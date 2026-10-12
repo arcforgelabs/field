@@ -37,7 +37,7 @@ export function attachmentsOf(mime) {
   return [...mime.matchAll(pattern)].map((match) => ({ contentType: match[1], filename: match[2], bytes: Buffer.from(match[3], "base64") }));
 }
 
-export async function boot(t) {
+export async function boot(t, { extraUsers = [] } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "field-email-documents-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const dataDir = join(dir, "data");
@@ -50,7 +50,7 @@ export async function boot(t) {
     dataDir,
     authToken: "email-documents-test-service-key-0001",
     quoteCatalogId: "field-verification",
-    bootstrapUsers: [{ email: "proof.sender@example.invalid", password: "email-documents-test-password", role: "admin", name: "Proof Operator" }],
+    bootstrapUsers: [{ email: "proof.sender@example.invalid", password: "email-documents-test-password", role: "admin", name: "Proof Operator" }, ...extraUsers],
     mail: { fromEmail: "proof.sender@example.invalid", fromName: "Proof Operator", gmailUser: "proof.sender@example.invalid", deliveryPolicy: { mode: "live" } },
     googleServiceAccountKey: keyPath,
   }));
@@ -95,24 +95,30 @@ export async function boot(t) {
     if (Date.now() > deadline) throw new Error(`server did not become healthy:\n${output.join("")}`);
     await new Promise((wake) => setTimeout(wake, 200));
   }
-  const login = await (await fetch(`${base}/api/auth/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "proof.sender@example.invalid", password: "email-documents-test-password" }),
-  })).json();
-  assert.ok(login.token, `sign-in failed:\n${output.join("")}`);
-  const auth = { authorization: `Bearer ${login.token}` };
-  const api = async (path, { method = "GET", body, form } = {}) => {
-    const response = await fetch(`${base}${path}`, {
-      method,
-      headers: { ...auth, ...(body ? { "content-type": "application/json" } : {}) },
-      body: form || (body ? JSON.stringify(body) : undefined),
-    });
-    return { status: response.status, body: await response.json().catch(() => null) };
+  // An api function signed in as one of the bootstrap users.
+  const signIn = async (email, password) => {
+    const login = await (await fetch(`${base}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    })).json();
+    assert.ok(login.token, `sign-in failed for ${email}:\n${output.join("")}`);
+    const auth = { authorization: `Bearer ${login.token}` };
+    return async (path, { method = "GET", body, form } = {}) => {
+      const response = await fetch(`${base}${path}`, {
+        method,
+        headers: { ...auth, ...(body ? { "content-type": "application/json" } : {}) },
+        body: form || (body ? JSON.stringify(body) : undefined),
+      });
+      return { status: response.status, body: await response.json().catch(() => null) };
+    };
   };
+  const api = await signIn("proof.sender@example.invalid", "email-documents-test-password");
   const mail = async () => (await readdir(mailDir).catch(() => [])).filter((name) => name.endsWith(".eml")).sort();
   const lastMail = async () => readFile(join(mailDir, (await mail()).at(-1)), "latin1");
-  return { api, mail, lastMail, output };
+  // The next Gmail send fails as given (fake-googleapis.mjs).
+  const failNextSend = (failure) => writeFile(join(mailDir, "next-send-failure.json"), JSON.stringify(failure));
+  return { api, mail, lastMail, output, failNextSend, signIn, dataDir };
 }
 
 export function multipart(payload, files = []) {

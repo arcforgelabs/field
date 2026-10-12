@@ -2189,6 +2189,9 @@ export async function sendJobQuote({
         "a previous quote delivery has an unknown outcome; reconcile its stable Gmail message identity before retrying",
       );
       pendingError.statusCode = 409;
+      // The composer says: Field lost contact with Gmail during the send and
+      // is checking Sent Mail before it allows a retry.
+      pendingError.code = "DELIVERY_OUTCOME_UNKNOWN";
       throw pendingError;
     }
     if (!pendingDelivery.preparedQuote || !pendingDelivery.preparedMeta) {
@@ -2764,6 +2767,10 @@ async function finalizeSuccessfulDelivery({
     bodyText: result.bodyText,
     htmlBody: result.htmlBody,
     attachments: result.attachments,
+    mainDocument: (() => {
+      const number = describeDeliveredDocument({ documentType: resolvedDocumentType, preparedMeta, preparedQuote, preparedMilestoneInvoice, version: issuedVersion }).number;
+      return number ? { documentType: resolvedDocumentType, number } : null;
+    })(),
     quoteVersion: issuedVersion,
     milestoneIndex: preparedMilestoneInvoice?.milestoneIndex ?? milestoneIndex ?? null,
     issuedDocumentId: issuance.issuanceId,
