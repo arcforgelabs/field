@@ -10,7 +10,7 @@ export type StoredEmailTemplate = {
 
 export type EmailTemplateInput = Omit<StoredEmailTemplate, "subject"> & { subject?: string };
 
-export const EMAIL_TEMPLATE_DOCUMENT_TYPES: readonly ["email", "quote", "invoice", "receipt"];
+export const EMAIL_TEMPLATE_DOCUMENT_TYPES: readonly ["email", "quote", "invoice", "receipt", "adjustment_note"];
 export const EMAIL_TEMPLATE_PLACEHOLDERS: readonly string[];
 export const DEFAULT_EMAIL_TEMPLATES: Record<string, StoredEmailTemplate[]>;
 

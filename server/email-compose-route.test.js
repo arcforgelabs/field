@@ -71,6 +71,10 @@ test("the composer's context and preview, and merge fields filled at send", { ti
   assert.equal(draftPreview.body.subject, "Invoice — [number when issued] — Completion");
   assert.equal(draftPreview.body.attachments[0].filename, "Invoice PDF, named when it is issued");
   assert.equal(draftPreview.body.pending.length, 1);
+  // A name given for the main PDF is made safe as the send makes it.
+  const named = await api(`/api/jobs/${aid}/email-preview`, { method: "POST", body: { documentType: "invoice", milestoneIndex: 0, attachmentFilename: "Deposit: Copperleaf?" } });
+  ok(named, "named preview");
+  assert.equal(named.body.attachments[0].filename, "Deposit- Copperleaf-.pdf");
   ok(await api(`/api/jobs/${aid}/email-quote`, { method: "POST", body: { to: CUSTOMER, documentType: "invoice", milestoneIndex: 1, subject: context.body.defaultSubject, customBody: '<p>Invoice <span data-merge="documentNumber">[Document number]</span></p>' } }), "draft invoice send");
   sent = mimeParts(await lastMail());
   const issued = sent.subject.match(/^Invoice — (INV-\d{4}-\d{1,2}-\d+) — Completion$/);

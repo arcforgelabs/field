@@ -27,6 +27,10 @@ export async function appendSentEmailArchive({ jobDir, record }) {
     bodyText: record.bodyText || "",
     htmlBody: record.htmlBody || "",
     attachments: Array.isArray(record.attachments) ? record.attachments : [],
+    // Its own Message-ID and the chain it replied to, for a later reply
+    // in the same Gmail conversation (server/email-threads.js).
+    rfcMessageId: record.rfcMessageId || null,
+    references: record.references || null,
     // The document the email was for, by type and number as issued.
     mainDocument: record.mainDocument && typeof record.mainDocument === "object" ? record.mainDocument : null,
     quoteVersion: record.quoteVersion ?? null,

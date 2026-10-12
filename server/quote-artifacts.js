@@ -188,6 +188,20 @@ export async function readQuoteArtifacts(jobDir, versionRef = null) {
   };
 }
 
+/** An operator's name for the main PDF, made safe; null when nothing is left. */
+export function sanitizeAttachmentFilename(filename) {
+  const raw = String(filename || "").trim();
+  if (!raw) return null;
+  const withoutExtension = raw.replace(/\.pdf$/i, "");
+  const cleaned = withoutExtension
+    .replace(/[/\\:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+  if (!cleaned) return null;
+  return `${cleaned}.pdf`;
+}
+
 export function buildQuotePdfFilename(meta, quote, documentType = null) {
   const resolvedDocumentType = resolveJobDocumentType({ meta, documentType });
   const milestoneInvoice = meta?.milestoneInvoice || null;

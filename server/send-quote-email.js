@@ -306,6 +306,13 @@ export function formatDeliveryMessageId(attemptId, host = NEUTRAL_MESSAGE_ID_HOS
 // Small messages keep the JSON form they always used.
 export const GMAIL_RAW_JSON_MAX_CHARS = 4 * 1024 * 1024;
 
+/** The earlier conversation's Gmail thread id, only when it is this mailbox's. */
+export function threadIdForMailbox(thread, mailbox) {
+  const earlier = normalizeEmail(thread?.gmailUser || "");
+  const sending = normalizeEmail(mailbox || "");
+  return thread?.threadId && earlier && sending && earlier === sending ? thread.threadId : null;
+}
+
 export async function sendGmailMessage(gmail, raw, { threadId = null, signal = null } = {}) {
   const thread = threadId ? { threadId } : {};
   const options = signal ? { ...GMAIL_SEND_REQUEST_OPTIONS, signal } : GMAIL_SEND_REQUEST_OPTIONS;
@@ -375,6 +382,8 @@ async function performSendQuoteEmail({
   additionalAttachments = [],
   deliveryAttemptId = null,
   deliveryMessageId = null,
+  // Into the earlier Gmail conversation: { threadId, inReplyTo, references }.
+  thread = null,
 }) {
   const recipients = assertAllowedQuoteRecipients({ config, emails: to, label: "recipient" });
   const ccRecipients = assertAllowedQuoteRecipients({ config, emails: cc, label: "cc", required: false });
@@ -425,9 +434,13 @@ async function performSendQuoteEmail({
     messageId: deliveryAttemptId
       ? deliveryMessageId || formatDeliveryMessageId(deliveryAttemptId, resolveMessageIdHost({ config, user, fromEmail: sender.fromEmail }))
       : null,
+    inReplyTo: thread?.inReplyTo || null,
+    references: thread?.references || null,
   });
 
-  const result = await sendGmailMessage(gmail, raw);
+  // Gmail's thread id belongs to one mailbox: another mailbox's would be
+  // refused or misfiled, so it threads by its headers and "Re:" alone.
+  const result = await sendGmailMessage(gmail, raw, { threadId: threadIdForMailbox(thread, transport.gmailUser || sender.fromEmail) });
 
   return {
     id: result.data.id,
@@ -555,6 +568,7 @@ async function performSendJobEmail({
   onBeforeDispatch = null,
   // Aborted when the send ceiling gives up (sendJobEmail).
   signal = null,
+  thread = null,
 }) {
   const recipients = assertAllowedQuoteRecipients({ config, emails: to, label: "recipient" });
   const ccRecipients = assertAllowedQuoteRecipients({ config, emails: cc, label: "cc", required: false });
@@ -618,6 +632,8 @@ async function performSendJobEmail({
     additionalAttachments,
     deliveryAttemptId,
     messageId: deliveryMessageId,
+    inReplyTo: thread?.inReplyTo || null,
+    references: thread?.references || null,
   });
 
   assertNotAbandoned(signal);
@@ -638,12 +654,16 @@ async function performSendJobEmail({
         bodyText: body,
         htmlBody,
         attachments: additionalAttachments.map(describeExtraAttachment),
+        rfcMessageId: deliveryMessageId,
+        references: thread?.references || null,
       },
     });
   }
 
   assertNotAbandoned(signal);
-  const result = await sendGmailMessage(gmail, raw, { signal });
+  // Gmail's thread id belongs to one mailbox: another mailbox's would be
+  // refused or misfiled, so it threads by its headers and "Re:" alone.
+  const result = await sendGmailMessage(gmail, raw, { threadId: threadIdForMailbox(thread, sendingMailbox), signal });
 
   return {
     id: result.data.id,
@@ -955,6 +975,9 @@ export function buildMimeMessage({
   additionalAttachments = [],
   deliveryAttemptId = null,
   messageId = null,
+  // RFC 5322 threading: the Message-ID this replies to, and the chain.
+  inReplyTo = null,
+  references = null,
 }) {
   const mixedBoundary = `field-mixed-${Date.now()}`;
   const altBoundary = `field-alt-${Date.now()}`;
@@ -982,6 +1005,8 @@ export function buildMimeMessage({
           `X-Field-Delivery-Attempt: ${cleanHeaderText(deliveryAttemptId)}`,
         ]
       : []),
+    ...(cleanHeaderText(inReplyTo) ? [`In-Reply-To: ${cleanHeaderText(inReplyTo)}`] : []),
+    ...(cleanHeaderText(references) ? [`References: ${cleanHeaderText(references)}`] : []),
     "MIME-Version: 1.0",
     `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
   ].filter(Boolean);

@@ -1,4 +1,4 @@
-export const EMAIL_TEMPLATE_DOCUMENT_TYPES = ["email", "quote", "invoice", "receipt"];
+export const EMAIL_TEMPLATE_DOCUMENT_TYPES = ["email", "quote", "invoice", "receipt", "adjustment_note"];
 
 // Merge fields: one definition, here. The server fills every value
 // (server/email-merge-fields.js) for the composer, the preview and the send,
@@ -112,6 +112,29 @@ export const DEFAULT_EMAIL_TEMPLATES = {
       description: "Softer wording for known clients.",
       subject: "Invoice - {{jobTitle}}",
       html: "<p>{{greeting}}</p><p>I have attached the {{milestone}}invoice{{jobTitleFor}}.</p><p>Let me know if you need anything clarified.</p>",
+    },
+    {
+      id: "replacement",
+      name: "Replacement invoice",
+      description: "An invoice issued in place of a credited one, with its adjustment note.",
+      subject: "Replacement invoice {{documentNumber}} · {{jobTitle}}",
+      html: "<p>{{greeting}}</p><p>Your {{milestone}}invoice{{jobTitleFor}} has changed. Attached are:</p><ul><li>{{documentNumber}}, the replacement invoice, with {{amountDue}} to pay</li><li>{{creditNoteNumber}}, the adjustment note that cancels {{replacesNumber}}</li></ul><p>Please pay {{documentNumber}} and disregard {{replacesNumber}}. Our bank details are on the invoice.</p>",
+    },
+  ],
+  adjustment_note: [
+    {
+      id: "standard",
+      name: "Adjustment note",
+      description: "Sends an adjustment note on its own.",
+      subject: "Adjustment note {{creditNoteNumber}} · {{jobTitle}}",
+      html: "<p>{{greeting}}</p><p>Attached is adjustment note {{creditNoteNumber}}, which cancels invoice {{replacesNumber}}{{jobTitleFor}}.</p><p>Please keep it with your records: it corrects the GST claimed on {{replacesNumber}}.</p>",
+    },
+    {
+      id: "with-replacement",
+      name: "Adjustment note and replacement",
+      description: "Explains the adjustment note and the invoice that replaces the credited one.",
+      subject: "Adjustment note {{creditNoteNumber}} · {{jobTitle}}",
+      html: "<p>{{greeting}}</p><p>Invoice {{replacesNumber}}{{jobTitleFor}} is cancelled by adjustment note {{creditNoteNumber}}, attached. It is replaced by {{documentNumber}}.</p><p>Reply to this email if you have any questions.</p>",
     },
   ],
   receipt: [

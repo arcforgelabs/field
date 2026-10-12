@@ -11,13 +11,15 @@
 //   GET  /api/settings/email-signature  the signed-in person's signature
 //   PUT  /api/settings/email-signature  change it ({ html }; empty resets)
 import { applyMergeFields, applyMergeFieldsToText } from "../shared/email-templates.js";
-import { buildEmailMergeValues, listEmailMergeFields } from "./email-merge-fields.js";
+import { adjustmentNoteValues, buildEmailMergeValues, listEmailMergeFields } from "./email-merge-fields.js";
+import { buildSendPlan } from "./email-send-plan.js";
+import { replySubject } from "./email-threads.js";
 import { readEmailSignature, saveEmailSignature } from "./email-signatures.js";
 import { listEmailTemplates } from "./email-templates.js";
 import { readDocumentQuoteArtifacts } from "./job-document-context.js";
 import { readQuoteArtifacts } from "./quote-artifacts.js";
 import { prepareRequestedJobDocument } from "./job-documents.js";
-import { buildQuotePdfFilename } from "./quote-artifacts.js";
+import { buildQuotePdfFilename, sanitizeAttachmentFilename } from "./quote-artifacts.js";
 import {
   composeDocumentEmail,
   composeJobEmail,
@@ -160,6 +162,10 @@ export function registerEmailComposeRoutes(app, { requireAuth, findJob, config, 
       const defaultSubject = view.documentType
         ? defaultDocumentSubject({ meta: subjectView.meta, quote: view.quote, documentType: view.documentType })
         : defaultJobEmailSubject(view.meta);
+      // An adjustment note on its own (?purpose=adjustment-note&creditNote=CN-…).
+      const purpose = req.query.purpose === "adjustment-note" ? "adjustment-note" : null;
+      const service = documentServiceFor(req);
+      const adjustmentNote = purpose ? await adjustmentNoteValues(service, req.query.creditNote) : null;
       const values = buildEmailMergeValues({
         meta: view.meta,
         quote: view.quote,
@@ -168,7 +174,17 @@ export function registerEmailComposeRoutes(app, { requireAuth, findJob, config, 
         config,
         user: req.caller,
         defaultSubject,
+        adjustmentNote,
       });
+      // What to attach by default and the earlier conversation (decisions 2 and 5).
+      const documents = service ? (await service.listJobDocuments(meta.id).catch(() => ({ documents: [] }))).documents : [];
+      const plan = await buildSendPlan({ jobDir: job.dir, view, meta: view.meta, documents, purpose, creditNoteNumber: adjustmentNote?.creditNoteNumber || null });
+      const all = listEmailTemplates().templates;
+      let templates = purpose ? all.adjustment_note : all[view.documentType || "email"] || [];
+      // A replacement invoice starts on its own template; other invoices never do.
+      templates = plan.sendType === "replacement-invoice"
+        ? [...templates.filter((template) => template.id === "replacement"), ...templates.filter((template) => template.id !== "replacement")]
+        : view.documentType === "invoice" ? templates.filter((template) => template.id !== "replacement") : templates;
       const signature = await readEmailSignature({ dataDir, user: req.caller }).catch(() => null);
       res.json({
         ok: true,
@@ -177,7 +193,12 @@ export function registerEmailComposeRoutes(app, { requireAuth, findJob, config, 
         milestoneIndex: view.milestoneInvoice?.milestoneIndex ?? null,
         from: senderFor(config, req.caller),
         defaultSubject,
-        templates: listEmailTemplates().templates[view.documentType || "email"] || [],
+        templates,
+        sendType: plan.sendType,
+        suggestions: plan.suggestions,
+        replacement: plan.replacement,
+        // The earlier conversation for this document line; replying keeps its subject.
+        thread: plan.thread ? { ...plan.thread, replySubject: replySubject(plan.thread.subject) } : null,
         mergeValues: values,
         mergeFields: listEmailMergeFields(values),
         signature,
@@ -215,7 +236,8 @@ export function registerEmailComposeRoutes(app, { requireAuth, findJob, config, 
         ? payload.uploads.map((upload) => ({ filename: String(upload?.filename || "attachment"), byteLength: Number(upload?.byteLength) || null }))
         : [];
       const mainFilename = view.documentType
-        ? String(payload.attachmentFilename || "").trim()
+        // Named as the send names it (job-actions.js), so the preview matches.
+        ? sanitizeAttachmentFilename(payload.attachmentFilename)
           || (draftInvoice ? "Invoice PDF, named when it is issued" : buildQuotePdfFilename(view.meta, view.quote, view.documentType))
         : null;
       const attachments = [
@@ -235,6 +257,7 @@ export function registerEmailComposeRoutes(app, { requireAuth, findJob, config, 
         user: req.caller,
         attachmentNames: attachments.map((attachment) => attachment.filename),
         defaultSubject,
+        adjustmentNote: payload.adjustmentNote ? await adjustmentNoteValues(documentServiceFor(req), payload.adjustmentNote) : null,
       });
       if (draftInvoice) values.documentNumber = PENDING_NUMBER_TEXT;
       const customBody = payload.customBody ? applyMergeFields(String(payload.customBody), values, { final: true }) : null;
