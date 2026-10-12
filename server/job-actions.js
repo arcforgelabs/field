@@ -1022,7 +1022,7 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
       quote,
       milestoneInvoice: issuing,
     });
-    return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "invoice" });
+    return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "invoice", jobDir });
   };
   const stored = (issued, result) => ({
     ...issued,

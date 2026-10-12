@@ -1241,16 +1241,28 @@ How step 4b prints a milestone invoice (#28, part three). Only invoices
 issued from now on change; an issued PDF never does.
 
 - **Claim lines, not the quote's schedule.** The PDF has one claim line per
-  milestone it bills, named as its invoice line is ("Deposit, 50 % of
-  EQ-2610-03 v2", the quote version it was issued against), with the
-  milestone context under it and its subtotal, GST and total. Then the claim
-  box ("This claim (ex GST)", "GST (10%)", "Amount Due", the labels
-  `issued-totals.js` reads) and a small quote summary: the quote and
-  version, the contract value, what earlier milestones claimed, this claim
-  and what remains. The quote's schedule is not printed: the quote is its
-  own document.
+  milestone it bills, in plain words ("Deposit: 50% of the quoted price"),
+  with the quote on a quieter second line ("Quote EQ-2610-03, accepted 14
+  September 2026", or "sent …" when it was not accepted) and its subtotal,
+  GST and total. "Revision 2" is added only when the customer was sent more
+  than one version of the quote (the job's send history); a customer never
+  sees "v1" (owner, 2026-10-13; `server/invoices/customer-wording.js`). The
+  invoice rows keep their own line names with the quote version, for the
+  record. Then the claim box ("This claim (ex GST)", "GST (10%)", "Amount
+  Due", the labels `issued-totals.js` reads) and the quote summary, two
+  columns the width of the claim table: "All amounts include GST" once in
+  its heading, the same quote line, then contract value, previously claimed
+  and this claim, a hairline, and "Remaining after this claim" in bold.
+  Amounts are right-aligned in figures of one width. The quote's schedule
+  is not printed: the quote is its own document.
 - **A tax invoice.** An issued milestone invoice is titled "Tax invoice" and
   prints what the ATO asks of one: the supplier's name and ABN, the date,
   the recipient, a description of what is claimed and the GST, with the job
   reference. A draft preview stays "Invoice" with "Draft, not yet issued".
+- **A lost PDF drawn again is marked "Reconstructed copy"** (owner,
+  2026-10-13). An invoice issued before step 4b (an `EI-…` number) is drawn
+  in the layout it was issued with: titled "Invoice", with the quote's
+  schedule and the claim box. One issued from the sequence (`INV-…`) is
+  drawn in the step 4b layout. An invoice not yet issued always uses the
+  step 4b layout.
 - Receipts, and an invoice for a job with no milestones, print as before.

@@ -2296,6 +2296,7 @@ app.get("/api/jobs/:id/quote-pdf", requireAuth, async (req, res) => {
         quote: resolved.preparedQuote,
         documentType: resolved.preparedDocumentType,
         invoicePaidAmount: resolved.preparedMeta?.invoicePaidAmount,
+        jobDir: job.dir,
       });
       res.end(pdfBuffer);
       return;
@@ -2457,6 +2458,7 @@ app.post("/api/jobs/:id/quote-pdf-preview", requireAuth, async (req, res) => {
       quote: prepared.preparedQuote,
       documentType: prepared.preparedDocumentType,
       invoicePaidAmount: req.body?.invoicePaidAmount ?? prepared.preparedMeta?.invoicePaidAmount,
+      jobDir: job.dir,
     });
     const previewPdfName = buildQuotePdfFilename(job.meta, prepared.preparedQuote, "", prepared.preparedDocumentType);
     res.setHeader("Cache-Control", "no-store");
@@ -2542,6 +2544,7 @@ app.get("/api/jobs/:id/milestones/:index/pdf", requireAuth, async (req, res) => 
       quote: resolved.preparedQuote,
       documentType: resolved.preparedDocumentType,
       invoicePaidAmount: resolved.preparedMeta?.invoicePaidAmount,
+      jobDir: job.dir,
     });
     const pdfName = buildQuotePdfFilename(job.meta, resolved.preparedQuote, "", resolved.preparedDocumentType);
     res.setHeader("Content-Type", "application/pdf");
