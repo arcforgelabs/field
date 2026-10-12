@@ -19,6 +19,7 @@ import { applyQuoteCatalogQuantityRules } from "./quote-quantity-rules.js";
 import { isPriceCatalogAuthorityProvider, normalizeCommercialAuthorityProvider } from "./quote-trace.js";
 import { formatInactiveComponentDependencyList } from "./catalog/views.js";
 import { formatCatalogUnit, formatCatalogUnitText, normalizeCatalogUnit } from "../shared/catalog-units.js";
+import { taxOnSubtotal } from "../shared/money.js";
 
 export function generateEvidenceQuote({
   meta,
@@ -192,8 +193,8 @@ export function generateEvidenceQuote({
     ),
     totals: {
       subtotal,
-      gst: subtotal == null ? null : roundMoney(subtotal * gstRate),
-      total: subtotal == null ? null : roundMoney(subtotal + roundMoney(subtotal * gstRate)),
+      gst: subtotal == null ? null : taxOnSubtotal(subtotal, gstRate),
+      total: subtotal == null ? null : roundMoney(subtotal + taxOnSubtotal(subtotal, gstRate)),
       currency: quoteCatalog.currency,
       _preCompilation: true,
     },
@@ -807,7 +808,7 @@ function synchronizeQuotePricingFromCommercialBreakdown(quote) {
   const subtotal = lineItemTotals.some((value) => value == null || !Number.isFinite(Number(value)))
     ? null
     : roundMoney(lineItemTotals.reduce((total, value) => total + Number(value), 0));
-  const gst = subtotal == null ? null : roundMoney(subtotal * gstRate);
+  const gst = subtotal == null ? null : taxOnSubtotal(subtotal, gstRate);
   const nextTotals = {
     ...(quote.totals || {}),
     subtotal,
@@ -880,7 +881,7 @@ function buildScenarioMatrix({
     const subtotal = scenarioTotals.some((value) => value == null || !Number.isFinite(Number(value)))
       ? null
       : roundMoney(scenarioTotals.reduce((sum, value) => sum + Number(value), 0));
-    const gst = subtotal == null ? null : roundMoney(subtotal * Number(quote?.quoteCatalog?.gstRate || 0));
+    const gst = subtotal == null ? null : taxOnSubtotal(subtotal, Number(quote?.quoteCatalog?.gstRate || 0));
     scenarios.push({
       id: buildScenarioId(selections),
       label: selections.map((selection) => selection.optionLabel).filter(Boolean).join(" + "),

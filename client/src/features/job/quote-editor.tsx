@@ -24,6 +24,7 @@ import {
   calculatePresentationScheduleTotals,
 } from "../../../../shared/quote-presentation-renderer.js";
 import { searchCatalogItems } from "../../../../shared/catalog-search.js";
+import { taxOnSubtotal } from "../../../../shared/money.js";
 import { COMMON_QUOTE_UNITS, convertCatalogQuantity, normalizeCatalogUnit } from "../../../../shared/catalog-units.js";
 import { buildCatalogQuoteRows, catalogChangesEditedSinceCheck } from "@/features/job-detail/quote-catalog-rows";
 import { QuoteCatalogChangesBanner } from "@/features/job-detail/components/quote-catalog-changes-banner";
@@ -87,7 +88,10 @@ export function QuoteEditor({ detail, editable: canEdit, lockReason, onNewVersio
 
   useEffect(() => { try { localStorage.setItem("field.showCost", showCost ? "1" : "0"); } catch { /* storage unavailable */ } }, [showCost]);
 
-  const gstRate = quote.totals?.subtotal ? quote.totals.gst / quote.totals.subtotal : 0.1;
+  // The catalogue's rate, never one divided back out of saved totals: a saved
+  // GST that was a cent off (#2) would carry its error into every edit.
+  const catalogGstRate = quote.quoteCatalog?.gstRate;
+  const gstRate = catalogGstRate != null && Number.isFinite(Number(catalogGstRate)) ? Number(catalogGstRate) : 0.1;
   const rendered = useMemo(
     () => buildRenderedPresentationScheduleItems({ organizer, sourceItems, includeCollapsedChildren: true }) as QuotePresentationScheduleItem[],
     [organizer, sourceItems],
@@ -95,7 +99,7 @@ export function QuoteEditor({ detail, editable: canEdit, lockReason, onNewVersio
   const renderedById = useMemo(() => new Map(rendered.map((item) => [String(item.nodeId), item])), [rendered]);
   const totals = useMemo(() => {
     const { charge, cost } = calculatePresentationScheduleTotals({ organizer, sourceItems });
-    const gst = round2(charge * gstRate);
+    const gst = taxOnSubtotal(round2(charge), gstRate) ?? 0;
     return { subtotal: charge, gst, total: round2(charge + gst), cost };
   }, [organizer, sourceItems, gstRate]);
   useEffect(() => { if (!pricesHidden) onTotals(totals); }, [totals, onTotals, pricesHidden]);

@@ -752,6 +752,7 @@ export interface Quote {
     total: number;
     currency: string;
   };
+  quoteCatalog?: { gstRate?: number | null } | null;
   assumptions?: string[];
   assumptionInputs?: QuoteAssumptionInput[];
   missingInputs?: string[];
