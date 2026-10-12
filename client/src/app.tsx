@@ -10,7 +10,7 @@ import { AppShell } from "@/components/shell/app-shell";
 const JobsPage = lazy(() => import("@/features/jobs/jobs-page").then((m) => ({ default: m.JobsPage })));
 const JobPage = lazy(() => import("@/features/job/job-page").then((m) => ({ default: m.JobPage })));
 const InvoicesPage = lazy(() => import("@/features/invoices/invoices-page").then((m) => ({ default: m.InvoicesPage })));
-const QuoteEmailPage = lazy(() => import("@/features/job-detail/quote-email-page").then((m) => ({ default: m.QuoteEmailPage })));
+const EmailComposerPage = lazy(() => import("@/features/job-detail/email-composer-page").then((m) => ({ default: m.EmailComposerPage })));
 const CataloguePage = lazy(() => import("@/features/catalogue/catalogue-page").then((m) => ({ default: m.CataloguePage })));
 const SupplierImportPage = lazy(() => import("@/features/pricing/supplier-import-page").then((m) => ({ default: m.SupplierImportPage })));
 const SettingsPage = lazy(() => import("@/features/settings/settings-page").then((m) => ({ default: m.SettingsPage })));
@@ -87,8 +87,8 @@ export function App() {
         <Route
           path="/jobs/:id/email-editor"
           element={
-            <ProtectedRoute bare>
-              <QuoteEmailPage />
+            <ProtectedRoute>
+              <EmailComposerPage />
             </ProtectedRoute>
           }
         />

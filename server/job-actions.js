@@ -55,6 +55,8 @@ import { queueStagedPostCommit, runAtomicJobGeneration } from "./job-generation.
 import { recordIssuedQuoteDocuments } from "./quote-issuance.js";
 import { buildQuoteSnapshotRecord } from "./quote-snapshots.js";
 import { describeDeliveredDocument, recordAttachedDocumentsEmailed, recordDeliveredDocument, recordFailedDelivery } from "./documents/delivery.js";
+import { applyMergeFields, applyMergeFieldsToText } from "../shared/email-templates.js";
+import { buildEmailMergeValues } from "./email-merge-fields.js";
 import {
   assertEmailAttachmentLimits,
   documentAttachmentRecord,
@@ -1917,6 +1919,7 @@ async function prepareQuoteDeliveryAttempt({
   scheduledAt,
   attachedDocuments = [],
   messageIdHost,
+  uploadNames = [],
 }) {
   let preparedMeta = resolvedMeta;
   let preparedQuote = deliveryQuote;
@@ -2063,12 +2066,26 @@ async function prepareQuoteDeliveryAttempt({
     );
   }
   const preparedReportMarkdown = selectedReport.report || preparedQuoteMarkdown;
+  // Merge fields are filled now, from the document as prepared (an invoice
+  // issued by this send has its number), and the attempt keeps the result:
+  // every dispatch and retry sends exactly this text.
+  const mergeValues = (customBody || subjectOverride) ? buildEmailMergeValues({
+    meta: preparedMeta,
+    quote: preparedQuote,
+    documentType: resolvedDocumentType,
+    milestoneInvoice: preparedMilestoneInvoice,
+    config,
+    user,
+    attachmentNames: [quotePdfFilename, ...attachedDocuments.map((document) => document.filename), ...uploadNames],
+  }) : null;
+  const mergedBody = customBody && mergeValues ? applyMergeFields(customBody, mergeValues, { final: true }) : customBody;
+  const mergedSubject = subjectOverride && mergeValues ? applyMergeFieldsToText(subjectOverride, mergeValues, { final: true }) : subjectOverride;
   const pendingAttempt = buildQuoteDeliveryAttempt({
     quoteVersion: selectedVersion || preparedQuote.version || preparedMeta.quoteVersion,
     documentType: resolvedDocumentType,
     to,
     cc,
-    subject: subjectOverride || null,
+    subject: mergedSubject || null,
     quoteMarkdown: preparedQuoteMarkdown,
     reportMarkdown: preparedReportMarkdown,
     quotePdf: quotePdfBuffer,
@@ -2081,7 +2098,7 @@ async function prepareQuoteDeliveryAttempt({
     // bytes. A dispatch reads them again from the issued-document store.
     documents: attachedDocuments.map(documentAttachmentRecord),
     bcc: Array.isArray(bcc) ? bcc : [],
-    customBody: customBody || null,
+    customBody: mergedBody || null,
     validatedInvoicePaidAmount,
     selectedVersion,
     preparedMilestoneInvoice,
@@ -2328,6 +2345,7 @@ export async function sendJobQuote({
       scheduledAt,
       attachedDocuments,
       messageIdHost: resolveMessageIdHost({ config, user }),
+      uploadNames: (additionalAttachments || []).map((attachment) => attachment?.filename).filter(Boolean),
     })
   ));
   let {
@@ -2395,11 +2413,12 @@ export async function sendJobQuote({
     to,
     cc,
     bcc,
-    customBody,
+    // As the attempt stored them, merge fields filled.
+    customBody: pendingAttempt.customBody || null,
     documentType: resolvedDocumentType,
     invoicePaidAmount: validatedInvoicePaidAmount,
     themeFontFamily,
-    subjectOverride,
+    subjectOverride: pendingAttempt.subject || null,
     additionalAttachments: [...documentMimeAttachments(attachedDocuments), ...additionalAttachments],
       deliveryAttemptId: pendingAttempt.attemptId,
       deliveryMessageId: pendingAttempt.messageId || null,

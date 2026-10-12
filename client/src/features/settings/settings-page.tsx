@@ -9,11 +9,12 @@ import { useShell } from "@/components/shell/shell-context";
 import { AppearanceSection } from "./appearance-section";
 import { PeopleSection } from "./people-section";
 import { InvoicingPanel } from "./invoicing-panel";
+import { EmailSignaturePanel } from "./email-signature-panel";
 import "./settings-page.css";
 
 const ClerkAccount = lazy(() => import("./clerk-account"));
 
-type Section = "account" | "team" | "documents" | "appearance";
+type Section = "account" | "team" | "documents" | "email" | "appearance";
 
 export function SettingsPage() {
   const { logout, user, mode, isOwner } = useAuth();
@@ -22,6 +23,7 @@ export function SettingsPage() {
     { id: "account", label: "Account and security", show: true },
     { id: "team", label: "Team", show: mode === "clerk" && isOwner },
     { id: "documents", label: "Quotes and invoices", show: true },
+    { id: "email", label: "Email", show: true },
     { id: "appearance", label: "Appearance", show: true },
   ];
   const requested = params.get("section") as Section | null;
@@ -80,6 +82,7 @@ export function SettingsPage() {
               <InvoicingPanel />
             </>
           )}
+          {active === "email" && <EmailSignaturePanel />}
           {active === "appearance" && (
             <Panel title="Appearance" description="Saved in this browser. Clerk's account screens follow the same choice.">
               <AppearanceSection />

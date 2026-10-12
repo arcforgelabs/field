@@ -349,43 +349,15 @@ async function performSendQuoteEmail({
     throw new Error("mail.fromEmail or FIELD_MAIL_FROM is required for quote sending.");
   }
 
-  const resolvedDocumentType = resolveJobDocumentType({ meta, documentType });
-  const documentLabelLower = getJobDocumentLabelLower(resolvedDocumentType);
-  const milestoneInvoice = meta?.milestoneInvoice || null;
-  const isReceipt = resolvedDocumentType === "receipt";
-  const isInvoice = resolvedDocumentType === "invoice";
-  const isPaymentDocument = isInvoice || isReceipt;
-  const documentRef = isInvoice
-    ? buildInvoiceDocumentNumber({ meta, quote, milestoneInvoice })
-    : isReceipt
-      ? buildReceiptDocumentNumber({ meta, quote, milestoneInvoice })
-      : (quote.quoteNumber || meta.quoteNumber || meta.id || null);
-  const defaultSubject = isPaymentDocument
-    ? [
-        isReceipt ? "Receipt" : "Invoice",
-        documentRef,
-        milestoneInvoice?.milestoneLabel || meta.title || meta.label || documentBusinessName(quote),
-      ].filter(Boolean).join(" — ")
-    : `${quote.delivery?.status === "final" ? "Quote" : "Quote Draft"} — ${meta.title || meta.label || documentBusinessName(quote)}`;
-  const subject = cleanHeaderText(subjectOverride) || defaultSubject;
-  const body = customBody ? stripHtml(customBody) : buildEmailBody({ meta, quote, documentType: resolvedDocumentType });
-
-  const quoteCatalog = quote.quoteCatalog || quote.profile || {};
-  const deliveryDefaults = quoteCatalog.deliveryDefaults || {};
-  const biz = applyBusinessProfileOverride(quoteCatalog.businessProfile || {});
-  // A quote email's totals come from the quote's rows (#10).
-  const rowsView = resolvedDocumentType === "quote" ? await loadQuoteRows({ quote, meta }) : null;
-  const htmlBody = buildEmailHtml({
+  const { subject, body, htmlBody, documentLabelLower } = await composeDocumentEmail({
     meta,
     quote,
-    totals: rowsView?.financials || null,
-    biz,
-    deliveryDefaults,
-    fromName: sender.fromName,
-    mode: emailMode,
+    documentType,
     customBody,
-    documentType: resolvedDocumentType,
+    subjectOverride,
+    emailMode,
     themeFontFamily,
+    fromName: sender.fromName,
   });
 
   const raw = buildMimeMessage({
@@ -434,6 +406,80 @@ async function performSendQuoteEmail({
   };
 }
 
+/**
+ * The subject, plain text and HTML of a quote, invoice or receipt email:
+ * what the send builds and what the composer's preview shows
+ * (POST /api/jobs/:id/email-preview), from one function.
+ */
+export async function composeDocumentEmail({
+  meta,
+  quote,
+  documentType = null,
+  customBody = null,
+  subjectOverride = null,
+  emailMode = "summary",
+  themeFontFamily = null,
+  fromName = null,
+}) {
+  const resolvedDocumentType = resolveJobDocumentType({ meta, documentType });
+  const documentLabelLower = getJobDocumentLabelLower(resolvedDocumentType);
+  const subject = cleanHeaderText(subjectOverride) || defaultDocumentSubject({ meta, quote, documentType: resolvedDocumentType });
+  const body = customBody ? stripHtml(customBody) : buildEmailBody({ meta, quote, documentType: resolvedDocumentType });
+
+  const quoteCatalog = quote.quoteCatalog || quote.profile || {};
+  const deliveryDefaults = quoteCatalog.deliveryDefaults || {};
+  const biz = applyBusinessProfileOverride(quoteCatalog.businessProfile || {});
+  // A quote email's totals come from the quote's rows (#10).
+  const rowsView = resolvedDocumentType === "quote" ? await loadQuoteRows({ quote, meta }) : null;
+  const htmlBody = buildEmailHtml({
+    meta,
+    quote,
+    totals: rowsView?.financials || null,
+    biz,
+    deliveryDefaults,
+    fromName,
+    mode: emailMode,
+    customBody,
+    documentType: resolvedDocumentType,
+    themeFontFamily,
+  });
+  return { subject, body, htmlBody, resolvedDocumentType, documentLabelLower };
+}
+
+/** The subject a document email gets when the operator leaves it as it is. */
+export function defaultDocumentSubject({ meta, quote, documentType }) {
+  const resolvedDocumentType = resolveJobDocumentType({ meta, documentType });
+  const milestoneInvoice = meta?.milestoneInvoice || null;
+  const isReceipt = resolvedDocumentType === "receipt";
+  const isInvoice = resolvedDocumentType === "invoice";
+  const documentRef = isInvoice
+    ? buildInvoiceDocumentNumber({ meta, quote, milestoneInvoice })
+    : isReceipt
+      ? buildReceiptDocumentNumber({ meta, quote, milestoneInvoice })
+      : (quote?.quoteNumber || meta?.quoteNumber || meta?.id || null);
+  if (isInvoice || isReceipt) {
+    return [
+      isReceipt ? "Receipt" : "Invoice",
+      documentRef,
+      milestoneInvoice?.milestoneLabel || meta?.title || meta?.label || documentBusinessName(quote),
+    ].filter(Boolean).join(" — ");
+  }
+  return `${quote?.delivery?.status === "final" ? "Quote" : "Quote Draft"} — ${meta?.title || meta?.label || documentBusinessName(quote)}`;
+}
+
+/** The subject, plain text and HTML of a job email with no document of its own. */
+export function composeJobEmail({ meta, subject = null, customBody = null, themeFontFamily = null, fromName = null }) {
+  return {
+    subject: cleanHeaderText(subject) || defaultJobEmailSubject(meta),
+    htmlBody: wrapGenericEmailHtml({ customBody, fromName, themeFontFamily }),
+    body: stripHtml(customBody || ""),
+  };
+}
+
+export function defaultJobEmailSubject(meta) {
+  return `Job update — ${meta?.title || meta?.label || meta?.siteAddress || meta?.id || installationBusinessName()}`;
+}
+
 export async function sendJobEmail(args) {
   return withGmailSendCeiling(performSendJobEmail(args), "sendJobEmail");
 }
@@ -469,13 +515,13 @@ async function performSendJobEmail({
     throw new Error("mail.fromEmail or FIELD_MAIL_FROM is required for email sending.");
   }
 
-  const resolvedSubject = cleanHeaderText(subject) || `Job update — ${meta?.title || meta?.label || meta?.siteAddress || meta?.id || installationBusinessName()}`;
-  const htmlBody = wrapGenericEmailHtml({
+  const { subject: resolvedSubject, htmlBody, body } = composeJobEmail({
+    meta,
+    subject,
     customBody,
-    fromName: sender.fromName,
     themeFontFamily,
+    fromName: sender.fromName,
   });
-  const body = stripHtml(customBody || "");
 
   const raw = buildMimeMessage({
     fromName: sender.fromName,
