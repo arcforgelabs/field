@@ -5,6 +5,7 @@ import {
   boolean,
   check,
   customType,
+  date,
   foreignKey,
   index,
   integer,
@@ -934,3 +935,223 @@ export const documentNumberCounters = pgTable(
     tenantIsolation("document_number_counters"),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Quotes as rows (#241, #178 phase 3; docs/PRICING_ENGINE.md "Quotes and
+// invoices"). One `quotes` row per quote version, its customer-facing
+// sections and its lines, each line holding the values it prints. In this
+// step the job files stay the source of truth: the rows are written alongside
+// them (dual-write after every committed quote change, and a verified
+// backfill; server/quotes/) and nothing reads them yet.
+//
+// Money follows "Numbers, money and rounding": amounts exclude GST; every
+// total is whole cents; unit sell, unit cost and quantity have four decimals.
+// A line's total is its official amount: round(quantity x unit sell, 2) when
+// `line_total_source` is `computed` (the database checks it), or the amount a
+// document already issued printed, with the reason, when it is `printed`. GST
+// is worked out once on the subtotal per tax rate (server/quotes/totals.js,
+// the one totals function; decided 2026-10-12, #178).
+//
+// A sent quote never changes (migration 0010): once a quote is sent,
+// accepted or declined, or has a send time, triggers refuse any insert,
+// update or delete of its sections and lines, any change to its money,
+// customer or wording, and deleting it, for the table owner as well as
+// field_app. Its status may still move on (sent -> accepted, superseded,
+// void) and it may gain the issued document it was sent as.
+//
+// Catalogue links (`item_uid`, `price_uid`, `price_key`) are evidence, not
+// foreign keys: the catalogue can still delete an item a quote used, and a
+// sent line must keep naming it.
+
+export const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined", "superseded", "void"] as const;
+export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
+export const QUOTE_LINE_TYPES = ["item", "custom", "component", "note"] as const;
+export type QuoteLineType = (typeof QUOTE_LINE_TYPES)[number];
+export const LINE_TOTAL_SOURCES = ["computed", "printed"] as const;
+export type LineTotalSource = (typeof LINE_TOTAL_SOURCES)[number];
+
+export const quotes = pgTable(
+  "quotes",
+  {
+    /** `qte_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    /** The job (jobs stay in the job store until phase 3b). */
+    jobId: text("job_id").notNull(),
+    /** As printed: EQ-2501-03. Every version of a quote shares it. */
+    number: text("number").notNull(),
+    version: integer("version").notNull(),
+    status: text("status").$type<QuoteStatus>().notNull().default("draft"),
+    title: text("title"),
+    scopeText: text("scope_text"),
+    termsText: text("terms_text"),
+    /** Name, email, phone and site address; frozen once sent. */
+    customer: jsonb("customer").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    currency: text("currency").notNull().default("AUD"),
+    validUntilOn: date("valid_until_on", { mode: "string" }),
+    subtotal: numeric("subtotal", { precision: 12, scale: 2 }).notNull(),
+    taxTotal: numeric("tax_total", { precision: 12, scale: 2 }).notNull(),
+    total: numeric("total", { precision: 12, scale: 2 }).notNull(),
+    /**
+     * `computed`: round(subtotal x rate, 2) per rate. `printed`: the GST a
+     * document already printed a cent apart, when the tax fell exactly on
+     * half a cent and the old renderer rounded it the other way; with the
+     * reason in `tax_total_reason`.
+     */
+    taxTotalSource: text("tax_total_source").$type<LineTotalSource>().notNull().default("computed"),
+    taxTotalReason: text("tax_total_reason"),
+    /** The catalogue version the lines were last priced against; null when not known (rows mapped from files). */
+    catalogVersion: bigint("catalog_version", { mode: "number" }),
+    sentAt: timestamp("sent_at", { withTimezone: true, mode: "date" }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true, mode: "date" }),
+    /** The issued document (#230) this version was sent as. */
+    issuedDocumentUid: text("issued_document_uid"),
+    /** Hash of what the rows were mapped from, so an unchanged version is not rewritten. */
+    sourceDigest: text("source_digest"),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+    /** Optimistic concurrency (named so it does not clash with `version`). */
+    versionLock: integer("version_lock").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("quotes_org_uid_key").on(t.orgUid, t.uid),
+    uniqueIndex("quotes_org_job_version_key").on(t.orgUid, t.jobId, t.version),
+    index("quotes_org_number_idx").on(t.orgUid, t.number, t.version),
+    foreignKey({
+      name: "quotes_issued_document_fk",
+      columns: [t.orgUid, t.issuedDocumentUid],
+      foreignColumns: [issuedDocuments.orgUid, issuedDocuments.uid],
+    }),
+    check("quotes_uid_check", sql`${t.uid} ~ '^qte_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("quotes_status_check", sql`${t.status} in ('draft','sent','accepted','declined','superseded','void')`),
+    check("quotes_version_check", sql`${t.version} > 0`),
+    check("quotes_number_check", sql`btrim(${t.number}) <> ''`),
+    check("quotes_currency_check", sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check("quotes_total_check", sql`${t.total} = ${t.subtotal} + ${t.taxTotal}`),
+    check("quotes_tax_total_source_check", sql`${t.taxTotalSource} in ('computed','printed') and (${t.taxTotalSource} = 'computed' or ${t.taxTotalReason} is not null)`),
+    check("quotes_version_lock_check", sql`${t.versionLock} > 0`),
+    tenantIsolation("quotes"),
+  ],
+);
+
+/** The groups the customer sees, flat and ordered. */
+export const quoteSections = pgTable(
+  "quote_sections",
+  {
+    /** `qsc_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    quoteUid: text("quote_uid").notNull(),
+    title: text("title").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    showSubtotal: boolean("show_subtotal").notNull().default(true),
+    /** The organizer node it was mapped from, while the files are the source of truth. */
+    sourceNodeId: text("source_node_id"),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+  },
+  (t) => [
+    uniqueIndex("quote_sections_org_uid_key").on(t.orgUid, t.uid),
+    index("quote_sections_quote_idx").on(t.orgUid, t.quoteUid, t.sortOrder),
+    foreignKey({
+      name: "quote_sections_quote_fk",
+      columns: [t.orgUid, t.quoteUid],
+      foreignColumns: [quotes.orgUid, quotes.uid],
+    }).onDelete("cascade"),
+    check("quote_sections_uid_check", sql`${t.uid} ~ '^qsc_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    tenantIsolation("quote_sections"),
+  ],
+);
+
+/** Every line stores the values it prints, whether or not it came from the catalogue. */
+export const quoteLines = pgTable(
+  "quote_lines",
+  {
+    /** `qln_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    quoteUid: text("quote_uid").notNull(),
+    /** Null for a line outside any section. */
+    sectionUid: text("section_uid"),
+    /** The line this one is shown under: a kit's component, or a row under a heading. */
+    parentLineUid: text("parent_line_uid"),
+    sortOrder: integer("sort_order").notNull(),
+    /** item (catalogue), custom (typed in, or from the engine), component (shown under a priced line, never counted), note (a heading, no money). */
+    lineType: text("line_type").$type<QuoteLineType>().notNull(),
+    itemUid: text("item_uid"),
+    /** The item_prices row the line was priced from (its id). Null for a rollup kit (see price_key). */
+    priceUid: text("price_uid"),
+    priceKey: text("price_key"),
+    code: text("code"),
+    name: text("name").notNull(),
+    description: text("description"),
+    quantity: numeric("quantity", { precision: 14, scale: 4 }).notNull(),
+    unitCode: text("unit_code").notNull(),
+    unitCost: numeric("unit_cost", { precision: 12, scale: 4 }),
+    /**
+     * The rate, to four decimals (a historical line keeps the rate it was
+     * priced at). A line added from now on takes it rounded to cents. Null
+     * for a note, and for an unpriced line (which never counts as zero).
+     */
+    unitSell: numeric("unit_sell", { precision: 12, scale: 4 }),
+    isPriceOverride: boolean("is_price_override").notNull().default(false),
+    overrideReason: text("override_reason"),
+    taxCode: text("tax_code").notNull(),
+    /** Percent: 10 means 10 %. */
+    taxRate: numeric("tax_rate", { precision: 7, scale: 3 }).notNull(),
+    /** The line's official amount, ex GST. */
+    lineTotal: numeric("line_total", { precision: 12, scale: 2 }).notNull(),
+    /**
+     * `computed`: round(quantity x unit sell, 2), checked by the database.
+     * `printed`: the amount a document already issued printed, where
+     * quantity x rate does not give it; why is in `line_total_reason`.
+     */
+    lineTotalSource: text("line_total_source").$type<LineTotalSource>().notNull().default("computed"),
+    lineTotalReason: text("line_total_reason"),
+    /** Listed with its price but not in the total (today's "listed only" rows). */
+    isOptional: boolean("is_optional").notNull().default(false),
+    isSelected: boolean("is_selected").notNull().default(true),
+    /** The organizer node it was mapped from, while the files are the source of truth. */
+    sourceNodeId: text("source_node_id"),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+  },
+  (t) => [
+    uniqueIndex("quote_lines_org_uid_key").on(t.orgUid, t.uid),
+    index("quote_lines_quote_idx").on(t.orgUid, t.quoteUid, t.sortOrder),
+    index("quote_lines_item_idx").on(t.orgUid, t.itemUid),
+    foreignKey({
+      name: "quote_lines_quote_fk",
+      columns: [t.orgUid, t.quoteUid],
+      foreignColumns: [quotes.orgUid, quotes.uid],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "quote_lines_section_fk",
+      columns: [t.orgUid, t.sectionUid],
+      foreignColumns: [quoteSections.orgUid, quoteSections.uid],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "quote_lines_parent_fk",
+      columns: [t.orgUid, t.parentLineUid],
+      foreignColumns: [t.orgUid, t.uid],
+    }).onDelete("cascade"),
+    check("quote_lines_uid_check", sql`${t.uid} ~ '^qln_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("quote_lines_line_type_check", sql`${t.lineType} in ('item','custom','component','note')`),
+    check("quote_lines_item_check", sql`${t.lineType} <> 'item' or ${t.itemUid} is not null`),
+    check("quote_lines_note_check", sql`${t.lineType} <> 'note' or (${t.unitSell} is null and ${t.lineTotal} = 0)`),
+    check("quote_lines_line_total_check", sql`case ${t.lineTotalSource}
+      when 'computed' then (${t.unitSell} is null and ${t.lineTotal} = 0) or ${t.lineTotal} = round(${t.quantity} * ${t.unitSell}, 2)
+      when 'printed' then ${t.lineTotalReason} is not null
+      else false end`),
+    check("quote_lines_quantity_check", sql`${t.quantity} >= 0`),
+    check("quote_lines_selected_check", sql`${t.isOptional} or ${t.isSelected}`),
+    check("quote_lines_parent_check", sql`${t.parentLineUid} is null or ${t.parentLineUid} <> ${t.uid}`),
+    tenantIsolation("quote_lines"),
+  ],
+);
+
+export type Quote = typeof quotes.$inferSelect;
+export type QuoteSection = typeof quoteSections.$inferSelect;
+export type QuoteLine = typeof quoteLines.$inferSelect;

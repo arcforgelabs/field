@@ -71,6 +71,13 @@
       "when": 1791773257512,
       "tag": "0009_issued_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791783947685,
+      "tag": "0010_quote_rows",
+      "breakpoints": true
     }
   ]
 }

@@ -48,6 +48,7 @@ import { queueStagedPostCommit, runAtomicJobGeneration } from "./job-generation.
 import { recordIssuedQuoteDocuments } from "./quote-issuance.js";
 import { buildQuoteSnapshotRecord } from "./quote-snapshots.js";
 import { recordDeliveredDocument, recordFailedDelivery } from "./documents/delivery.js";
+import { quoteRowRecorder } from "./quotes/recorder.js";
 import { issuedDocumentRecorder } from "./documents/recorder.js";
 import { applyQuoteCatalogChanges, computeQuoteCatalogChanges, upgradeOrganizerCatalogLinks } from "./quote-catalog-sync.js";
 import {
@@ -2125,6 +2126,11 @@ async function finalizeAndProjectDelivery({ jobDir, finalization, config = null 
   ));
   await recordSentDeliverySnapshot({ config, finalization, issuance: finalized?.issuance || null });
   await recordDeliveredDocument({ finalization, issuance: finalized?.issuance || null });
+  // Quote rows (#241): the commit above already marked the version sent; now
+  // that its issued document exists, link it. Never throws.
+  if ((finalization.resolvedDocumentType || "quote") === "quote") {
+    await quoteRowRecorder().syncJob(jobDir, { reason: "quote sent" });
+  }
   const postCommit = finalized?.postCommit;
   if (postCommit?.sentEmailRecord) {
     try {

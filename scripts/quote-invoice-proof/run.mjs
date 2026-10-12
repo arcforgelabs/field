@@ -36,7 +36,9 @@
 // answer the read-only steps exactly as before, each with 200 (a refusal that
 // survives the restart unchanged is still a failure). The result is written to
 // storage-restart.json (compare.mjs ignores storage-* files) and any
-// difference fails the run.
+// difference fails the run. On checkouts with issued documents (#223) and
+// quote rows (#241) it also checks those tables against what was sent
+// (storage-documents.json, storage-backfill.json, storage-quote-rows.json).
 //
 // Use a trust-auth PostgreSQL (the Docker container and CI are). With password
 // (SCRAM) auth, postgres.js draws its client nonce from the seeded random
@@ -59,6 +61,9 @@ const repoRoot = resolve(repoArg);
 const outDir = resolve(outArg);
 // Checkouts with issued documents by uid (#223, server/documents/).
 const HAS_ISSUED_DOCUMENTS = existsSync(join(repoRoot, "server/documents/routes.js"));
+// Checkouts with quote rows (#241, server/quotes/).
+const HAS_QUOTE_ROWS = existsSync(join(repoRoot, "server/quotes/backfill.js"));
+let quoteRowStatus = null;
 const port = Number(portArg || 19731);
 const here = import.meta.dirname;
 const root = mkdtempSync(join(tmpdir(), "field-quote-invoice-proof-"));
@@ -200,6 +205,7 @@ try {
   }
   if (STORAGE_MODE) restartChecks = await readOnlyChecks(aid, bid);
   if (STORAGE_MODE && HAS_ISSUED_DOCUMENTS) await issuedDocumentsProof(aid);
+  if (STORAGE_MODE && HAS_QUOTE_ROWS) quoteRowStatus = (await syncJson("GET", "/api/storage/status")).quoteRows;
 } catch (error) {
   writeFileSync(join(outDir, "ERROR.txt"), `${error.stack}\n`);
   console.error(error.message);
@@ -214,6 +220,7 @@ try {
     try {
       if (!process.exitCode) await proveRestartFromEmptyDisk();
       if (!process.exitCode && HAS_ISSUED_DOCUMENTS) await backfillProof();
+      if (!process.exitCode && HAS_QUOTE_ROWS) await quoteRowsProof(restartChecks.ids);
     } catch (error) {
       writeFileSync(join(outDir, "storage-ERROR.txt"), `${error.stack}\n`);
       console.error(`storage restart proof failed: ${error.message}`);
@@ -391,6 +398,58 @@ async function backfillProof() {
   writeFileSync(join(outDir, "storage-backfill.json"), `${JSON.stringify(result, null, 2)}\n`);
   console.log(`issued documents backfill: ${result.ok ? "OK" : "FAILED"} (found ${JSON.stringify(real.found)}, already recorded ${real.alreadyRecorded}, new ${JSON.stringify(real.recorded)})`);
   if (!result.ok) throw new Error(`backfill after the proof recorded or refused something: ${JSON.stringify({ dry: dry.recorded, real: real.recorded, mismatches: real.mismatches, conflicts: real.conflicts, errors: real.errors })}`);
+}
+
+// Quote rows (#241): the live dual-write left job A's and job B's quote
+// versions as rows whose totals equal the totals printed on the quote PDFs
+// the proof fetched (a04, b03), with A accepted (landed) and B sent, each
+// linked to its issued document. The backfill over the data directory then
+// verifies every version (against the renderer and the sent PDFs) and finds
+// nothing to write. Results go to storage-quote-rows.json (compare.mjs ignores
+// storage-* files).
+async function quoteRowsProof({ aid, bid }) {
+  const { extractQuotePdfTotals } = await import(pathToFileURL(join(repoRoot, "server/quotes/issued-totals.js")).href);
+  const run = (extra) => {
+    try {
+      return { code: 0, report: JSON.parse(execFileSync(process.execPath, [join(repoRoot, "scripts/backfill-quote-rows.js"), "--json", "--data-dir", dataDir, ...extra], {
+        cwd: repoRoot,
+        env: { PATH: baseEnv.PATH, HOME: root, FIELD_DB_URL: storageDb.url, FIELD_CONFIG: configPath },
+      }).toString()) };
+    } catch (error) {
+      return { code: error.status, report: JSON.parse(error.stdout?.toString() || "null"), stderr: error.stderr?.toString() || "" };
+    }
+  };
+  const report = { checks: [], ok: true, live: quoteRowStatus };
+  const check = (name, ok, detail = null) => {
+    report.checks.push({ name, ok: Boolean(ok), ...(detail == null ? {} : { detail }) });
+    if (!ok) report.ok = false;
+  };
+  check("the live dual-write recorded without failures or mismatches", quoteRowStatus?.enabled && quoteRowStatus.failures === 0
+    && quoteRowStatus.mismatches === 0 && quoteRowStatus.conflicts === 0 && quoteRowStatus.created > 0, quoteRowStatus);
+  const dry = run(["--dry-run"]);
+  const real = run([]);
+  report.dryRun = dry.report;
+  report.run = real.report;
+  const clean = (result) => result.code === 0 && result.report && result.report.mismatches.length === 0
+    && result.report.conflicts.length === 0 && result.report.errors.length === 0 && result.report.jobsRefused === 0;
+  check("the backfill dry run verifies every version and finds nothing to write", clean(dry)
+    && Object.keys(dry.report.actions).every((action) => action === "unchanged"), { code: dry.code, actions: dry.report?.actions, stderr: dry.stderr });
+  check("a real backfill run writes nothing new", clean(real)
+    && Object.keys(real.report.actions).every((action) => action === "unchanged"), { code: real.code, actions: real.report?.actions });
+  const entries = real.report?.entries || [];
+  for (const [label, jobId, pdfName, status] of [["job A", aid, "a04-quote.pdf", "accepted"], ["job B", bid, "b03-quote.pdf", "sent"]]) {
+    const entry = entries.find((candidate) => candidate.jobId === jobId && candidate.version === 1);
+    const printed = extractQuotePdfTotals(readFileSync(join(outDir, pdfName)));
+    check(`${label}: quote v1 rows exist, ${status}, linked to its issued document`, entry && entry.status === status && entry.action === "unchanged"
+      && /^doc_/.test(entry.issuedDocumentUid || ""), entry ? { status: entry.status, action: entry.action, issuedDocumentUid: entry.issuedDocumentUid } : null);
+    check(`${label}: rows' totals equal the totals on ${pdfName} and on the sent PDF`, entry && printed
+      && entry.rows.subtotal === printed.subtotal && entry.rows.taxTotal === printed.taxTotal && entry.rows.total === printed.total
+      && entry.issued.some((copy) => copy.totals?.total === printed.total),
+    { rows: entry?.rows || null, printed, sent: entry?.issued || null });
+  }
+  writeFileSync(join(outDir, "storage-quote-rows.json"), `${JSON.stringify(report, null, 2)}\n`);
+  console.log(`quote rows proof: ${report.ok ? "OK" : "FAILED"} (${report.checks.filter((entry) => entry.ok).length}/${report.checks.length} checks)`);
+  if (!report.ok) throw new Error(`quote rows proof failed: ${JSON.stringify(report.checks.filter((entry) => !entry.ok))}`);
 }
 
 // Requests for the catalogue-sync proof: not recorded in steps.json and not

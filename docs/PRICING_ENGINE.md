@@ -15,7 +15,16 @@ is built yet unless it says so. Pricing configuration names items by uid
 with the code as fallback (step 4). The price book clean-up (step 5) is a
 boot data migration behind the price-equality gate, and MCP answers carry no
 item codes (step 6; HTTP on request, by default once the app stops reading
-them).
+them). Phase 3 step 3 part one is built too: every quote version is also
+written as `quotes`, `quote_sections` and `quote_lines` rows and checked
+against what Field shows, while the files stay the source of truth.
+
+The owner's six decisions of 2026-10-12 (#178, from the document audit) are
+recorded where they change the design: credit notes ("Invoices and
+payments"), invoice numbers ("Identity"), document bytes and issue versus
+delivery ("`document_events` and `issued_documents`"), claim-line invoices
+and milestone rules ("Invoices and payments"), and the order of work
+("Phase 3, step by step").
 
 ## Principles
 
@@ -157,20 +166,44 @@ a code never breaks anything, because nothing links by code.
   own item with its own code and a `variant_of_uid` link.
 
 A **number** is a customer-facing document identifier, allocated once, never
-reused, from a per-type sequence: quotes `EQ-YYMM-NN` (as today), invoices
-`INV-YYMM-NN`. Revisions of a quote keep its number and add a version
-(`EQ-2501-03 v2`).
+reused, from a per-type sequence: quotes `EQ-YYMM-NN` (as today). Revisions
+of a quote keep its number and add a version (`EQ-2501-03 v2`).
+
+> **Decision, 2026-10-12 (#178):** invoice numbers are
+> `INV-YYYY-MM-N`, from one sequence per organisation, allocated when the
+> invoice is issued (`document_number_counters`). An invoice connected to a
+> job carries the job number as a required reference. Numbers already issued
+> (`EI-…`) stay as they are.
 
 ### Numbers, money and rounding
 
 | What | Column type | Notes |
 | --- | --- | --- |
 | Unit cost | `numeric(12,4)` | Costs per small unit (per m, per kg) need more than cents. |
-| Unit sell | `numeric(12,2)` | Always whole cents. Computed sells are rounded half-up to cents when they are stored or frozen. |
-| Line, subtotal, tax, total | `numeric(12,2)` | Line total = round(qty × unit sell, 2). Tax is computed per line, then summed. |
+| Unit sell on a quote line | `numeric(12,4)` | Four decimals, so a historical line keeps the rate it was priced at. A line added from now on takes the rate rounded half-up to cents, so qty × rate always gives its total. |
+| Line total | `numeric(12,2)` | The line's official amount. Round(qty × unit sell, 2), or for a line frozen from a document already issued, the amount it printed (see below). |
+| Subtotal, tax, total | `numeric(12,2)` | Subtotal = sum of line totals. Tax = round(subtotal × rate, 2), once per tax rate, not per line. Total = subtotal + tax. |
 | Quantity | `numeric(14,4)` | Displayed trimmed (`12`, `2.5`, `0.125`). |
 | Markup, margin | `numeric(7,3)` percent | `25` means 25 %. |
 | Conversion factor | `numeric(14,6)` | |
+
+> **Decisions, 2026-10-12 (#178):**
+>
+> - **GST is worked out once on the subtotal, not per line.** Every quote
+>   Field has sent did it this way, so the rows reproduce what customers
+>   received. With one rate (all GST at 10 % today) that is
+>   round(subtotal × 10 %, 2); with several, once per rate group. Per-line
+>   GST could differ by a cent or more (three lines of $10.05: $3.02 on the
+>   subtotal, $3.03 per line).
+> - **The line total frozen as printed is the official amount.** Quote lines
+>   carry their rate to four decimals, and a historical version reproduces
+>   exactly. A line whose qty × rate does not give the total it printed (a
+>   three-decimal catalogue sell the PDF rounded differently, a fixed price
+>   no whole-cent rate reaches) keeps that total, marked
+>   `line_total_source = 'printed'` with the reason in `line_total_reason`.
+>   Every other line is `computed`, and the database checks that it equals
+>   round(qty × rate, 2). Rounding catalogue sells with more than two
+>   decimals is a separate catalogue decision; catalogue data is not changed.
 
 - One currency (AUD), held on the quote and invoice row, so the model does not
   have to change if another is ever needed.
@@ -382,16 +415,48 @@ and the next `version`. The previous row becomes `superseded`.
 | `currency` | text | `AUD` |
 | `valid_until_on` | date | |
 | `subtotal`, `tax_total`, `total` | numeric(12,2) | Computed by the one totals function. Stored when sent |
+| `tax_total_source`, `tax_total_reason` | text | `computed`, or `printed` with the reason (below) |
 | `catalog_version` | bigint | The catalogue version the lines were last priced against |
 | `sent_at`, `accepted_at` | timestamptz | |
 | `version_lock` | int | Optimistic concurrency (named so it doesn't clash with `version`) |
+
+**Built (#241, migration `0010_quote_rows`), with these differences:**
+
+- A version is unique per job, `(org_uid, job_id, version)`, not per
+  number. The audit found quote numbers that collide across jobs, so
+  `(number, version)` is only indexed until numbers come from
+  `document_number_counters`. The backfill lists any number two jobs share.
+- `issued_document_uid` links the issued document (#230) the version was
+  sent as. `source_digest` is a hash of the files the rows were mapped from,
+  so an unchanged version is not rewritten.
+- `terms_text` and `catalog_version` are null for rows mapped from files:
+  terms print from the business settings, and quote.json does not record the
+  catalogue version.
+- Totals are stored on every version, not only when sent, and are always
+  `quoteTotals` over the lines being written.
+- **GST as printed, in one case only.** Until GST was rounded exactly (#2),
+  the renderer worked it out in binary floating point. When the exact tax
+  falls on half a cent ($21.15 at 10 % is $2.115), a PDF could print a cent
+  less than exact rounding ($2.11, not $2.12): 3,277 of the first 2,000,000
+  possible subtotals. Field now shows $2.12 for such a quote. A sent version
+  whose sent copy printed the lower GST keeps it, with
+  `tax_total_source = 'printed'` and the reason; its subtotal must still
+  equal what Field shows. The service refuses a printed GST in any other
+  case, and new quotes always compute it.
+- **Sent never changes, in the database.** A quote is frozen once it is
+  `sent`, `accepted` or `declined`, or has a `sent_at`. Triggers then refuse
+  inserting, updating or deleting its sections and lines, changing its
+  number, money, customer or wording, setting it back to `draft`, replacing
+  its issued document, and deleting it, for the table owner too. Its status
+  may still move on (`superseded`, `accepted`, `void`).
 
 ### `quote_sections`
 
 The groups the customer sees ("Retaining wall", "Drainage"). This replaces
 organizer group nodes. Sections are flat, ordered and optionally subtotalled.
 
-`uid` (`qsc_…`), `quote_uid`, `title`, `sort_order`, `show_subtotal`.
+`uid` (`qsc_…`), `quote_uid`, `title`, `sort_order`, `show_subtotal`
+(built, with `source_node_id`, the organizer group it came from).
 
 ### `quote_lines`
 
@@ -411,10 +476,11 @@ catalogue.
 | `code`, `name`, `description` | text | Frozen copies. The description prints |
 | `quantity` | numeric(14,4) | |
 | `unit_code` | FK units | |
-| `unit_cost`, `unit_sell` | numeric(12,4), (12,2) | Copied from the catalogue when added, or typed |
+| `unit_cost`, `unit_sell` | numeric(12,4), (12,4) | Copied from the catalogue when added (the sell rounded to cents), or typed |
 | `is_price_override` | boolean | The estimator changed the catalogue's sell. `override_reason` text |
 | `tax_code`, `tax_rate` | text, numeric | From the item. Frozen |
-| `line_total`, `line_tax` | numeric(12,2) | round(qty × unit_sell, 2), and its tax |
+| `line_total` | numeric(12,2) | The official amount: round(qty × unit_sell, 2), or as printed |
+| `line_total_source`, `line_total_reason` | text | `computed` (checked by the database), or `printed` with the reason |
 | `is_optional`, `is_selected` | boolean | For options the customer can choose. Unused today, so it can come later |
 
 Rules:
@@ -430,28 +496,69 @@ Rules:
   `is_price_override` are listed but never changed silently. This replaces
   #167's organizer diff, and fixes #170's frozen-kit gap by construction.
 - **Totals:** one function, `quoteTotals(lines)`. It sums `line_total` over
-  priced, selected lines, sums `line_tax`, and adds them for `total`. The PDF,
-  the email, the list view and the API all read it.
+  priced, selected lines for the subtotal, works GST out once on that
+  subtotal (round(subtotal × rate, 2) per tax rate, not per line), and adds
+  them for `total`. The PDF, the email, the list view and the API all read
+  it. There is no per-line tax: it would not add up to the GST charged.
+- **New lines round their rate.** A line added from now on takes the rate
+  rounded to cents, so qty × rate always gives its total and the line is
+  `computed`. Only lines frozen from documents already issued are `printed`.
 - **Send freezes.** Sending sets `status = sent` and stores the totals.
   After that, a trigger refuses any `UPDATE` or `DELETE` on the quote's lines
   and sections. To change a sent quote, create a new version, which copies
   its lines into a new draft. Sending needs no lineage or attestation check:
   every line already holds its own frozen price (#169 disappears).
 
+**Built (#241), with these differences:**
+
+- `section_uid` is null for a line outside any section (a top-level row).
+  `parent_line_uid` also puts a row under a `note` heading, not only a
+  component under its kit.
+- `is_optional` and `is_selected` are built, because today's "listed only"
+  rows are exactly that: printed with a price, not charged.
+- `item_uid`, `price_uid` and `price_key` are not foreign keys. The
+  catalogue can still delete an item a quote used, and a sent line must keep
+  naming it. `price_uid` holds today's `item_prices` id.
+- `unit_code` is text, not a foreign key: quote rows carry units the
+  `units` table may not have.
+- `tax_code` is `GST` at the quote's rate: today one rate (the catalogue
+  file's `gstRate`) applies to the whole quote.
+- `line_tax` is not built: GST is worked out on the subtotal (decided
+  2026-10-12), so a per-line tax would not add up to what was charged.
+- `line_total_source` and `line_total_reason` record how a line's total was
+  set (see "Numbers, money and rounding").
+
 ### Invoices and payments
 
 Milestone invoicing is used on 51 of 65 jobs, so it gets proper tables.
 
+> **Decisions, 2026-10-12 (#178):**
+>
+> - **An issued invoice is never revised in place.** It is corrected with a
+>   credit (adjustment) note against it, then a new invoice. Today's `-R2`
+>   revisions migrate as a credit note plus a new invoice.
+> - **Numbers:** `INV-YYYY-MM-N`, one sequence per organisation, allocated
+>   at issue, with the job number as a required reference (see "Identity").
+> - **Milestone invoices show claim lines**, one per milestone, each
+>   referencing the quote. Milestone defaults come from account-wide rules
+>   by contract value, with per-job overrides that are visibly marked
+>   (#239). The first rules follow South Australia's domestic building deposit limits:
+>   at most $1,000 under $20,000, at most 5 % from $20,000.
+
 - `payment_milestones`: `uid`, `quote_uid`, `label` ("Deposit",
-  "On completion"), `percent` or `amount`, `sort_order`.
-- `invoices`: `uid` (`inv_…`), `number` (`INV-YYMM-NN`), `quote_uid`,
-  `milestone_uid` null, `kind` (`deposit`, `progress`, `final`,
-  `variation`), `status` (`draft`, `issued`, `paid`, `void`),
-  `issued_on`, `due_on`, `subtotal`, `tax_total`, `total`,
-  `amount_paid`. An issued invoice is frozen the same way a sent quote is.
+  "On completion"), `percent` or `amount`, `sort_order`. Defaults come from
+  the account's rules (#239).
+- `invoices`: `uid` (`inv_…`), `number` (`INV-YYYY-MM-N`), `quote_uid`,
+  `job_id` (the required reference), `milestone_uid` null, `kind`
+  (`deposit`, `progress`, `final`, `variation`), `status` (`draft`,
+  `issued`, `paid`, `void`), `issued_on`, `due_on`, `subtotal`,
+  `tax_total`, `total`, `amount_paid`. An issued invoice is frozen the same
+  way a sent quote is, and is corrected only by a credit note.
+- `credit_notes`: an adjustment against one issued invoice, with its own
+  number, lines and issued document (`document_type` `credit_note`).
 - `invoice_lines`: the same shape as `quote_lines` (`iln_…`). A milestone
-  invoice usually has one line ("40 % deposit on EQ-2501-03 v2") that points
-  at the quote.
+  invoice has claim lines, one per milestone ("40 % deposit on EQ-2501-03
+  v2"), each pointing at the quote.
 - `payments`: `uid`, `invoice_uid`, `amount`, `paid_on`, `method`,
   `reference`. Receipts are generated from payments.
 
@@ -493,18 +600,21 @@ Rules:
 - **Issued once, never changed.** Triggers refuse `UPDATE`, `DELETE` and
   `TRUNCATE` on blobs and events, and on every `issued_documents` column
   except `details`, for the table owner too. `field_app` is granted no more.
-- **A document is issued when it is finalised; email is delivery.** The
-  `issued` event and the `emailed` event are separate facts. Step 2 records
-  both and does not change when today's code considers something issued: a
-  quote is issued when it is emailed, an invoice revision when it is frozen.
+- **A document is issued when it is finalised; email is delivery** (decided
+  2026-10-12, #178). The `issued` event and the `emailed` event are separate
+  facts. Step 2 records both and does not change when today's code considers
+  something issued: a quote is issued when it is emailed, an invoice revision
+  when it is frozen. Issuing at finalisation arrives with documents built
+  from rows.
 - **Same number, same bytes, or refused.** Recording a number again with the
   same bytes is a no-op. A resend that renders the PDF again keeps the issued
   document as it was and stores the bytes that were sent with its `emailed`
   event (`bytesMatchIssued: false`).
 - **The byte store is an interface.** `server/documents/blob-store.js` is the
   only code that touches `document_blobs`, through `put(bytes) → sha256`
-  and `get(sha256) → bytes`. S3 or R2 with Object Lock can replace it without
-  touching the rows.
+  and `get(sha256) → bytes`. Decided 2026-10-12 (#178): bytes stay in
+  `document_blobs` for now; Cloudflare R2 with a bucket lock is an opt-in
+  replacement behind the same two calls (#240), without touching the rows.
 
 These tables replace `quote-issuance.json` and its `issued-documents/`
 folder, the issued-PDF fields on `milestone-invoices/state.json`, the
@@ -612,7 +722,8 @@ Rules for the migration:
 
   The migration verifies, per quote, that the new totals equal the totals on
   the PDF the customer received, to the cent. Any mismatch is reported and
-  refuses the migration.
+  refuses the migration. Built as `scripts/backfill-quote-rows.js` (#241;
+  see "Phase 3, step by step"), which refuses per job.
 - Milestone state becomes `payment_milestones`, and issued revisions become
   issued `invoices` with their stored PDFs.
 - The old files stay read-only in the job folder until the watch period ends.
@@ -719,7 +830,9 @@ Not built yet, and why:
   lands with the clean-up's categories, as rows with `parent_id`.
 - Money precision (`numeric(12,2)` sells): 84 production sell rows carry more
   than 2 decimals, so narrowing the column would change prices. That needs
-  its own decision; until then `price()` returns sells as stored.
+  its own decision; until then `price()` returns sells as stored. Quote
+  lines carry rates to four decimals (decided 2026-10-12), so quote rows do
+  not wait for it, and catalogue data is not changed.
 - `pricing_method` as a column, and dropping `kind`, `visibility`, `tags`,
   `price_reference`, `cost_mode` and `sell_mode`: the price book redesign
   still reads them. The API serves the new names alongside; the columns go
@@ -737,14 +850,19 @@ Not built yet, and why:
 ### Phase 3, step by step
 
 Phase 3 is several PRs. Each one is additive and leaves the quote and
-invoice proof byte-identical.
+invoice proof byte-identical. The steps follow the rebuild order the owner
+set on 2026-10-12 (#178): document store, quotes as rows, invoices as rows,
+then jobs and the rest. Work starts now, beside the catalogue work.
 
 | Step | What | State |
 | --- | --- | --- |
 | 1 | The PDF routes stop inferring the document type from the job stage (#220) | Built |
 | 2 | The document store and issue service (#223): `document_blobs`, `issued_documents`, `document_events`, `document_number_counters`; dual-write from today's send path; backfill; `GET /api/documents/:uid/pdf` and `GET /api/jobs/:id/documents` | Built |
-| 3 | The old PDF routes (`/api/jobs/:id/quote-pdf`, `/milestones/:index/pdf`) serve issued documents from the tables; the issuance ledger and the legacy sent-quote lookup are no longer read | Next |
-| 4 | `quotes`, `quote_sections`, `quote_lines`, invoices and payments, with numbers allocated from `document_number_counters` | Later |
+| 2b | The old PDF routes (`/api/jobs/:id/quote-pdf`, `/milestones/:index/pdf`) serve issued documents from the tables; the issuance ledger and the legacy sent-quote lookup are no longer read | Next |
+| 3, part one | Quotes as rows (#241): `quotes`, `quote_sections`, `quote_lines` (migration 0010), one `quoteTotals`, the quote service, dual-write after every committed quote change, and a backfill that verifies every version to the cent | Built |
+| 3, part two | The quote editor, PDFs and MCP read quote rows; quote numbers from `document_number_counters` | Next |
+| 4 | Invoices, credit notes, payments and receipts as rows; `INV-YYYY-MM-N` numbers allocated at issue; claim-line milestone invoices and milestone rules (#239) | Later |
+| 5 | Jobs and the rest (phase 3b) | Later |
 
 How step 2 fills the tables:
 
@@ -764,3 +882,60 @@ How step 2 fills the tables:
   nothing new. It is not yet a boot step of the data-migration runner
   (`server/data-migrations/`); it becomes one after its first production
   dry run.
+
+How step 3 part one fills the quote tables (`server/quotes/`). The job files
+stay the source of truth, and nothing reads the rows yet.
+
+- **Mapping** (`from-artifact.js`). A version's rows are its customer
+  schedule as the renderer resolves it, each row with the values it prints.
+  A top-level organizer group is a section; a nested group is a `note`
+  heading. A catalogue-linked row is an `item` line with the row's item uid,
+  price id and price key. Manual and engine rows are `custom` lines. Rows
+  under a priced row (kit components, engine breakdowns, rows under a fixed
+  price) are `component` lines, shown and never counted. A group with a
+  fixed price is one `custom` line at that price. Every line keeps the total
+  it printed and the row's own rate to four decimals; the total is
+  `computed` when qty × rate gives it and `printed`, with the reason,
+  otherwise (an amount today's renderer rounded in floating point, a fixed
+  price no whole-cent rate reaches). A fixed price on a row keeps the row's
+  quantity and takes the whole-cent rate it works out to, when there is one;
+  the rate the PDF printed goes into `override_reason`. "Listed only" rows
+  are optional and not selected. Rows excluded from the price are left out,
+  because the PDF does not print them.
+- **Status** (`job-quotes.js`), from the evidence the rest of Field uses.
+  The newest version that was emailed (the issuance ledger, or before it the
+  send fields) is the customer's: `accepted` when the job is landed,
+  `declined` when lost, otherwise `sent`. Other emailed versions are
+  `superseded`, older unsent ones `superseded`, the newest unsent one
+  `draft`. A version only moved to Sent by hand is not sent (it is
+  `accepted` or `declined` when the job is landed or lost).
+- **Checks** (`sync.js`). `quoteTotals` over the rows must equal the totals
+  Field shows to the cent (the renderer's subtotal, GST and total, which the
+  PDF prints); lines kept as printed are listed as warnings. A sent
+  version must also equal the totals on the PDF the customer was sent: the
+  issued document's bytes, else the issuance ledger's PDF (or the quote
+  markdown stored with it when the PDF cannot be read), else for a quote
+  sent before the ledger the copy `legacy-sent-quote.js` finds. Totals are
+  read from the PDF's own text (`issued-totals.js`), never re-rendered.
+- **Live.** After every committed job generation, the recorder writes the
+  versions that changed. A version that fails a check is not written, its
+  draft rows are removed, and it is counted with both numbers in
+  `GET /api/storage/status` (`quoteRows`). After a quote email is recorded,
+  the send path syncs again so the sent version links its issued document.
+  Nothing here can fail a save or a send. Without a database it is skipped
+  with a log line.
+- **Backfill.** `node scripts/backfill-quote-rows.js [--dry-run] [--json]`
+  checks every job's versions as above and writes a job only when all of
+  its versions pass. A failing job is reported per version with both
+  numbers, nothing is written for it, and the run exits 2. A second run
+  writes nothing new. Without a database, `--dry-run` checks the files
+  alone. It is not a boot step of the data-migration runner: like the
+  issued-document backfill, it becomes one only after a production dry run
+  shows what it would refuse.
+- **Every sent PDF's totals reproduce.** With the 2026-10-12 decisions
+  (GST on the subtotal, line totals as printed, four-decimal rates), the
+  three cases the first version of this step could not reproduce (GST per
+  line, a rate with more than two decimals, a fixed price no whole-cent rate
+  reaches) all reproduce. What still fails a check is a version whose files
+  disagree with the PDF that was sent, which the backfill reports and never
+  writes.
