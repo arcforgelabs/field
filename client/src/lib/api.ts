@@ -72,7 +72,90 @@ export type ScheduledEmail = {
     attachmentFilename?: string | null;
     invoicePaidAmount?: number | null;
   } | null;
+  /** Field documents attached by uid (their references, never their bytes). */
+  documents?: EmailDocumentRef[];
 };
+
+export type EmailDocumentRef = {
+  uid: string;
+  documentType: string | null;
+  number: string | null;
+  byteLength?: number | null;
+};
+
+export type JobDocumentStatus = "issued" | "accepted" | "paid" | "credited" | "superseded" | "void";
+
+/** An issued document of a job, from GET /api/jobs/:id/documents. */
+export type JobDocument = {
+  uid: string;
+  documentType: "quote" | "invoice" | "receipt" | "credit_note";
+  number: string;
+  quoteVersion: number | null;
+  revision: number | null;
+  issuedAt: string;
+  pdfSha256: string;
+  pdfUrl: string;
+  byteLength: number | null;
+  status: JobDocumentStatus;
+  emailed: Array<{ event: string; at: string; messageId: string | null; to: string[] }>;
+  details?: Record<string, unknown>;
+};
+
+/** A document the job will have but that is not issued yet (a draft milestone invoice). */
+export type NotIssuedDocument = {
+  documentType: "invoice";
+  milestoneIndex: number;
+  label: string;
+  total: number | null;
+  reason: string;
+};
+
+export type JobDocumentsResponse = {
+  ok: true;
+  jobId: string;
+  documents: JobDocument[];
+  notIssued?: NotIssuedDocument[];
+};
+
+export type EmailTemplateSource = { id: string; name: string; description: string; subject: string; html: string };
+export type EmailMergeValues = Record<string, string | null>;
+
+/** What the composer reads for one send (GET /api/jobs/:id/email-context). */
+export type EmailContext = {
+  ok: true;
+  jobId: string;
+  documentType: "quote" | "invoice" | "receipt" | null;
+  milestoneIndex: number | null;
+  from: { name: string | null; email: string | null };
+  defaultSubject: string;
+  templates: EmailTemplateSource[];
+  mergeValues: EmailMergeValues;
+  mergeFields: Array<{ key: string; label: string; value: string | null }>;
+  signature: { html: string; isDefault: boolean } | null;
+  jobContacts: Array<{ email: string; name: string; source: "job" | "sent" }>;
+  deliveryPolicy: { mode: "live" | "allowlist" | "disabled"; allowedRecipients?: string[] };
+};
+
+/** What a send would produce (POST /api/jobs/:id/email-preview). */
+export type EmailPreview = {
+  ok: true;
+  subject: string;
+  html: string;
+  text: string;
+  from: { name: string | null; email: string | null };
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  attachments: Array<{ filename: string; source: "main" | "document" | "upload"; byteLength?: number | null; number?: string | null; documentType?: string | null }>;
+  pending: string[];
+};
+
+/** The email limits the server holds (server/documents/email-attachments.js). */
+export const EMAIL_ATTACHMENT_LIMITS = {
+  maxAttachments: 10,
+  maxUploadBytes: 10 * 1024 * 1024,
+  maxTotalBytes: 18 * 1024 * 1024,
+} as const;
 
 export type GoogleContact = {
   name: string;
@@ -234,8 +317,9 @@ async function requestForm<T>(path: string, options: RequestInit & { body: FormD
       throw new Error("unauthorized");
     }
     const err = new Error(body.error || res.statusText);
-    const errWithCode = err as Error & { code?: unknown };
+    const errWithCode = err as Error & { code?: unknown; status?: number };
     errWithCode.code = body.code;
+    errWithCode.status = res.status;
     throw err;
   }
 
@@ -463,8 +547,11 @@ export const api = {
       draftId?: string | null;
       /** Also attach the adjustment note the invoice was issued with (#28). */
       attachCreditNote?: boolean;
+      /** Other issued documents of the job, attached by uid. */
+      documents?: Array<{ uid: string }>;
     }
   ) {
+    const documents = options?.documents?.length ? { documents: options.documents.map(({ uid }) => ({ uid })) } : {};
     if (options?.attachments?.length) {
       const payload = {
         to,
@@ -481,6 +568,7 @@ export const api = {
         ...(options?.scheduledAt ? { scheduledAt: options.scheduledAt } : {}),
         ...(options?.draftId ? { draftId: options.draftId } : {}),
         ...(options?.attachCreditNote ? { attachCreditNote: true } : {}),
+        ...documents,
       };
       const formData = new FormData();
       formData.append("payload", JSON.stringify(payload));
@@ -509,8 +597,41 @@ export const api = {
         ...(options?.scheduledAt ? { scheduledAt: options.scheduledAt } : {}),
         ...(options?.draftId ? { draftId: options.draftId } : {}),
         ...(options?.attachCreditNote ? { attachCreditNote: true } : {}),
+        ...documents,
       }),
     });
+  },
+  emailContext(id: string, params: { documentType?: string | null; milestoneIndex?: number | null; version?: string | null }) {
+    const search = new URLSearchParams();
+    if (params.documentType) search.set("documentType", params.documentType);
+    if (params.milestoneIndex != null) search.set("milestoneIndex", String(params.milestoneIndex));
+    if (params.version) search.set("version", params.version);
+    return request<EmailContext>(`/api/jobs/${id}/email-context${search.toString() ? `?${search}` : ""}`);
+  },
+  emailPreview(id: string, body: {
+    documentType?: string | null;
+    milestoneIndex?: number | null;
+    version?: string | null;
+    subject?: string | null;
+    customBody?: string | null;
+    to?: string[];
+    cc?: string[];
+    bcc?: string[];
+    documents?: Array<{ uid: string }>;
+    uploads?: Array<{ filename: string; byteLength: number }>;
+    attachmentFilename?: string | null;
+  }, init?: { signal?: AbortSignal }) {
+    return request<EmailPreview>(`/api/jobs/${id}/email-preview`, { method: "POST", body: JSON.stringify(body), signal: init?.signal });
+  },
+  emailSignature() {
+    return request<{ ok: true; signature: { html: string; isDefault: boolean; updatedAt: string | null } }>("/api/settings/email-signature");
+  },
+  saveEmailSignature(html: string) {
+    return request<{ ok: true; signature: { html: string; isDefault: boolean; updatedAt: string | null } }>("/api/settings/email-signature", { method: "PUT", body: JSON.stringify({ html }) });
+  },
+  /** The job's issued documents (503 without a database: no picker then). */
+  jobDocuments(id: string) {
+    return request<JobDocumentsResponse>(`/api/jobs/${id}/documents`);
   },
   emailTemplates() {
     return request<{
@@ -538,9 +659,11 @@ export const api = {
       attachments?: File[];
       scheduledAt?: string | null;
       draftId?: string | null;
+      documents?: Array<{ uid: string }>;
     },
   ) {
     const payload = {
+      ...(options?.documents?.length ? { documents: options.documents.map(({ uid }) => ({ uid })) } : {}),
       to,
       subject,
       cc: options?.cc || [],

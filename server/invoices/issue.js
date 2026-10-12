@@ -37,7 +37,7 @@ import { allocateCreditedPayments, insertCreditNoteRow, insertIssuedInvoiceRow, 
 import { formatSequenceNumber, invoicePeriod } from "./numbers.js";
 import { readCreditNoteOnReissue } from "./business-settings.js";
 
-export { CREDIT_NOTE_NUMBER_PATTERN, INVOICE_NUMBER_PATTERN, SEQUENCE_PREFIXES, formatCreditNoteNumber, formatInvoiceNumber, formatSequenceNumber, invoicePeriod, isSequenceInvoiceNumber } from "./numbers.js";
+export { CREDIT_NOTE_NUMBER_PATTERN, INVOICE_NUMBER_PATTERN, RECEIPT_NUMBER_PATTERN, SEQUENCE_PREFIXES, formatCreditNoteNumber, formatInvoiceNumber, formatReceiptNumber, formatSequenceNumber, invoicePeriod, isSequenceInvoiceNumber, isSequenceReceiptNumber } from "./numbers.js";
 
 const { invoices, creditNotes, issuedDocuments, documentEvents, documentNumberCounters, paymentMilestones, quotes, quoteSnapshots } = schema;
 
@@ -73,6 +73,15 @@ export function mapCreditNoteForIssue({ milestoneInvoices, paymentSchedule = nul
 export function creditIssueKey({ jobId, milestoneIndex, creditedRevisionNumber, revisionNumber, fingerprint }) {
   const digest = createHash("sha256").update(String(fingerprint ?? "")).digest("hex").slice(0, 16);
   return `credit:${jobId}:m${milestoneIndex}:r${creditedRevisionNumber}-r${revisionNumber}:${digest}`;
+}
+
+/**
+ * The idempotency key of one receipt: the job, the milestone, the payment
+ * that cleared it and the invoice it pays. A retry has the same key; paying
+ * the milestone again after it was marked unpaid is a different one.
+ */
+export function receiptIssueKey({ jobId, milestoneIndex, paymentId, invoiceNumber }) {
+  return `receipt:${jobId}:m${milestoneIndex}:${paymentId || "no-payment"}:${invoiceNumber || "no-invoice"}`;
 }
 
 /**
@@ -314,6 +323,54 @@ export function createInvoiceIssueService({
     },
 
     /**
+     * Issue a paid milestone's receipt (owner's decision, 2026-10-13): its
+     * number RCT-YYYY-M-N from the generic allocator, rendered once with that
+     * number and the invoice it pays, stored with its `issued` event. The
+     * receipt row is written by the invoice-row sync once the job's files
+     * hold the payment (the row names the payment). A retry with the same
+     * key returns the same receipt and allocates nothing. Returns { replayed,
+     * number, issuedDocumentUid, pdfSha256, pdfBytes, issuedAt }.
+     */
+    async issueReceipt({ jobId, idempotencyKey, issuedAt, issuedBy = null, invoiceNumber, quoteVersion = null, details = {}, render }) {
+      const cleanJobId = text(String(jobId ?? ""));
+      if (!cleanJobId) throw new InvoiceIssueError("a receipt is issued for a job: its job id is missing");
+      const key = text(idempotencyKey);
+      if (!key) throw new InvoiceIssueError("a receipt issue needs its idempotency key");
+      const paid = text(invoiceNumber);
+      if (!paid) throw new InvoiceIssueError("a receipt names the invoice it pays", { code: "RECEIPT_INVOICE_REQUIRED" });
+      if (typeof render !== "function") throw new InvoiceIssueError("a receipt issue needs its renderer");
+      const issuedDate = new Date(issuedAt);
+      if (Number.isNaN(issuedDate.getTime())) throw new InvoiceIssueError(`issue time is not a timestamp: ${JSON.stringify(issuedAt)}`);
+      const actor = text(issuedBy);
+      const result = await scope.transaction(async (tx) => {
+        await lock(tx);
+        const [existing] = await tx.select().from(issuedDocuments)
+          .where(and(eq(issuedDocuments.jobId, cleanJobId), eq(issuedDocuments.documentType, "receipt"), sql`${issuedDocuments.details}->>'issueKey' = ${key}`));
+        if (existing) {
+          return { replayed: true, number: existing.number, ...(await documentBytes(tx, existing.uid, `receipt ${existing.number}`)), issuedAt: iso(existing.issuedAt) };
+        }
+        const at = now();
+        const number = await allocate(tx, "receipt", issuedDate, at);
+        const stored = await storeDocument(tx, {
+          jobId: cleanJobId,
+          documentType: "receipt",
+          number,
+          render,
+          quoteVersion,
+          issuedDate,
+          actor,
+          details: { ...(details && typeof details === "object" ? details : {}), issueKey: key, invoiceNumber: paid },
+          eventData: { issueKey: key, invoiceNumber: paid },
+          at,
+        });
+        return { replayed: false, number, ...stored, issuedAt: issuedDate.toISOString() };
+      });
+      if (!result.replayed) afterCommit([result.pdfSha256]);
+      if (sha256Hex(result.pdfBytes) !== result.pdfSha256) throw new DocumentBytesError(`the bytes of receipt ${result.number} do not match their hash`);
+      return result;
+    },
+
+    /**
      * Correct an issued invoice (step 4b): credit it in full with a credit
      * (adjustment) note, then issue the invoice that replaces it, in ONE
      * transaction. The note takes CN-YYYY-M-N and the invoice INV-YYYY-M-N,
@@ -510,6 +567,9 @@ function unavailable(reason) {
     },
     async creditAndReissue() {
       throw new InvoiceIssueError(`credit notes and invoices are issued in PostgreSQL, and ${reason}; nothing was issued`, { code: "INVOICE_ISSUE_UNAVAILABLE", statusCode: 503 });
+    },
+    async issueReceipt() {
+      throw new InvoiceIssueError(`receipts are issued in PostgreSQL, and ${reason}; nothing was issued`, { code: "INVOICE_ISSUE_UNAVAILABLE", statusCode: 503 });
     },
   });
 }

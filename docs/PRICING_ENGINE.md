@@ -613,8 +613,9 @@ differences:**
   that differs from GST on its own subtotal the invoice keeps the GST it was
   issued with, `printed`, with the reason.
 - `invoice_lines` hold what the invoice PDF claims: one `claim` line, the
-  milestone's share of the quote ex GST, against the quote. Today's PDF also
-  prints the quote's schedule, which is the quote's rows.
+  milestone's share of the quote ex GST, against the quote. Since step 4b
+  that is all the PDF claims; invoices issued earlier also printed the
+  quote's schedule, which is the quote's rows.
 - `credit_notes` and `credit_note_lines` exist with their checks and
   triggers. Step 4b writes them (see "How step 4b credits an invoice").
 - `payments` belong to the invoice they were recorded against
@@ -896,7 +897,7 @@ offline quote and invoice proof passing (`npm run qa:quote-invoice-proof`).
 | 0b. Tenancy foundation | `organizations`, `org_memberships`, `org_uid` and RLS on the existing catalogue, user and snapshot tables; a request-scoped transaction helper that sets `field.org_uid`; an RLS test that proves cross-tenant reads and writes fail | Two-org test suite passes |
 | 1. Catalogue schema | Migration: `type`, `category_uid`, `pricing_method`, `is_sold`, code `CHECK`, money precision, `kit_components` (from `item_components`), recipes out of json5, drop the empty `assembly_*` tables and unused columns, `audit_log`, `business_settings`. One `price()` function | Catalogue tests green. Every active item prices identically before and after, except cents rounding, which is recorded |
 | 2. Catalogue clean-up | Generate the code, type and category proposal CSV. The operator reviews it. Apply it | 0 generated or `-copy` codes, 0 untyped, 0 uncategorised |
-| 3. Quote tables | `quotes`, `quote_sections`, `quote_lines`, invoices, payments, events, issued documents (events, issued documents, quote rows and invoice rows are built, and invoices are issued and credited from rows: steps 2, 3, 4a and 4b parts one and two below). The quote service and one `quoteTotals`. Migrate all jobs, verified against sent PDFs to the cent | Every quote's totals match its PDF. New quotes are built only from rows |
+| 3. Quote tables | `quotes`, `quote_sections`, `quote_lines`, invoices, payments, events, issued documents (events, issued documents, quote rows and invoice rows are built, and invoices are issued and credited from rows: steps 2, 3, 4a and 4b below). The quote service and one `quoteTotals`. Migrate all jobs, verified against sent PDFs to the cent | Every quote's totals match its PDF. New quotes are built only from rows |
 | 3b. Jobs and the rest | `jobs`, `customers`, `contacts`, `job_notes`, `job_events`, `email_messages`, `email_templates`, `oauth_tokens`, `job_files`; migrate and verify every job; retire `field.db` and the file mirror | Nothing reads `DATA_DIR` except blobs |
 | 4. Strip the engine | Delete the removals list. Quote builder, PDF and email read only the new tables | ~30k lines gone; the proof passes |
 | 5. UI | Price book and drawer, then the quote builder, on Field's design system | The editing behaviour in "Price book UI" works; one catalogue editor |
@@ -960,7 +961,7 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 3, part two | Quote reads from rows (#10): display columns (migration 0011); the quote PDF, the quote email's totals, the job's cached totals and the job detail's customer pricing (client and MCP) come from the rows; editor saves carry `If-Match` | Built |
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
 | 4a | Invoices, payments and receipts as rows (#27): `payment_milestones`, `invoices`, `invoice_lines`, `payments`, `receipts`, and the shape of `credit_notes` (migration 0013); dual-write after every committed milestone change; a backfill verified against what was issued | Built |
-| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Parts one and two built (issue service, migration 0014; credit notes, migrations 0015 and 0016); claim lines next |
+| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (revisions made in place before them stay as issued); issue separate from email; claim-line invoice documents | Built (issue service, migration 0014; credit notes, migrations 0015 and 0016; claim-line documents) |
 | 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Later |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
@@ -1065,9 +1066,9 @@ How step 3 part two reads the quote tables (`server/quotes/read-model.js`,
   `FIELD_QUOTE_READS=files` sends every read to the files, for rollback.
   Reads are counted by source under `quoteReads` in
   `GET /api/storage/status`.
-- **What reads them.** The quote PDF (built, previewed and sent; invoices
-  and receipts still print the quote's schedule from the files until they
-  are rows), the quote email's totals, the job's cached totals (the job
+- **What reads them.** The quote PDF (built, previewed and sent; receipts
+  still print the quote's schedule from the files, and milestone invoices
+  print claim lines since step 4b), the quote email's totals, the job's cached totals (the job
   list), and the job detail's `customerPricing`, which the client and the
   MCP quote tool read.
 - **Saves.** `GET /api/jobs/:id` and every quote save answer with
@@ -1093,8 +1094,8 @@ nothing reads the rows yet. No customer document changes.
   invoice issued before revisions were frozen maps from its stored record.
   A draft milestone is a draft invoice under its provisional number. Totals
   are as issued and never recomputed. Payments keep their dates, method,
-  reference and void details. A paid milestone's receipt keeps its `ER-…`
-  number.
+  reference and void details. A paid milestone's receipt keeps the number
+  it was issued with (`ER-…`, or `RCT-…` since step 4b).
 - **Checks** (`sync.js`). Each issued invoice's subtotal, GST and total
   must equal its stored revision and, where its PDF can be read (the issued
   document's bytes, else the revision's stored PDF, hash-checked), the
@@ -1104,6 +1105,23 @@ nothing reads the rows yet. No customer document changes.
   drafts were built against an earlier quote, the difference is a warning:
   Field rebuilds them on the next milestone action. A job that fails is
   reported with both numbers, and nothing is written for it.
+- **What was sent decides (#60).** Before 2026-08-05, an invoice's milestone
+  record and its PDF could come from different quote versions. Where an
+  issued invoice disagrees with one of its PDFs:
+  - Field may hold hash-verified copies of the emailed PDF (an issued
+    document with an `emailed` event, or an issuance-ledger delivery;
+    `sent-copies.js`). If they agree, the rows take the emailed amounts, with
+    `tax_total_source = printed` and a reason that names both versions. That
+    is a warning, not a refusal. Every later sync of an unsettled legacy
+    invoice does the same, so the rows never conflict. A stored PDF that
+    differs from the emailed copy is reported as not the copy that was sent.
+  - Without such a copy, the job is refused. Its entry lists the archived
+    emails of the invoice: when it was sent, and the quote version it was
+    built against.
+  - An owner settles the invoice through
+    `GET`/`POST /api/admin/invoices/amount-disagreements`
+    (`amount-evidence.js`). A settled invoice's rows carry the settled
+    amounts, as printed, with the decision.
 - **Live.** After every committed job generation, after the quote rows,
   the recorder writes the job's invoice rows. After an invoice or receipt
   email the send path syncs again, so the rows link the issued document. A
@@ -1162,8 +1180,22 @@ number and bytes now come from PostgreSQL.
 - **Email is delivery.** The `emailed` event carries the hash of the bytes
   sent; a resend sends the stored bytes. A failed email is an `email_failed`
   event and never undoes the issue.
-- **Receipts** keep `ER-…-M<n>` in this step: they are not yet issued
-  through a service, and moving them to a sequence is a later change.
+- **Receipts** have their own series, `RCT-YYYY-M-N` (the month not
+  zero-padded: `RCT-2026-1-1`), from the same allocator as invoices and
+  credit notes (owner's decision, 2026-10-13). When a milestone that was
+  not paid becomes paid, `issueReceipt` allocates the number, renders the
+  receipt once with it and the `INV-…` invoice it pays ("For invoice:" in
+  its details), and stores it as an issued document with its `issued`
+  event; the milestone carries the number (`receiptNumber`,
+  `issuedReceipt`), and sending the receipt sends those stored bytes. The
+  receipt row is written by the dual-write, which names the payment. A
+  milestone that stops being paid (marked unpaid, a payment voided) keeps
+  the issued receipt in its `receiptHistory`, marked voided, and its row
+  becomes `void`; paying it again issues a new receipt. Receipts issued
+  before keep their `ER-…-M<n>` numbers, and a milestone paid before this
+  release keeps its receipt. Until it is paid, a milestone's receipt is
+  tracked under the provisional `ER-…-M<n>`. A stored receipt that was lost
+  is drawn again with its number, marked "Reconstructed copy".
 - **Without a database** the server installs an issuer that refuses, so
   authorising or sending an invoice answers 503; invoice and quote sends
   already need the database for their snapshots.
@@ -1239,3 +1271,34 @@ How step 4b credits an invoice (#28, part two; migration
   credit note's stored bytes go with the invoice (`attachCreditNote` on
   `POST /api/jobs/:id/email-quote`). Attaching other Field documents is
   part of the email editor's redesign.
+
+How step 4b prints a milestone invoice (#28, part three). Only invoices
+issued from now on change; an issued PDF never does.
+
+- **Claim lines, not the quote's schedule.** The PDF has one claim line per
+  milestone it bills, in plain words ("Deposit: 50% of the quoted price"),
+  with the quote on a quieter second line ("Quote EQ-2610-03, accepted 14
+  September 2026", or "sent …" when it was not accepted) and its subtotal,
+  GST and total. "Revision 2" is added only when the customer was sent more
+  than one version of the quote (the job's send history); a customer never
+  sees "v1" (owner, 2026-10-13; `server/invoices/customer-wording.js`). The
+  invoice rows keep their own line names with the quote version, for the
+  record. Then the claim box ("This claim (ex GST)", "GST (10%)", "Amount
+  Due", the labels `issued-totals.js` reads) and the quote summary, two
+  columns the width of the claim table: "All amounts include GST" once in
+  its heading, the same quote line, then contract value, previously claimed
+  and this claim, a hairline, and "Remaining after this claim" in bold.
+  Amounts are right-aligned in figures of one width. The quote's schedule
+  is not printed: the quote is its own document.
+- **A tax invoice.** An issued milestone invoice is titled "Tax invoice" and
+  prints what the ATO asks of one: the supplier's name and ABN, the date,
+  the recipient, a description of what is claimed and the GST, with the job
+  reference. A draft preview stays "Invoice" with "Draft, not yet issued".
+- **A lost PDF drawn again is marked "Reconstructed copy"** (owner,
+  2026-10-13). An invoice issued before step 4b (an `EI-…` number) is drawn
+  in the layout it was issued with: titled "Invoice", with the quote's
+  schedule and the claim box. One issued from the sequence (`INV-…`) is
+  drawn in the step 4b layout. An invoice not yet issued always uses the
+  step 4b layout.
+- A receipt prints as before, with its number and "For invoice: INV-…" in
+  its details. An invoice for a job with no milestones prints as before.

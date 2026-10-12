@@ -40,6 +40,7 @@ function printedPeriod(period) {
 export const SEQUENCE_PREFIXES = Object.freeze({
   invoice: "INV",
   credit_note: "CN",
+  receipt: "RCT",
 });
 
 /** PREFIX-YYYY-M-N for a document type, from the period YYYY-MM and the counter's value. */
@@ -90,5 +91,18 @@ export const CREDIT_NOTE_NUMBER_PATTERN = /^CN-(\d{4})-([1-9]|1[0-2])-([1-9]\d*)
 
 export function formatCreditNoteNumber(period, value) {
   return formatSequenceNumber("credit_note", period, value);
+}
+
+// Receipts (owner's decision, 2026-10-13): RCT-YYYY-M-N from the same
+// counters (document type `receipt`), allocated when a milestone is paid and
+// its receipt is issued. Receipts issued before keep their ER-… numbers.
+export const RECEIPT_NUMBER_PATTERN = /^RCT-(\d{4})-([1-9]|1[0-2])-([1-9]\d*)$/;
+
+export function formatReceiptNumber(period, value) {
+  return formatSequenceNumber("receipt", period, value);
+}
+
+export function isSequenceReceiptNumber(number) {
+  return RECEIPT_NUMBER_PATTERN.test(String(number || ""));
 }
 

@@ -1,4 +1,5 @@
 import { applyBusinessProfileOverride, businessDisplayName, businessNameOf, installationBusinessName } from "./business-profile.js";
+import { createHash } from "node:crypto";
 import { google } from "googleapis";
 import {
   googleServiceAccountCacheId,
@@ -234,6 +235,76 @@ export function resolveGmailLoginHint(config = {}, { user = null } = {}) {
   );
 }
 
+// The host part of the stable Message-ID a delivery attempt carries (#50).
+// It is the installation's own: `mail.messageIdHost` (or
+// FIELD_MAIL_MESSAGE_ID_HOST) when set, else the domain of the address Field
+// sends from, else a neutral reserved host. The Message-ID is stored with the
+// delivery attempt when it is prepared and never rebuilt, so a send prepared
+// before this change keeps its old host and Sent Mail is still searched for it.
+export const NEUTRAL_MESSAGE_ID_HOST = "field.invalid";
+const HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+
+export function resolveMessageIdHost({ config = {}, user = null, fromEmail = "" } = {}) {
+  const configured = normalizeEmail(process.env.FIELD_MAIL_MESSAGE_ID_HOST || config?.mail?.messageIdHost || "");
+  if (configured && HOST_PATTERN.test(configured)) return configured;
+  let sender = normalizeEmail(fromEmail);
+  if (!sender) {
+    try {
+      sender = resolveMailSender({ config, user }).fromEmail;
+    } catch {
+      sender = "";
+    }
+  }
+  const domain = sender.includes("@") ? sender.slice(sender.lastIndexOf("@") + 1) : "";
+  return HOST_PATTERN.test(domain) ? domain : NEUTRAL_MESSAGE_ID_HOST;
+}
+
+export function formatDeliveryMessageId(attemptId, host = NEUTRAL_MESSAGE_ID_HOST) {
+  return `<field-${cleanHeaderText(attemptId)}@${cleanHeaderText(host) || NEUTRAL_MESSAGE_ID_HOST}>`;
+}
+
+// messages.send takes the whole message in the JSON `raw` field only up to
+// about 5 MB (Google's simple-request limit); anything larger must use the
+// media upload form (/upload/gmail/v1/users/me/messages/send, up to 35 MB).
+// Small messages keep the JSON form they always used.
+export const GMAIL_RAW_JSON_MAX_CHARS = 4 * 1024 * 1024;
+
+export async function sendGmailMessage(gmail, raw, { threadId = null } = {}) {
+  const thread = threadId ? { threadId } : {};
+  if (raw.length <= GMAIL_RAW_JSON_MAX_CHARS) {
+    return gmail.users.messages.send({ userId: "me", requestBody: { raw, ...thread } }, GMAIL_SEND_REQUEST_OPTIONS);
+  }
+  return gmail.users.messages.send({
+    userId: "me",
+    requestBody: { ...thread },
+    media: { mimeType: "message/rfc822", body: Buffer.from(raw, "base64url") },
+  }, GMAIL_SEND_REQUEST_OPTIONS);
+}
+
+// What the result (and the sent-email archive) says about each extra
+// attachment: a Field document by uid and hash, an upload by size and hash.
+function describeExtraAttachment(attachment, index) {
+  const described = {
+    filename: attachment.filename || `attachment-${index + 1}`,
+    contentType: attachment.contentType || "application/octet-stream",
+  };
+  if (attachment.uid) {
+    Object.assign(described, {
+      source: "document",
+      uid: attachment.uid,
+      documentType: attachment.documentType || null,
+      number: attachment.number || null,
+    });
+  } else {
+    described.source = "upload";
+  }
+  if (attachment.buffer) {
+    described.byteLength = attachment.buffer.length;
+    described.sha256 = createHash("sha256").update(attachment.buffer).digest("hex");
+  }
+  return described;
+}
+
 export async function sendQuoteEmail(args) {
   return withGmailSendCeiling(performSendQuoteEmail(args), "sendQuoteEmail");
 }
@@ -256,6 +327,7 @@ async function performSendQuoteEmail({
   subjectOverride = null,
   additionalAttachments = [],
   deliveryAttemptId = null,
+  deliveryMessageId = null,
 }) {
   const recipients = assertAllowedQuoteRecipients({ config, emails: to, label: "recipient" });
   const ccRecipients = assertAllowedQuoteRecipients({ config, emails: cc, label: "cc", required: false });
@@ -277,43 +349,15 @@ async function performSendQuoteEmail({
     throw new Error("mail.fromEmail or FIELD_MAIL_FROM is required for quote sending.");
   }
 
-  const resolvedDocumentType = resolveJobDocumentType({ meta, documentType });
-  const documentLabelLower = getJobDocumentLabelLower(resolvedDocumentType);
-  const milestoneInvoice = meta?.milestoneInvoice || null;
-  const isReceipt = resolvedDocumentType === "receipt";
-  const isInvoice = resolvedDocumentType === "invoice";
-  const isPaymentDocument = isInvoice || isReceipt;
-  const documentRef = isInvoice
-    ? buildInvoiceDocumentNumber({ meta, quote, milestoneInvoice })
-    : isReceipt
-      ? buildReceiptDocumentNumber({ meta, quote, milestoneInvoice })
-      : (quote.quoteNumber || meta.quoteNumber || meta.id || null);
-  const defaultSubject = isPaymentDocument
-    ? [
-        isReceipt ? "Receipt" : "Invoice",
-        documentRef,
-        milestoneInvoice?.milestoneLabel || meta.title || meta.label || documentBusinessName(quote),
-      ].filter(Boolean).join(" — ")
-    : `${quote.delivery?.status === "final" ? "Quote" : "Quote Draft"} — ${meta.title || meta.label || documentBusinessName(quote)}`;
-  const subject = cleanHeaderText(subjectOverride) || defaultSubject;
-  const body = customBody ? stripHtml(customBody) : buildEmailBody({ meta, quote, documentType: resolvedDocumentType });
-
-  const quoteCatalog = quote.quoteCatalog || quote.profile || {};
-  const deliveryDefaults = quoteCatalog.deliveryDefaults || {};
-  const biz = applyBusinessProfileOverride(quoteCatalog.businessProfile || {});
-  // A quote email's totals come from the quote's rows (#10).
-  const rowsView = resolvedDocumentType === "quote" ? await loadQuoteRows({ quote, meta }) : null;
-  const htmlBody = buildEmailHtml({
+  const { subject, body, htmlBody, documentLabelLower } = await composeDocumentEmail({
     meta,
     quote,
-    totals: rowsView?.financials || null,
-    biz,
-    deliveryDefaults,
-    fromName: sender.fromName,
-    mode: emailMode,
+    documentType,
     customBody,
-    documentType: resolvedDocumentType,
+    subjectOverride,
+    emailMode,
     themeFontFamily,
+    fromName: sender.fromName,
   });
 
   const raw = buildMimeMessage({
@@ -331,15 +375,12 @@ async function performSendQuoteEmail({
     attachmentContentType: "application/pdf",
     additionalAttachments,
     deliveryAttemptId,
+    messageId: deliveryAttemptId
+      ? deliveryMessageId || formatDeliveryMessageId(deliveryAttemptId, resolveMessageIdHost({ config, user, fromEmail: sender.fromEmail }))
+      : null,
   });
 
-  const result = await gmail.users.messages.send(
-    {
-      userId: "me",
-      requestBody: { raw },
-    },
-    GMAIL_SEND_REQUEST_OPTIONS,
-  );
+  const result = await sendGmailMessage(gmail, raw);
 
   return {
     id: result.data.id,
@@ -360,12 +401,83 @@ async function performSendQuoteEmail({
         filename: quotePdfFilename || `${documentLabelLower}-v${String(quote.version || 1).padStart(3, "0")}.pdf`,
         contentType: "application/pdf",
       },
-      ...additionalAttachments.map((attachment, index) => ({
-        filename: attachment.filename || `attachment-${index + 1}`,
-        contentType: attachment.contentType || "application/octet-stream",
-      })),
+      ...additionalAttachments.map(describeExtraAttachment),
     ],
   };
+}
+
+/**
+ * The subject, plain text and HTML of a quote, invoice or receipt email:
+ * what the send builds and what the composer's preview shows
+ * (POST /api/jobs/:id/email-preview), from one function.
+ */
+export async function composeDocumentEmail({
+  meta,
+  quote,
+  documentType = null,
+  customBody = null,
+  subjectOverride = null,
+  emailMode = "summary",
+  themeFontFamily = null,
+  fromName = null,
+}) {
+  const resolvedDocumentType = resolveJobDocumentType({ meta, documentType });
+  const documentLabelLower = getJobDocumentLabelLower(resolvedDocumentType);
+  const subject = cleanHeaderText(subjectOverride) || defaultDocumentSubject({ meta, quote, documentType: resolvedDocumentType });
+  const body = customBody ? stripHtml(customBody) : buildEmailBody({ meta, quote, documentType: resolvedDocumentType });
+
+  const quoteCatalog = quote.quoteCatalog || quote.profile || {};
+  const deliveryDefaults = quoteCatalog.deliveryDefaults || {};
+  const biz = applyBusinessProfileOverride(quoteCatalog.businessProfile || {});
+  // A quote email's totals come from the quote's rows (#10).
+  const rowsView = resolvedDocumentType === "quote" ? await loadQuoteRows({ quote, meta }) : null;
+  const htmlBody = buildEmailHtml({
+    meta,
+    quote,
+    totals: rowsView?.financials || null,
+    biz,
+    deliveryDefaults,
+    fromName,
+    mode: emailMode,
+    customBody,
+    documentType: resolvedDocumentType,
+    themeFontFamily,
+  });
+  return { subject, body, htmlBody, resolvedDocumentType, documentLabelLower };
+}
+
+/** The subject a document email gets when the operator leaves it as it is. */
+export function defaultDocumentSubject({ meta, quote, documentType }) {
+  const resolvedDocumentType = resolveJobDocumentType({ meta, documentType });
+  const milestoneInvoice = meta?.milestoneInvoice || null;
+  const isReceipt = resolvedDocumentType === "receipt";
+  const isInvoice = resolvedDocumentType === "invoice";
+  const documentRef = isInvoice
+    ? buildInvoiceDocumentNumber({ meta, quote, milestoneInvoice })
+    : isReceipt
+      ? buildReceiptDocumentNumber({ meta, quote, milestoneInvoice })
+      : (quote?.quoteNumber || meta?.quoteNumber || meta?.id || null);
+  if (isInvoice || isReceipt) {
+    return [
+      isReceipt ? "Receipt" : "Invoice",
+      documentRef,
+      milestoneInvoice?.milestoneLabel || meta?.title || meta?.label || documentBusinessName(quote),
+    ].filter(Boolean).join(" — ");
+  }
+  return `${quote?.delivery?.status === "final" ? "Quote" : "Quote Draft"} — ${meta?.title || meta?.label || documentBusinessName(quote)}`;
+}
+
+/** The subject, plain text and HTML of a job email with no document of its own. */
+export function composeJobEmail({ meta, subject = null, customBody = null, themeFontFamily = null, fromName = null }) {
+  return {
+    subject: cleanHeaderText(subject) || defaultJobEmailSubject(meta),
+    htmlBody: wrapGenericEmailHtml({ customBody, fromName, themeFontFamily }),
+    body: stripHtml(customBody || ""),
+  };
+}
+
+export function defaultJobEmailSubject(meta) {
+  return `Job update — ${meta?.title || meta?.label || meta?.siteAddress || meta?.id || installationBusinessName()}`;
 }
 
 export async function sendJobEmail(args) {
@@ -403,13 +515,13 @@ async function performSendJobEmail({
     throw new Error("mail.fromEmail or FIELD_MAIL_FROM is required for email sending.");
   }
 
-  const resolvedSubject = cleanHeaderText(subject) || `Job update — ${meta?.title || meta?.label || meta?.siteAddress || meta?.id || installationBusinessName()}`;
-  const htmlBody = wrapGenericEmailHtml({
+  const { subject: resolvedSubject, htmlBody, body } = composeJobEmail({
+    meta,
+    subject,
     customBody,
-    fromName: sender.fromName,
     themeFontFamily,
+    fromName: sender.fromName,
   });
-  const body = stripHtml(customBody || "");
 
   const raw = buildMimeMessage({
     fromName: sender.fromName,
@@ -424,13 +536,7 @@ async function performSendJobEmail({
     additionalAttachments,
   });
 
-  const result = await gmail.users.messages.send(
-    {
-      userId: "me",
-      requestBody: { raw },
-    },
-    GMAIL_SEND_REQUEST_OPTIONS,
-  );
+  const result = await sendGmailMessage(gmail, raw);
 
   return {
     id: result.data.id,
@@ -446,10 +552,7 @@ async function performSendJobEmail({
     bcc: bccRecipients,
     bodyText: body,
     htmlBody,
-    attachments: additionalAttachments.map((attachment, index) => ({
-      filename: attachment.filename || `attachment-${index + 1}`,
-      contentType: attachment.contentType || "application/octet-stream",
-    })),
+    attachments: additionalAttachments.map(describeExtraAttachment),
   };
 }
 
@@ -702,6 +805,7 @@ export function buildMimeMessage({
   attachmentContentType,
   additionalAttachments = [],
   deliveryAttemptId = null,
+  messageId = null,
 }) {
   const mixedBoundary = `field-mixed-${Date.now()}`;
   const altBoundary = `field-alt-${Date.now()}`;
@@ -725,7 +829,7 @@ export function buildMimeMessage({
     `Subject: ${encodeHeader(subject)}`,
     ...(deliveryAttemptId
       ? [
-          `Message-ID: <field-${cleanHeaderText(deliveryAttemptId)}@arcforge.local>`,
+          `Message-ID: ${cleanHeaderText(messageId) || formatDeliveryMessageId(deliveryAttemptId)}`,
           `X-Field-Delivery-Attempt: ${cleanHeaderText(deliveryAttemptId)}`,
         ]
       : []),

@@ -35,11 +35,14 @@ import { GMAIL_SEND_TIMEOUT_MS } from "./send-quote-email.js";
 import { closeTestPriceCatalogs, createTestPriceCatalog, seedCatalogFromPriceMaps } from "./test-price-catalog.js";
 import { createQuoteSnapshotStore } from "./quote-snapshots.js";
 import { readQuoteIssuanceLedger } from "./quote-issuance.js";
-import { readPendingQuoteDelivery } from "./quote-delivery-outbox.js";
+import { readPendingQuoteDelivery, updatePendingQuoteDelivery } from "./quote-delivery-outbox.js";
 import { assertQuotePricingDisplayable, attachQuotePricingAttestation, buildQuotePricingAttestation, isIssuedQuoteVersion, isQuotePricingSendable, validateQuoteCommercialArtifact, withCurrentPricingVerdict } from "./quote-pricing-attestation.js";
 import { buildQuoteEditPolicy } from "./quote-edit-policy.js";
 import { readQuoteLifecycle, recordQuoteLanded } from "./quote-lifecycle.js";
 import { installTestInvoiceIssuer } from "./invoices/test-issuer.js";
+import { installInvoiceIssuer } from "./invoices/issue.js";
+import { PRE_4B_ISSUER } from "./invoices/test-fixtures.js";
+import { pdfTextRuns } from "./quotes/issued-totals.js";
 import { createBusinessSettingsService } from "./invoices/business-settings.js";
 import { creditNoteAttachment } from "./invoices/credit-note-attachment.js";
 import { createIssuedDocumentRecorder, installIssuedDocumentRecorder } from "./documents/recorder.js";
@@ -52,6 +55,7 @@ test.after(() => TEST_PRICE_CATALOG.close());
 const TEST_INVOICE_ISSUER = await installTestInvoiceIssuer();
 test.after(() => TEST_INVOICE_ISSUER.close());
 const SEQUENCE_NUMBER = /^INV-\d{4}-([1-9]|1[0-2])-[1-9]\d*$/;
+const RECEIPT_NUMBER = /^RCT-\d{4}-([1-9]|1[0-2])-[1-9]\d*$/;
 
 function createQuoteFixture(meta, overrides = {}) {
   return {
@@ -1437,8 +1441,15 @@ test("sendJobQuote can send a receipt for a paid landed milestone", async () => 
 
     assert.equal(result.meta.pipelineStage, "landed");
     assert.equal(result.milestoneInvoice.status, "paid");
-    assert.equal(result.milestoneInvoice.receiptNumber, "ER-REC-01-M1");
-    assert.equal(existsSync(join(jobDir, result.milestoneInvoice.receiptPdfPath)), true);
+    // Issued when the milestone was paid, from the RCT series; the receipt
+    // sent is the stored one.
+    assert.match(result.milestoneInvoice.receiptNumber, RECEIPT_NUMBER);
+    assert.equal(result.milestoneInvoice.issuedReceipt.number, result.milestoneInvoice.receiptNumber);
+    const receiptBytes = await readFile(join(jobDir, result.milestoneInvoice.receiptPdfPath));
+    assert.equal(createHash("sha256").update(receiptBytes).digest("hex"), result.milestoneInvoice.issuedReceipt.pdfSha256);
+    const runs = pdfTextRuns(receiptBytes);
+    assert.ok(runs.includes(result.milestoneInvoice.receiptNumber), runs.join(" | "));
+    assert.ok(runs.includes(`For invoice: ${result.milestoneInvoice.invoiceNumber}`), "the receipt names the invoice it pays");
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }
@@ -3053,7 +3064,9 @@ test("sendJobQuote keeps a timeout outcome unknown and reconciles the stable del
     const outboxPath = join(jobDir, "quote-delivery-outbox.json");
     const pending = JSON.parse(await readFile(outboxPath, "utf8"));
     assert.equal(pending.status, "unknown");
-    assert.equal(pending.messageId, `<field-${remoteAcceptedMessageId}@arcforge.local>`);
+    // The installation's own host (#50): the sender's domain here.
+    assert.match(pending.messageId, new RegExp(`^<field-${remoteAcceptedMessageId}@[a-z0-9.-]+>$`));
+    assert.doesNotMatch(pending.messageId, /arcforge/);
 
     await assert.rejects(
       () => sendJobQuote({
@@ -3093,6 +3106,110 @@ test("sendJobQuote keeps a timeout outcome unknown and reconciles the stable del
     assert.equal(issuanceLedger.records[0].quoteVersion, 1);
     assert.equal(issuanceLedger.records[0].artifacts.quotePdf.sha256.length, 64);
   } finally {
+    await rm(jobDir, { recursive: true, force: true });
+  }
+});
+
+// A stand-in for the issue service: the two reads the send path makes.
+function fakeDocumentStore(documents) {
+  return {
+    async listJobDocuments(jobId) {
+      return {
+        documents: documents.filter((entry) => entry.jobId === jobId).map(({ bytes, ...document }) => ({ ...document, events: document.events || [] })),
+        unattachedEvents: [],
+      };
+    },
+    async readIssuedDocument(uid) {
+      const found = documents.find((entry) => entry.uid === uid);
+      if (!found) return null;
+      const { bytes, events, ...document } = found;
+      return { document, bytes };
+    },
+  };
+}
+
+test("sendJobQuote attaches Field documents by uid, keeps only their references in the outbox, and reads them again for a pending attempt", async () => {
+  const jobDir = await mkdtemp(join(tmpdir(), "field-job-send-documents-"));
+  const attachmentEmails = [];
+  installIssuedDocumentRecorder({
+    enabled: true,
+    async recordDelivery() { return null; },
+    async recordEmailFailure() { return null; },
+    async recordInvoiceRevisions() { return null; },
+    async recordAttachmentEmails(input) { attachmentEmails.push(input); return []; },
+    status() { return { enabled: true }; },
+  });
+  try {
+    const meta = {
+      id: "job-send-documents-1",
+      title: "Documents test",
+      label: "Documents test",
+      outputMode: "quote",
+      pipelineStage: "draft",
+      quoteVersion: 1,
+      quoteNumber: "EQ-TEST-DOCS",
+      jobNumber: "JOB-TEST-DOCS",
+    };
+    await writeFile(join(jobDir, "meta.json"), JSON.stringify(meta, null, 2));
+    await writeFile(join(jobDir, "quote.json"), JSON.stringify(buildSendableQuoteFixture(meta, { version: 1 }), null, 2));
+    const plan = { uid: "doc_01JB8Z0000000000000000PLAN", jobId: meta.id, documentType: "receipt", number: "ER-TEST-M1", bytes: Buffer.from("%PDF-1.4 receipt\n") };
+    const otherJob = { uid: "doc_01JB8Z00000000000000000OTH", jobId: "job-other", documentType: "quote", number: "EQ-OTHER v1", bytes: Buffer.from("%PDF other") };
+    const store = fakeDocumentStore([plan, otherJob]);
+    const upload = { filename: "site-photo.jpg", contentType: "image/jpeg", buffer: Buffer.from("jpeg bytes") };
+
+    // Another job's document is refused before anything is prepared.
+    await assert.rejects(
+      () => sendJobQuote({ jobDir, meta, dataDir: jobDir, config: {}, to: "customer@example.invalid", documents: [otherJob.uid], documentService: store, sendEmail: async () => { throw new Error("must not send"); } }),
+      (error) => error.code === "DOCUMENT_OF_ANOTHER_JOB" && error.statusCode === 409,
+    );
+    assert.equal(await readPendingQuoteDelivery(jobDir), null, "nothing was prepared");
+
+    // A timeout leaves the attempt unknown; then it is put back to pending
+    // (as a crash before the claim would leave it) and dispatched again.
+    const sends = [];
+    await assert.rejects(() => sendJobQuote({
+      jobDir, meta, dataDir: jobDir, config: { mail: { fromEmail: "office@harlow.example.invalid" } }, to: "customer@example.invalid",
+      documents: [{ uid: plan.uid }], documentService: store, additionalAttachments: [upload],
+      sendEmail: async (args) => { sends.push(args); throw Object.assign(new Error("timed out"), { code: "ETIMEDOUT" }); },
+    }), /timed out/);
+    assert.deepEqual(sends[0].additionalAttachments.map((entry) => entry.filename), ["ER-TEST-M1.pdf", "site-photo.jpg"], "Field documents first, then uploads");
+    assert.ok(sends[0].additionalAttachments[0].buffer.equals(plan.bytes));
+    const outboxPath = join(jobDir, "quote-delivery-outbox.json");
+    const unknown = JSON.parse(await readFile(outboxPath, "utf8"));
+    assert.equal(sends[0].deliveryMessageId, unknown.messageId, "the stored Message-ID is the one sent");
+    assert.match(unknown.messageId, /@harlow\.example\.invalid>$/);
+    assert.deepEqual(unknown.documents, [{
+      uid: plan.uid, documentType: "receipt", number: "ER-TEST-M1", filename: "ER-TEST-M1.pdf",
+      sha256: createHash("sha256").update(plan.bytes).digest("hex"), byteLength: plan.bytes.length, status: "paid",
+    }]);
+    assert.doesNotMatch(JSON.stringify(unknown.documents), /receipt\\n/, "no bytes in the outbox");
+
+    // Pending again with the document's bytes changed since: refused for review.
+    await updatePendingQuoteDelivery(jobDir, unknown.attemptId, { status: "pending", claim: null });
+    const changedStore = fakeDocumentStore([{ ...plan, bytes: Buffer.from("%PDF-1.4 something else\n") }]);
+    await assert.rejects(
+      () => sendJobQuote({ jobDir, meta, dataDir: jobDir, config: {}, to: "customer@example.invalid", documentService: changedStore, sendEmail: async () => { throw new Error("must not send"); } }),
+      (error) => error.code === "DOCUMENT_BYTES_CHANGED",
+    );
+    assert.equal(JSON.parse(await readFile(outboxPath, "utf8")).status, "failed", "the attempt is retired, never dispatched");
+    // Pending with the same bytes: dispatched with the recorded document.
+    await updatePendingQuoteDelivery(jobDir, unknown.attemptId, { status: "pending", claim: null });
+    const result = await sendJobQuote({
+      jobDir, meta, dataDir: jobDir, config: {}, to: "customer@example.invalid", documentService: store,
+      sendEmail: async (args) => {
+        sends.push(args);
+        return { id: "gmail-docs-1", threadId: "thread-docs-1", subject: "Quote", to: ["customer@example.invalid"], cc: [], bcc: [], attachments: [] };
+      },
+    });
+    assert.equal(result.id, "gmail-docs-1");
+    assert.equal(sends[1].deliveryMessageId, unknown.messageId);
+    assert.ok(sends[1].additionalAttachments[0].buffer.equals(plan.bytes));
+    assert.equal(attachmentEmails.length, 1);
+    assert.equal(attachmentEmails[0].email.messageId, "gmail-docs-1");
+    assert.deepEqual(attachmentEmails[0].attachments.map((entry) => entry.uid), [plan.uid]);
+    assert.equal(attachmentEmails[0].withDocument.documentType, "quote");
+  } finally {
+    installIssuedDocumentRecorder(null);
     await rm(jobDir, { recursive: true, force: true });
   }
 });
@@ -3982,7 +4099,67 @@ test("paid milestone invoices write receipt artifacts and markJobMilestoneUnpaid
     assert.equal(unpaidMilestone.amountDue, unpaidMilestone.total);
     assert.equal(unpaidMilestone.issuedAt, null);
     assert.deepEqual(unpaidMilestone.payments, []);
-    assert.equal(existsSync(receiptPath), false);
+    // The receipt was issued (RCT-…): it stays, voided in the milestone's
+    // receipt history, and the milestone goes back to its provisional number.
+    assert.match(paidMilestone.receiptNumber, RECEIPT_NUMBER);
+    assert.ok(existsSync(receiptPath), "an issued receipt's PDF is kept");
+    assert.equal(unpaidMilestone.issuedReceipt, undefined);
+    assert.equal(unpaidMilestone.receiptNumber, "ER-TEST-RECEIPT-M1");
+    assert.equal(existsSync(join(jobDir, unpaidMilestone.receiptPdfPath)), false);
+    assert.deepEqual(unpaidMilestone.receiptHistory.map((receipt) => [receipt.number, Boolean(receipt.voidedAt)]), [[paidMilestone.receiptNumber, true]]);
+
+    // Paying it again issues a new receipt.
+    const reauthorised = await updateJobMilestone({ jobDir, meta: unpaid.meta, config: {}, milestoneIndex: 0, patch: { status: "authorised" } });
+    const repaid = await recordJobMilestonePayment({
+      jobDir,
+      meta: reauthorised.meta,
+      config: {},
+      milestoneIndex: 0,
+      payment: { amount: firstMilestone.total, date: "2026-03-29", reference: "EFT-RECEIPT-2", method: "manual" },
+    });
+    const repaidMilestone = repaid.meta.milestoneInvoices[0];
+    assert.match(repaidMilestone.receiptNumber, RECEIPT_NUMBER);
+    assert.notEqual(repaidMilestone.receiptNumber, paidMilestone.receiptNumber);
+  } finally {
+    await rm(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("a milestone paid before the RCT series keeps its ER receipt number", async () => {
+  const jobDir = await mkdtemp(join(tmpdir(), "field-job-receipt-legacy-"));
+  try {
+    const meta = {
+      id: "job-receipt-legacy-1",
+      title: "Legacy receipt test",
+      label: "Legacy receipt test",
+      outputMode: "quote",
+      pipelineStage: "landed",
+      deliveryStatus: "landed",
+      quoteVersion: 1,
+      quoteSentAt: "2026-03-27T00:00:00.000Z",
+      quoteNumber: "EQ-TEST-LEGACY",
+      jobNumber: "JOB-TEST-LEGACY",
+    };
+    const quote = createQuoteFixture(meta, { version: 1, quoteNumber: "EQ-TEST-LEGACY", totals: { subtotal: 200, gst: 20, total: 220, currency: "AUD" } });
+    await writeFile(join(jobDir, "meta.json"), JSON.stringify(meta, null, 2));
+    await writeFile(join(jobDir, "quote.json"), JSON.stringify(quote, null, 2));
+    const generated = await generateJobMilestones({ jobDir, meta, config: {}, paymentSchedule: { milestones: [{ label: "Deposit", percentage: 50 }, { label: "Completion", percentage: 50 }] } });
+    const authorised = await updateJobMilestone({ jobDir, meta: generated.meta, config: {}, milestoneIndex: 0, patch: { status: "authorised" } });
+    // Paid under a release before the RCT series.
+    installInvoiceIssuer(PRE_4B_ISSUER);
+    let paid;
+    try {
+      paid = await recordJobMilestonePayment({ jobDir, meta: authorised.meta, config: {}, milestoneIndex: 0, payment: { amount: authorised.meta.milestoneInvoices[0].total, date: "2026-03-28", reference: "EFT-LEGACY-1", method: "manual" } });
+    } finally {
+      installInvoiceIssuer(TEST_INVOICE_ISSUER.service);
+    }
+    assert.equal(paid.meta.milestoneInvoices[0].receiptNumber, "ER-TEST-LEGACY-M1");
+    // After the release, work on the job leaves that receipt as it was.
+    const later = await updateJobMilestone({ jobDir, meta: paid.meta, config: {}, milestoneIndex: 1, patch: { status: "authorised" } });
+    const deposit = later.meta.milestoneInvoices[0];
+    assert.equal(deposit.status, "paid");
+    assert.equal(deposit.receiptNumber, "ER-TEST-LEGACY-M1");
+    assert.equal(deposit.issuedReceipt, undefined);
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }
@@ -5432,7 +5609,7 @@ test("a job stored before artifactState (pdfIssuedAt/pdfUnrecoverable, no artifa
   }
 });
 
-test("a legacy issued invoice with a missing PDF is reconstructed from its pinned quote version, stamped, and audited — not silently re-rendered from the current quote", async () => {
+test("a legacy issued invoice with a missing PDF is never redrawn from its inferred quote version, yet a payment on it is recorded; restoring the file is the way back", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-legacy-reconstruct-"));
 
   try {
@@ -5484,31 +5661,52 @@ test("a legacy issued invoice with a missing PDF is reconstructed from its pinne
     const changed = { ...quote, version: 2, summary: "Changed after the fact — must not be used to reconstruct" };
     await writeFile(join(jobDir, "quote.json"), JSON.stringify(changed, null, 2));
 
+    // The legacy record has no recorded quote version: the one its frozen
+    // revision gets (v2, current at the freeze) is inferred, not the one its
+    // PDF was drawn from. Field must not redraw the PDF from that guess and
+    // store it under the original issue time as if it were the document the
+    // customer was sent. Its PDF stays MISSING (downloads answer 410), but
+    // payment and status actions do not need the bytes and go ahead.
     const hydrated = await readJobMeta(jobDir);
-    const resynced = await updateJobMilestone({
+    const paid = await recordJobMilestonePayment({
       jobDir,
       meta: hydrated,
       config: {},
       milestoneIndex: 0,
+      payment: { amount: 100, date: "2026-06-01", method: "bank_transfer" },
+    });
+    const legacy = paid.meta.milestoneInvoices[0];
+    assert.equal(legacy.amountPaid, 100, "the payment is recorded");
+    assert.equal(legacy.issuedRevision.artifactState, ARTIFACT_STATE.MISSING);
+    assert.match(legacy.issuedRevision.pdfUnrecoverableReason, /not redrawn from a guessed version/);
+    assert.ok(!existsSync(join(jobDir, "milestone-invoices", "EI-RECON-01-M1.pdf")), "no PDF was drawn");
+    const updated = await updateJobMilestone({
+      jobDir,
+      meta: await readJobMeta(jobDir),
+      config: {},
+      milestoneIndex: 0,
       patch: { dueDate: "2026-06-01" },
     });
-
-    const legacyResult = resynced.meta.milestoneInvoices[0];
-    assert.ok(legacyResult.issuedRevision, "the legacy record synthesized an issued revision");
-    // Reconstruction must stamp `pdfIssuedAt` so the revision reads as
-    // genuinely issued on every later read (the read path depends on this
-    // being reliable) and record a real sha for the newly
-    // written bytes.
-    assert.ok(legacyResult.issuedRevision.pdfIssuedAt, "pdfIssuedAt was stamped on reconstruction");
-    assert.ok(legacyResult.issuedRevision.pdfSha256, "a sha was recorded for the reconstructed bytes");
-
-    const reconstructedPath = join(jobDir, "milestone-invoices", "EI-RECON-01-M1.pdf");
-    assert.ok(existsSync(reconstructedPath), "the reconstructed PDF was written to disk");
-
+    assert.equal(updated.meta.milestoneInvoices[0].dueDate, "2026-06-01");
     const { activity } = await readJobState(jobDir);
-    const reconstructedActivity = activity.find((entry) => entry.kind === "invoice.artifact_reconstructed");
-    assert.ok(reconstructedActivity, "an invoice.artifact_reconstructed activity event was recorded");
-    assert.match(reconstructedActivity.body, /EI-RECON-01-M1/);
+    assert.ok(!activity.some((entry) => entry.kind === "invoice.artifact_reconstructed"));
+    assert.equal(activity.filter((entry) => entry.kind === "invoice.artifact_unrecoverable").length, 1, "said once, not on every action");
+    const read = await resolveIssuedMilestoneInvoiceArtifact({ jobDir, documentType: "invoice", milestoneInvoice: updated.meta.milestoneInvoices[0] });
+    assert.equal(read.gone, true, "the download still answers 410");
+
+    // Restoring the file is the way back: the next action adopts it as it is.
+    const restored = Buffer.from("%PDF-1.3 restored copy of the sent invoice\n");
+    await mkdir(join(jobDir, "milestone-invoices"), { recursive: true });
+    await writeFile(join(jobDir, "milestone-invoices", "EI-RECON-01-M1.pdf"), restored);
+    const adopted = await updateJobMilestone({
+      jobDir,
+      meta: await readJobMeta(jobDir),
+      config: {},
+      milestoneIndex: 0,
+      patch: { dueDate: "2026-06-01" },
+    });
+    assert.equal(adopted.meta.milestoneInvoices[0].issuedRevision.artifactState, ARTIFACT_STATE.STORED);
+    assert.deepEqual(await readFile(join(jobDir, "milestone-invoices", "EI-RECON-01-M1.pdf")), restored);
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }
@@ -5642,31 +5840,25 @@ test("an unrecoverable issued artifact on one milestone does not block a mutatio
   }
 });
 
-test("an explicit action targeting the unrecoverable invoice itself still fails loudly with a 410", async () => {
+test("a status action on the unrecoverable invoice itself goes ahead and leaves it MISSING; its download still answers 410", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-unrecoverable-explicit-"));
 
   try {
     await seedJobWithBrokenLegacyMilestoneZero(jobDir, { pinPdfVersion: false });
 
     const hydrated = await readJobMeta(jobDir);
-    await assert.rejects(
-      () => updateJobMilestone({
-        jobDir,
-        meta: hydrated,
-        config: {},
-        milestoneIndex: 0,
-        patch: { dueDate: "2026-06-01" },
-      }),
-      (err) => {
-        assert.equal(err.statusCode, 410);
-        return true;
-      },
-    );
-
-    // The failed explicit action must not have persisted a partial/degraded
-    // state — the previous meta.json is untouched.
-    const stillHydrated = await readJobMeta(jobDir);
-    assert.equal(stillHydrated.milestoneInvoices[0].dueDate ?? null, null);
+    const updated = await updateJobMilestone({
+      jobDir,
+      meta: hydrated,
+      config: {},
+      milestoneIndex: 0,
+      patch: { dueDate: "2026-06-01" },
+    });
+    const milestone0 = updated.meta.milestoneInvoices[0];
+    assert.equal(milestone0.dueDate, "2026-06-01");
+    assert.equal(milestone0.issuedRevision.artifactState, ARTIFACT_STATE.MISSING);
+    const read = await resolveIssuedMilestoneInvoiceArtifact({ jobDir, documentType: "invoice", milestoneInvoice: milestone0 });
+    assert.equal(read.gone, true);
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }

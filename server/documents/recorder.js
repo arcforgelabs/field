@@ -14,6 +14,9 @@
 //                                 (or find it issued) and add an `emailed`
 //                                 event with the Gmail message id
 //   recordEmailFailure(input)     an `email_failed` event
+//   recordAttachmentEmails(input) an `emailed` event (role attachment) for each
+//                                 Field document attached to an email next
+//                                 to the document it was for
 //   recordInvoiceRevisions(dir)   every milestone's active issued invoice
 //                                 revision, after the generation that issued
 //                                 it commits
@@ -33,6 +36,7 @@ const NOOP = Object.freeze({
   enabled: false,
   async recordDelivery() { return null; },
   async recordEmailFailure() { return null; },
+  async recordAttachmentEmails() { return null; },
   async recordInvoiceRevisions() { return null; },
   status() { return { enabled: false, reason: "not installed" }; },
 });
@@ -189,6 +193,47 @@ export function createIssuedDocumentRecorder({ service, logger = console }) {
     }
   }
 
+  // Each Field document attached to an email gets its own `emailed` event
+  // with the Gmail message id, keyed emailed:<messageId>:<uid>, so a retried
+  // record changes nothing. The email's own document keeps recordDelivery.
+  async function recordAttachmentEmails({ jobId, attachments = [], email = {}, withDocument = null }) {
+    const results = [];
+    for (const attachment of attachments) {
+      try {
+        const messageId = email.messageId || null;
+        const key = messageId
+          ? `emailed:${messageId}:${attachment.uid}`
+          : email.attemptId ? `emailed:attempt:${email.attemptId}:${attachment.uid}` : null;
+        const result = await service.recordEvent({
+          issuedDocumentUid: attachment.uid,
+          jobId,
+          documentType: attachment.documentType,
+          event: "emailed",
+          at: email.sentAt,
+          by: actorLabel(email.by),
+          data: {
+            role: "attachment",
+            pdfSha256: attachment.sha256 || null,
+            messageId,
+            threadId: email.threadId || null,
+            attemptId: email.attemptId || null,
+            to: addresses(email.to),
+            cc: addresses(email.cc),
+            bcc: addresses(email.bcc),
+            subject: email.subject || null,
+            ...(withDocument ? { withDocument } : {}),
+          },
+          idempotencyKey: key,
+        });
+        if (result?.created) state.emailed += 1;
+        results.push(result);
+      } catch (error) {
+        results.push(fail("attached document email", error, { jobId, number: attachment.number }));
+      }
+    }
+    return results;
+  }
+
   // After a generation that may have issued an invoice commits: record each
   // milestone's active issued revision, with the bytes its PDF was stored
   // with. An already-recorded revision is skipped before its bytes are sent.
@@ -233,6 +278,7 @@ export function createIssuedDocumentRecorder({ service, logger = console }) {
     service,
     recordDelivery,
     recordEmailFailure,
+    recordAttachmentEmails,
     recordInvoiceRevisions,
     status() {
       return { ...state, lastError: state.lastError ? { ...state.lastError } : null };
@@ -243,18 +289,20 @@ export function createIssuedDocumentRecorder({ service, logger = console }) {
 /** A server with no database: every call is skipped, with one log line per kind. */
 export function createUnavailableIssuedDocumentRecorder(reason, { logger = console } = {}) {
   const logged = new Set();
-  const skipped = { delivery: 0, emailFailure: 0, invoiceRevisions: 0 };
+  const skipped = { delivery: 0, emailFailure: 0, attachmentEmails: 0, invoiceRevisions: 0 };
   const skip = (kind) => {
     skipped[kind] += 1;
     if (logged.has(kind)) return null;
     logged.add(kind);
-    logger.warn(`[issued-documents] ${reason}: issued ${kind === "invoiceRevisions" ? "invoice revisions" : kind === "emailFailure" ? "email failures" : "deliveries"} are not recorded in PostgreSQL (the job files still hold them)`);
+    const what = { invoiceRevisions: "invoice revisions", emailFailure: "email failures", attachmentEmails: "attached document emails" }[kind] || "deliveries";
+    logger.warn(`[issued-documents] ${reason}: issued ${what} are not recorded in PostgreSQL (the job files still hold them)`);
     return null;
   };
   return {
     enabled: false,
     async recordDelivery() { return skip("delivery"); },
     async recordEmailFailure() { return skip("emailFailure"); },
+    async recordAttachmentEmails() { return skip("attachmentEmails"); },
     async recordInvoiceRevisions() { return skip("invoiceRevisions"); },
     status() { return { enabled: false, reason, skipped: { ...skipped } }; },
   };

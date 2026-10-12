@@ -45,6 +45,11 @@ export const PRE_4B_ISSUER = Object.freeze({
       invoice: { number: invoice.number, reference: null, invoiceUid: null, issuedDocumentUid: null, pdfSha256: sha256Hex(pdfBytes), pdfBytes, issuedAt: new Date(issuedAt).toISOString() },
     };
   },
+  // Before the RCT series nothing issued a receipt: it kept the milestone's
+  // ER-… number and was drawn when it was written or sent.
+  async issueReceipt() {
+    return null;
+  },
 });
 
 const ACTOR = { kind: "user", label: "Test Operator" };
@@ -139,6 +144,107 @@ export async function applyVariation(jobDir, quote, [label, amount] = ["Rock cla
     await write(join(stagedJobDir, "meta.json"), { ...meta, quoteVersion: variation.version });
   });
   return variation;
+}
+
+/** A milestone's claim on a quote: `percent` of its subtotal, with GST at 10 %. */
+export function claimOf(quote, percent) {
+  const subtotal = Math.round(quote.totals.subtotal * percent) / 100;
+  const gst = Math.round(subtotal * 10) / 100;
+  return { subtotal, gst, total: Math.round((subtotal + gst) * 100) / 100 };
+}
+
+/** An invoice PDF for a milestone claiming `amounts`, drawn from `quote` (how Field rendered one before revisions were frozen). */
+export async function renderLegacyInvoicePdf({ meta, quote, milestone, amounts, milestones = [milestone] }) {
+  const drawn = { ...milestone, ...amounts };
+  const prepared = prepareMilestoneInvoiceDocument({ meta: { ...meta, milestoneInvoices: milestones.map((entry) => (entry.milestoneIndex === drawn.milestoneIndex ? drawn : entry)) }, quote, milestoneInvoice: drawn, documentType: "invoice" });
+  return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "invoice", creationDate: new Date(milestone.issuedAt) });
+}
+
+/**
+ * A job shaped like the production jobs of the invoice-version bug: a 30 %
+ * deposit invoiced and emailed in July 2026, before invoice revisions were
+ * frozen, against quote v1; quote v2 (a variation) accepted since. Before the
+ * freeze every milestone action re-allocated the deposit's record from the
+ * quote then current, and re-rendered its PDF only when the action targeted
+ * it, so the record and the PDF can each come from a different version:
+ *
+ *   recordVersion   the version the milestone record's amounts come from
+ *   pdfVersion      the version the stored PDF's claim comes from
+ *   sentVersion     the version the archived invoice email says it was
+ *                   built against (sent-emails.jsonl)
+ *
+ * Nothing is frozen yet: the next milestone action, through today's code,
+ * adopts the record as the issued snapshot and the file as its PDF.
+ * Returns { jobDir, meta, quotes, claims, pdf, number }.
+ */
+export async function createLegacyVersionMismatchJob(dataDir, { id, number, recordVersion, pdfVersion, sentVersion = pdfVersion }) {
+  const jobDir = join(dataDir, "2026-07-01", id);
+  const meta = { ...landedMeta({ id, number }), quoteVersion: 2, landedAt: "2026-07-01T00:00:00.000Z" };
+  const quotes = {
+    1: invoiceQuote(meta, { version: 1, rows: [["Earthworks", 12000]] }),
+    2: invoiceQuote(meta, { version: 2, rows: [["Earthworks", 12000], ["Variation", 3500]] }),
+  };
+  const claims = { 1: claimOf(quotes[1], 30), 2: claimOf(quotes[2], 30) };
+  const invoiceNumber = `EI-${number}-M1`;
+  const deposit = {
+    id: `${id}-m1`,
+    jobId: id,
+    milestoneIndex: 0,
+    milestoneLabel: "Deposit",
+    invoiceNumber,
+    receiptNumber: `ER-${number}-M1`,
+    reference: `EQ-${number}`,
+    percentage: 30,
+    ...claims[recordVersion],
+    currency: "AUD",
+    lineItems: [{ description: "Earthworks", quantity: 1, unit: "lot", unitPrice: claims[recordVersion].subtotal, totalPrice: claims[recordVersion].subtotal }],
+    dueDate: "2026-07-24",
+    issuedAt: "2026-07-10T01:00:00.000Z",
+    status: "authorised",
+    payments: [],
+    pdfPath: `milestone-invoices/${invoiceNumber}.pdf`,
+  };
+  const completion = {
+    id: `${id}-m2`,
+    jobId: id,
+    milestoneIndex: 1,
+    milestoneLabel: "Completion",
+    invoiceNumber: `EI-${number}-M2`,
+    receiptNumber: `ER-${number}-M2`,
+    reference: `EQ-${number}`,
+    percentage: 70,
+    subtotal: 0,
+    gst: 0,
+    total: 0,
+    currency: "AUD",
+    lineItems: [],
+    status: "draft",
+    payments: [],
+    pdfPath: `milestone-invoices/EI-${number}-M2.pdf`,
+  };
+  await write(join(jobDir, "meta.json"), meta);
+  await write(join(jobDir, "quote-versions/v001/quote.json"), quotes[1]);
+  await write(join(jobDir, "quote.json"), quotes[2]);
+  const pdf = await renderLegacyInvoicePdf({ meta, quote: quotes[pdfVersion], milestone: deposit, amounts: claims[pdfVersion], milestones: [deposit, completion] });
+  await write(join(jobDir, deposit.pdfPath), pdf);
+  await write(join(jobDir, "milestone-invoices/state.json"), {
+    version: 1,
+    paymentSchedule: { milestones: [{ label: "Deposit", percentage: 30 }, { label: "Completion", percentage: 70 }] },
+    milestoneInvoices: [deposit, completion],
+  });
+  await write(join(jobDir, "sent-emails.jsonl"), `${JSON.stringify({
+    id: `sent-${id}`,
+    ts: deposit.issuedAt,
+    kind: "invoice.sent",
+    documentType: "invoice",
+    messageId: `msg-${id}`,
+    to: ["customer@example.invalid"],
+    subject: `Invoice ${invoiceNumber}`,
+    attachments: [{ filename: `${invoiceNumber} — Sam Customer — Synthetic scope — Invoice.pdf`, contentType: "application/pdf" }],
+    quoteVersion: sentVersion,
+    milestoneIndex: 0,
+  })}\n`);
+  return { jobDir, meta, quotes, claims, pdf, number: invoiceNumber, deposit, completion };
 }
 
 /**

@@ -5,6 +5,7 @@ import {
 } from "./quote-presentation.js";
 import { normalizePipelineStage } from "./pipeline.js";
 import {
+  AMOUNT_SETTLEMENT_SOURCES,
   buildInvoiceRevisionNumber,
   findInvoiceRevision,
   listInvoiceRevisions,
@@ -845,6 +846,42 @@ export function buildMilestoneInvoicePdfPath(milestoneInvoice = null) {
   return `${MILESTONE_INVOICE_DIR}/${safeInvoiceNumber}.pdf`;
 }
 
+// The receipt a paid milestone was issued (owner's decision, 2026-10-13):
+// RCT-YYYY-M-N from the issue service, the invoice it pays, the payment that
+// cleared the milestone and its stored PDF. Null for a milestone not paid
+// since the RCT series began (its receipt keeps the ER-… number).
+export function normalizeIssuedReceipt(receipt = null) {
+  if (!receipt || typeof receipt !== "object") return null;
+  const number = cleanText(receipt.number);
+  if (!number) return null;
+  return {
+    number,
+    issuedAt: normalizeIsoTimestamp(receipt.issuedAt),
+    invoiceNumber: cleanText(receipt.invoiceNumber) || null,
+    paymentId: cleanText(receipt.paymentId) || null,
+    amount: roundMoney(receipt.amount),
+    pdfPath: cleanText(receipt.pdfPath) || null,
+    pdfSha256: cleanText(receipt.pdfSha256) || null,
+    issuedDocumentUid: cleanText(receipt.issuedDocumentUid) || null,
+    ...(receipt.voidedAt ? { voidedAt: normalizeIsoTimestamp(receipt.voidedAt) } : {}),
+  };
+}
+
+function normalizeReceiptHistory(history = []) {
+  return (Array.isArray(history) ? history : []).map(normalizeIssuedReceipt).filter(Boolean);
+}
+
+// The receipt fields a milestone carries only once it has them, so the state
+// of a milestone never paid under the RCT series is unchanged.
+function receiptFields(milestoneInvoice = null) {
+  const issuedReceipt = normalizeIssuedReceipt(milestoneInvoice?.issuedReceipt);
+  const receiptHistory = normalizeReceiptHistory(milestoneInvoice?.receiptHistory);
+  return {
+    ...(issuedReceipt ? { issuedReceipt } : {}),
+    ...(receiptHistory.length ? { receiptHistory } : {}),
+  };
+}
+
 export function buildMilestoneReceiptPdfPath(milestoneInvoice = null) {
   const fallback = `receipt-${Number(milestoneInvoice?.milestoneIndex || 0) + 1}`;
   const safeReceiptNumber = String(milestoneInvoice?.receiptNumber || fallback)
@@ -954,6 +991,7 @@ export function normalizeStoredMilestoneInvoices(milestoneInvoices = []) {
           receiptNumber,
           milestoneIndex,
         }),
+        ...receiptFields(milestoneInvoice),
       };
     })
     .sort((a, b) => a.milestoneIndex - b.milestoneIndex);
@@ -1388,6 +1426,7 @@ export function buildMilestoneInvoices({
       payments,
       pdfPath: issuedRevision?.pdfPath || pdfPath,
       receiptPdfPath: cleanText(existingMilestone?.receiptPdfPath) || buildMilestoneReceiptPdfPath({ receiptNumber, milestoneIndex }),
+      ...receiptFields(existingMilestone),
     };
   });
 
@@ -1452,6 +1491,108 @@ export function applyMilestoneInvoiceRevisionState(milestoneInvoice = null, {
     issuedAt: issuedRevision?.issuedAt || (isIssued ? (issuedAt || milestoneInvoice.issuedAt || null) : null),
     pdfPath: issuedRevision?.pdfPath || pdfPath,
   };
+}
+
+/**
+ * Record an owner's decision about which amounts an issued invoice revision
+ * was actually issued for (`settleJobMilestoneInvoiceAmounts`). For legacy
+ * invoices from before revisions were frozen, the milestone record and the
+ * stored PDF can come from different quote versions; the owner picks one of
+ * the sets Field holds, and this applies it to the revision (active or
+ * superseded) with who, when and why, keeping the amounts the record held
+ * before under `amountsSettlement.recorded`. A revision is settled once.
+ * Pure: returns { milestoneInvoices, milestoneIndex, revision, recorded }.
+ */
+export function settleMilestoneInvoiceRevision({
+  milestoneInvoices = [],
+  invoiceNumber = null,
+  source = null,
+  amounts = null,
+  storedPdfSha256 = null,
+  storedPdfTotal = null,
+  sentSha256 = null,
+  actor = null,
+  reason = null,
+  at = null,
+} = {}) {
+  const cleanedReason = cleanText(reason);
+  if (!cleanedReason) throw createError("a reason is required to settle an invoice's amounts", 400);
+  if (!AMOUNT_SETTLEMENT_SOURCES.includes(source)) {
+    throw createError(`choose one of ${AMOUNT_SETTLEMENT_SOURCES.join(", ")}`, 400);
+  }
+  const number = cleanText(invoiceNumber);
+  const subtotal = roundMoney(amounts?.subtotal);
+  const gst = roundMoney(amounts?.gst);
+  const total = roundMoney(amounts?.total);
+  if (toCents(subtotal) + toCents(gst) !== toCents(total)) {
+    throw createError(`the amounts do not add up: ${subtotal} + GST ${gst} is not ${total}`, 400);
+  }
+  const decidedAt = normalizeIsoTimestamp(at) || new Date().toISOString();
+  let found = null;
+
+  const settle = (revision, milestoneIndex) => {
+    if (revision.amountsSettlement) {
+      throw createError(`invoice ${number} was already settled on ${revision.amountsSettlement.decidedAt || "an earlier date"}`, 409);
+    }
+    const recorded = { subtotal: roundMoney(revision.subtotal), gst: roundMoney(revision.gst), total: roundMoney(revision.total) };
+    const lineItems = normalizeMilestoneLineItems(revision.lineItems);
+    let settledLines = lineItems;
+    if (toCents(subtotal) !== toCents(recorded.subtotal)) {
+      const allocations = allocateCents(subtotal, lineItems.map((item) => Number(item.totalPrice || 0))).map(fromCents);
+      settledLines = lineItems.length
+        ? lineItems.map((item, index) => ({
+            ...item,
+            totalPrice: allocations[index],
+            unitPrice: roundMoney(item.quantity > 0 ? allocations[index] / item.quantity : allocations[index]),
+          }))
+        : [{ description: "Claim", quantity: 1, unit: "lot", unitPrice: subtotal, totalPrice: subtotal, accountCode: null, sourceCode: null }];
+    }
+    const settled = normalizeInvoiceRevision({
+      ...revision,
+      subtotal,
+      gst,
+      total,
+      lineItems: settledLines,
+      amountsSettlement: {
+        source,
+        subtotal,
+        gst,
+        total,
+        recorded,
+        storedPdfSha256,
+        storedPdfTotal,
+        sentSha256,
+        decidedBy: actor,
+        decidedAt,
+        reason: cleanedReason,
+      },
+    });
+    found = { milestoneIndex, revision: settled, recorded };
+    return settled;
+  };
+
+  const next = (Array.isArray(milestoneInvoices) ? milestoneInvoices : []).map((milestone) => {
+    if (found || !milestone) return milestone;
+    if (milestone.issuedRevision?.invoiceNumber === number) {
+      const issuedRevision = settle(normalizeInvoiceRevision(milestone.issuedRevision), milestone.milestoneIndex);
+      return {
+        ...milestone,
+        issuedRevision,
+        subtotal: issuedRevision.subtotal,
+        gst: issuedRevision.gst,
+        total: issuedRevision.total,
+        lineItems: issuedRevision.lineItems,
+      };
+    }
+    const history = Array.isArray(milestone.revisionHistory) ? milestone.revisionHistory : [];
+    const position = history.findIndex((entry) => entry?.invoiceNumber === number);
+    if (position < 0) return milestone;
+    const revisionHistory = [...history];
+    revisionHistory[position] = settle(normalizeInvoiceRevision(history[position]), milestone.milestoneIndex);
+    return { ...milestone, revisionHistory };
+  });
+  if (!found) throw createError(`no issued invoice ${number} on this job`, 404);
+  return { milestoneInvoices: next, ...found };
 }
 
 export function updateMilestoneInvoice({

@@ -17,7 +17,9 @@ import {
   createUnavailableInvoiceIssuer,
   formatCreditNoteNumber,
   formatInvoiceNumber,
+  formatReceiptNumber,
   invoiceIssueKey,
+  receiptIssueKey,
   invoiceIssuer,
   invoicePeriod,
   isSequenceInvoiceNumber,
@@ -320,6 +322,46 @@ describe("invoice issue service", () => {
     await assert.rejects(settings.update({ creditNoteOnReissue: "sometimes" }), /must be one of when-emailed, always, never/);
     await settings.update({ creditNoteOnReissue: "when-emailed" }, { actor: "owner-1" });
     assert.deepEqual(await settings.get(), { creditNoteOnReissue: "when-emailed", updatedAt: (await settings.get()).updatedAt, updatedBy: "owner-1" });
+  });
+
+  test("receipts: RCT-YYYY-M-N from their own counter, stored with the invoice they pay; a retry replays", async () => {
+    const issuedAt = "2026-10-12T02:00:00.000Z";
+    const period = invoicePeriod(new Date(issuedAt));
+    const invoicesBefore = await counterOf("invoice", period);
+    const receiptsBefore = await counterOf("receipt", period);
+    const receipt = (key, overrides = {}) => a.issueReceipt({
+      jobId: "job-receipts",
+      idempotencyKey: key,
+      issuedAt,
+      issuedBy: "user-1",
+      invoiceNumber: "INV-2026-10-1",
+      quoteVersion: 2,
+      details: { milestoneIndex: 0, amount: 440 },
+      render: async (number) => {
+        renders.push(number);
+        return pdfFor(number);
+      },
+      ...overrides,
+    });
+    const first = await receipt(receiptIssueKey({ jobId: "job-receipts", milestoneIndex: 0, paymentId: "pay-1", invoiceNumber: "INV-2026-10-1" }));
+    assert.equal(first.number, formatReceiptNumber(period, receiptsBefore + 1));
+    assert.equal(first.replayed, false);
+    assert.equal(renders.at(-1), first.number);
+    const documents = createIssuedDocumentService({ db: t.db, orgUid: ORG_A });
+    const stored = await documents.readIssuedDocument(first.issuedDocumentUid);
+    assert.deepEqual([stored.document.documentType, stored.document.number, stored.document.details.invoiceNumber], ["receipt", first.number, "INV-2026-10-1"]);
+    assert.deepEqual(stored.bytes, first.pdfBytes);
+
+    const rendered = renders.length;
+    const again = await receipt(receiptIssueKey({ jobId: "job-receipts", milestoneIndex: 0, paymentId: "pay-1", invoiceNumber: "INV-2026-10-1" }), { issuedAt: "2026-10-13T02:00:00.000Z" });
+    assert.deepEqual([again.replayed, again.number, again.issuedDocumentUid, again.issuedAt], [true, first.number, first.issuedDocumentUid, first.issuedAt]);
+    assert.equal(renders.length, rendered, "not rendered again");
+
+    const second = await receipt(receiptIssueKey({ jobId: "job-receipts", milestoneIndex: 0, paymentId: "pay-2", invoiceNumber: "INV-2026-10-1" }));
+    assert.equal(second.number, formatReceiptNumber(period, receiptsBefore + 2));
+    assert.equal(await counterOf("invoice", period), invoicesBefore, "receipts do not use invoice numbers");
+    await rejects(receipt("no-invoice", { invoiceNumber: null }), /a receipt names the invoice it pays/);
+    await rejects(createUnavailableInvoiceIssuer("this server has no database").issueReceipt({}), /receipts are issued in PostgreSQL/);
   });
 
   test("the issue key names the job, milestone, revision and money", () => {

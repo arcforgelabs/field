@@ -11,6 +11,13 @@ function refused(message, statusCode) {
   return error;
 }
 
+/** The number of the adjustment note the milestone's current invoice was issued in place of, or null. */
+export async function creditNoteNumberFor({ jobDir, milestoneIndex = 0 }) {
+  const meta = await readJobMeta(jobDir);
+  const milestone = (meta?.milestoneInvoices || []).find((entry) => Number(entry.milestoneIndex) === Number(milestoneIndex ?? 0));
+  return milestone?.issuedRevision?.creditNoteNumber || null;
+}
+
 /** { filename, contentType, buffer } for the milestone's current invoice, or throws (409 none, 410 bytes unreadable). */
 export async function creditNoteAttachment({ jobDir, milestoneIndex = 0, issuedDocuments = null }) {
   const meta = await readJobMeta(jobDir);

@@ -71,6 +71,11 @@ test("through SET ROLE field_app: the issue allocates, stores and writes with th
   assert.match(credited.creditNote.number, /^CN-\d{4}-([1-9]|1[0-2])-1$/);
   const [moved] = await withOrg(db, DEFAULT_ORG_UID, (tx) => queryRows(sql`select (select count(*) from payment_allocations)::int as allocations, (select amount_paid from invoices where uid = ${credited.invoice.invoiceUid}) as paid`, tx));
   assert.deepEqual(moved, { allocations: 1, paid: "50.00" });
+  // A receipt from its own series, and its replay by key, with the same grants.
+  const receipt = await service.issueReceipt({ jobId: "job-app", idempotencyKey: "app-receipt-1", issuedAt: "2026-10-13T03:00:00.000Z", invoiceNumber: credited.invoice.number, render: async (number) => Buffer.from(`%PDF-1.4\n${number}\n%%EOF\n`) });
+  assert.match(receipt.number, /^RCT-\d{4}-([1-9]|1[0-2])-1$/);
+  const receiptReplay = await service.issueReceipt({ jobId: "job-app", idempotencyKey: "app-receipt-1", issuedAt: "2026-10-13T03:00:00.000Z", invoiceNumber: credited.invoice.number, render: async () => { throw new Error("not rendered again"); } });
+  assert.deepEqual([receiptReplay.replayed, receiptReplay.number], [true, receipt.number]);
 });
 
 test("as a table owner without CREATEROLE: concurrent issues are numbered 1..n, a failed one leaves no gap, organisations do not share a sequence", { skip: !enabled && "set FIELD_DB_TEST_DOCKER=1 or FIELD_DB_TEST_DATABASE_URL" }, async () => {

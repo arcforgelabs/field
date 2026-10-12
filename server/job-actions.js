@@ -7,6 +7,8 @@ import {
   assertMilestoneScheduleWithinQuoteTotal,
   buildMilestoneInvoicePdfPath,
   buildMilestoneInvoices,
+  buildMilestoneReceiptNumber,
+  buildMilestoneReceiptPdfPath,
   findMilestoneInvoice,
   getJobDocumentLabel,
   isMilestoneInvoiceIssued,
@@ -19,13 +21,14 @@ import {
   recordMilestoneInvoicePayment,
   resolveJobDocumentType,
   resolveRequestedMilestoneInvoice,
+  settleMilestoneInvoiceRevision,
   sumActiveMilestonePayments,
   updateMilestoneInvoice,
   validateInvoicePaidAmount,
   voidMilestoneInvoicePayment,
 } from "./job-documents.js";
 import { buildAndPersistQuote, buildQuoteInStagedGeneration, readQuoteOverrides } from "./quote-workflow.js";
-import { findSentMessageByDeliveryAttempt, sendQuoteEmail } from "./send-quote-email.js";
+import { findSentMessageByDeliveryAttempt, resolveMessageIdHost, sendQuoteEmail } from "./send-quote-email.js";
 import { appendSentEmailArchive } from "./sent-email-archive.js";
 import { appendJobActivity, listOpenSendBlockingGaps, readJobState } from "./job-state.js";
 import { generateEvidenceQuoteMarkdown } from "./generate-evidence-quote.js";
@@ -51,15 +54,26 @@ import { buildQuoteEditPolicy, shouldForkQuoteMutation } from "./quote-edit-poli
 import { queueStagedPostCommit, runAtomicJobGeneration } from "./job-generation.js";
 import { recordIssuedQuoteDocuments } from "./quote-issuance.js";
 import { buildQuoteSnapshotRecord } from "./quote-snapshots.js";
-import { recordDeliveredDocument, recordFailedDelivery } from "./documents/delivery.js";
+import { describeDeliveredDocument, recordAttachedDocumentsEmailed, recordDeliveredDocument, recordFailedDelivery } from "./documents/delivery.js";
+import { applyMergeFields, applyMergeFieldsToText } from "../shared/email-templates.js";
+import { buildEmailMergeValues } from "./email-merge-fields.js";
+import {
+  assertEmailAttachmentLimits,
+  documentAttachmentRecord,
+  documentMimeAttachments,
+  loadDocumentAttachments,
+} from "./documents/email-attachments.js";
 import { quoteRowRecorder } from "./quotes/recorder.js";
 import { invoiceRowRecorder } from "./invoices/recorder.js";
 import { quoteRowsFromArtifact } from "./quotes/read-model.js";
 import { issuedDocumentRecorder } from "./documents/recorder.js";
 import { invoiceRevisionDetails, partiesDetails } from "./documents/job-sources.js";
-import { creditIssueKey, invoiceIssueKey, invoiceIssuer, mapCreditNoteForIssue, mapInvoiceForIssue } from "./invoices/issue.js";
+import { creditIssueKey, invoiceIssueKey, invoiceIssuer, mapCreditNoteForIssue, mapInvoiceForIssue, receiptIssueKey } from "./invoices/issue.js";
 import { quoteTaxRatePercent } from "./quotes/from-artifact.js";
 import { claimDescription, customerQuoteReference, quoteReferenceLine } from "./invoices/customer-wording.js";
+import { invoiceAmountEvidence } from "./invoices/amount-evidence.js";
+import { collectSentInvoiceCopies } from "./invoices/sent-copies.js";
+import { toCents } from "./quotes/totals.js";
 import { applyQuoteCatalogChanges, computeQuoteCatalogChanges, upgradeOrganizerCatalogLinks } from "./quote-catalog-sync.js";
 import {
   buildQuoteDeliveryAttempt,
@@ -1022,7 +1036,7 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
       quote,
       milestoneInvoice: issuing,
     });
-    return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "invoice" });
+    return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "invoice", jobDir });
   };
   const stored = (issued, result) => ({
     ...issued,
@@ -1155,6 +1169,99 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
   return current;
 }
 
+function isMilestonePaid(entry) {
+  return Boolean(entry) && Number(entry.amountPaid || 0) > 0 && (entry.status === "paid" || Number(entry.amountDue || 0) <= 0);
+}
+
+// Issue the receipt of every milestone this call pays (owner's decision,
+// 2026-10-13): when a milestone that was not paid becomes paid, the issue
+// service allocates RCT-YYYY-M-N, renders the receipt once with that number
+// and the invoice it pays, and stores it; the milestone then carries the
+// number and the exact stored bytes are written at its receipt path. A
+// milestone paid before (its receipt keeps its ER-… number) or with no
+// earlier state (a legacy job being migrated) is left as it is. A milestone
+// that stops being paid (marked unpaid, a payment voided) keeps its issued
+// receipt in its receipt history, marked voided, and goes back to its
+// provisional ER-… number; paying it again issues a new receipt.
+async function issueNewMilestoneReceipts({ jobDir, meta, quote, paymentSchedule = null, milestoneInvoices = [], actor = null }) {
+  const prior = new Map(normalizeStoredMilestoneInvoices(meta?.milestoneInvoices || []).map((entry) => [entry.milestoneIndex, entry]));
+  const normalized = normalizeStoredMilestoneInvoices(milestoneInvoices);
+  const toIssue = normalized.filter((entry) => isMilestonePaid(entry) && !entry.issuedReceipt && prior.has(entry.milestoneIndex) && !isMilestonePaid(prior.get(entry.milestoneIndex)));
+  const toVoid = normalized.filter((entry) => !isMilestonePaid(entry) && entry.issuedReceipt);
+  if (!toIssue.length && !toVoid.length) return milestoneInvoices;
+  const jobId = String(meta?.id || "").trim();
+  const schedule = paymentSchedule || meta?.paymentSchedule || null;
+  const issuedBy = actorLabel(actor);
+  let current = milestoneInvoices;
+  const replace = (index, next) => {
+    current = current.map((other) => (other.milestoneIndex === index ? next : other));
+  };
+  const raw = (entry) => current.find((other) => other.milestoneIndex === entry.milestoneIndex) || entry;
+  const provisional = (entry) => {
+    const receiptNumber = buildMilestoneReceiptNumber({ meta, quote, milestoneIndex: entry.milestoneIndex, milestoneInvoice: { ...entry, receiptNumber: null } });
+    return { receiptNumber, receiptPdfPath: buildMilestoneReceiptPdfPath({ receiptNumber, milestoneIndex: entry.milestoneIndex }) };
+  };
+
+  for (const entry of toVoid) {
+    const voidedAt = new Date().toISOString();
+    replace(entry.milestoneIndex, {
+      ...raw(entry),
+      ...provisional(entry),
+      issuedReceipt: null,
+      receiptHistory: [...(entry.receiptHistory || []), { ...entry.issuedReceipt, voidedAt }],
+    });
+  }
+
+  for (const entry of toIssue) {
+    const payment = (entry.payments || []).filter((candidate) => !candidate?.voidedAt).at(-1) || null;
+    const invoiceNumber = entry.issuedRevision?.invoiceNumber || entry.invoiceNumber;
+    const issuedAt = new Date().toISOString();
+    const withNumber = (number) => ({
+      ...raw(entry),
+      receiptNumber: number,
+      receiptPdfPath: buildMilestoneReceiptPdfPath({ receiptNumber: number, milestoneIndex: entry.milestoneIndex }),
+    });
+    const result = await invoiceIssuer().issueReceipt({
+      jobId,
+      idempotencyKey: receiptIssueKey({ jobId, milestoneIndex: entry.milestoneIndex, paymentId: payment?.id, invoiceNumber }),
+      issuedAt,
+      issuedBy,
+      invoiceNumber,
+      quoteVersion: entry.issuedRevision?.quoteVersion || null,
+      details: { milestoneIndex: entry.milestoneIndex, milestoneLabel: entry.milestoneLabel, paymentId: payment?.id || null, amount: entry.amountPaid, ...partiesDetails({ meta, quote }) },
+      render: (number) => {
+        const issuing = withNumber(number);
+        const prepared = prepareMilestoneInvoiceDocument({
+          meta: { ...meta, ...(schedule ? { paymentSchedule: schedule } : {}), milestoneInvoices: current.map((other) => (other.milestoneIndex === entry.milestoneIndex ? issuing : other)) },
+          quote,
+          milestoneInvoice: issuing,
+          documentType: "receipt",
+        });
+        return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "receipt", jobDir });
+      },
+    });
+    // An issuer standing in for a release before the RCT series issues none:
+    // the receipt keeps its ER-… number, as it did then.
+    if (!result) continue;
+    const issued = withNumber(result.number);
+    await writeIssuedInvoicePdf({ jobDir, relativePdfPath: issued.receiptPdfPath, pdfBuffer: result.pdfBytes });
+    replace(entry.milestoneIndex, {
+      ...issued,
+      issuedReceipt: {
+        number: result.number,
+        issuedAt: result.issuedAt,
+        invoiceNumber,
+        paymentId: payment?.id || null,
+        amount: entry.amountPaid,
+        pdfPath: issued.receiptPdfPath,
+        pdfSha256: result.pdfSha256,
+        issuedDocumentUid: result.issuedDocumentUid || null,
+      },
+    });
+  }
+  return current;
+}
+
 async function persistMilestoneInvoiceState({
   jobDir,
   meta,
@@ -1164,6 +1271,10 @@ async function persistMilestoneInvoiceState({
   artifactMilestoneIndex = null,
   // Who is acting, for the record of an invoice this call issues.
   actor = null,
+  // The caller delivers the targeted invoice's bytes (send, revise), so an
+  // unrecoverable PDF must stop it (410). Payment and status actions do not
+  // need the bytes: they leave a missing PDF MISSING and carry on.
+  requireArtifact = false,
   // Requests every milestone's artifact captured this pass, including a
   // draft's preview render — a sweep convenience, e.g. previewing every
   // milestone up front right after generating a schedule. It used to ALSO
@@ -1174,6 +1285,7 @@ async function persistMilestoneInvoiceState({
   writeAllArtifacts = false,
 } = {}) {
   milestoneInvoices = await issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule, milestoneInvoices, actor });
+  milestoneInvoices = await issueNewMilestoneReceipts({ jobDir, meta, quote, paymentSchedule, milestoneInvoices, actor });
   let nextMeta = applyMilestoneInvoiceCompatFields({
     ...meta,
     ...(paymentSchedule ? { paymentSchedule } : {}),
@@ -1239,6 +1351,18 @@ async function persistMilestoneInvoiceState({
     (milestoneInvoices || []).map((entry) => [entry.milestoneIndex, entry]),
   );
 
+  // A legacy invoice whose PDF is missing can adopt the hash-verified copy
+  // Field emailed (#60), read once per call and only when one is needed.
+  let sentCopies = null;
+  const findSentCopy = async (invoiceNumber) => {
+    sentCopies ??= await collectSentInvoiceCopies({
+      jobDir,
+      jobId: nextMeta?.id ? String(nextMeta.id) : null,
+      issuedDocuments: issuedDocumentRecorder().service || null,
+    }).catch(() => ({ copiesFor: () => [] }));
+    return sentCopies.copiesFor(invoiceNumber);
+  };
+
   for (const entry of artifactTargets) {
     const isExplicitTarget = explicitTargetIndexes.has(entry.milestoneIndex);
     const priorState = deriveArtifactState(entry.issuedRevision);
@@ -1250,13 +1374,16 @@ async function persistMilestoneInvoiceState({
         meta: nextMeta,
         quote,
         milestoneInvoice: rawMilestoneInvoicesByIndex.get(entry.milestoneIndex) || entry,
+        findSentCopy,
       });
       transition = invoiceArtifact.artifactTransition;
     } catch (err) {
-      // Explicit target: the caller acted on this milestone directly — fail
-      // loudly. An unrecoverable issued artifact answers 410 and must stop the
-      // action that targets it.
-      if (isExplicitTarget) throw err;
+      // Explicit target of an action that delivers the document (send,
+      // revise): fail loudly. An unrecoverable issued artifact answers 410
+      // and must stop it. Any other failure on an explicit target (not a
+      // missing PDF) fails loudly too.
+      const missing = err.artifactTransition?.toState === ARTIFACT_STATE.MISSING;
+      if (isExplicitTarget && (requireArtifact || !missing)) throw err;
       // Implicit target: this milestone was swept in opportunistically —
       // "capture any not-yet-stored issued revision while we're here" — not
       // because the caller acted on it. An opportunistic background repair
@@ -1277,7 +1404,8 @@ async function persistMilestoneInvoiceState({
         invoiceNumber: entry.invoiceNumber,
         revisionNumber: entry.issuedRevision?.revisionNumber ?? null,
         reconstructed: Boolean(invoiceArtifact?.reconstructed),
-        quoteVersionInferred: Boolean(invoiceArtifact?.quoteVersionInferred),
+        adoptedClaimDiffers: invoiceArtifact?.adoptedClaimDiffers || null,
+        adoptedFrom: invoiceArtifact?.adoptedFrom || null,
       });
     }
 
@@ -1363,6 +1491,31 @@ async function persistMilestoneInvoiceState({
   await recordIssuedInvoiceRevisionsAfterCommit(jobDir, nextMeta);
 
   for (const [milestoneIndex, info] of artifactTransitionsByIndex) {
+    if (info.toState === ARTIFACT_STATE.STORED && info.adoptedFrom) {
+      await appendJobActivity({
+        jobDir,
+        activity: {
+          kind: "invoice.artifact_restored_from_sent_copy",
+          ts: new Date().toISOString(),
+          actor: { kind: "system", label: "Field" },
+          title: "Invoice PDF restored from the copy emailed",
+          body: `The stored PDF for ${info.invoiceNumber || `milestone ${milestoneIndex + 1}`} was missing and has been restored from the copy Field emailed (${info.adoptedFrom}, checked against its recorded hash).`,
+        },
+      });
+    }
+    if (info.toState === ARTIFACT_STATE.STORED && info.adoptedClaimDiffers) {
+      await appendJobActivity({
+        jobDir,
+        activity: {
+          kind: "invoice.adopted_pdf_differs",
+          ts: new Date().toISOString(),
+          actor: { kind: "system", label: "Field" },
+          title: "Invoice PDF and record disagree",
+          body: `The stored PDF for ${info.invoiceNumber || `milestone ${milestoneIndex + 1}`} claims ${info.adoptedClaimDiffers.printedTotal}, but its milestone record holds ${info.adoptedClaimDiffers.recordedTotal}. It was issued before invoice revisions were frozen, when Field could redraw one without the other. An owner settles which amount was sent (GET /api/admin/invoices/amount-disagreements).`,
+        },
+      });
+      continue;
+    }
     if (info.toState === ARTIFACT_STATE.STORED && info.reconstructed) {
       await appendJobActivity({
         jobDir,
@@ -1371,7 +1524,7 @@ async function persistMilestoneInvoiceState({
           ts: new Date().toISOString(),
           actor: { kind: "system", label: "Field" },
           title: "Invoice PDF reconstructed",
-          body: `The stored PDF for ${info.invoiceNumber || `milestone ${milestoneIndex + 1}`}${info.revisionNumber ? ` (revision ${info.revisionNumber})` : ""} was missing and has been reconstructed from ${info.quoteVersionInferred ? "the best available quote version — inferred, not necessarily the version it was originally rendered from, because this is a legacy invoice from before invoice revisions were tracked" : "the quote version it was originally issued against"}.`,
+          body: `The stored PDF for ${info.invoiceNumber || `milestone ${milestoneIndex + 1}`}${info.revisionNumber ? ` (revision ${info.revisionNumber})` : ""} was missing and has been reconstructed from the quote version it was originally issued against.`,
         },
       });
       continue;
@@ -1764,6 +1917,9 @@ async function prepareQuoteDeliveryAttempt({
   sendPolicy,
   scheduledEmailId,
   scheduledAt,
+  attachedDocuments = [],
+  messageIdHost,
+  uploadNames = [],
 }) {
   let preparedMeta = resolvedMeta;
   let preparedQuote = deliveryQuote;
@@ -1833,6 +1989,7 @@ async function prepareQuoteDeliveryAttempt({
         paymentSchedule: preparedMeta.paymentSchedule || null,
         milestoneInvoices,
         artifactMilestoneIndex: preparedMilestoneInvoice.milestoneIndex,
+        requireArtifact: true,
         actor: user,
       });
       preparedMeta = persisted.meta;
@@ -1909,21 +2066,39 @@ async function prepareQuoteDeliveryAttempt({
     );
   }
   const preparedReportMarkdown = selectedReport.report || preparedQuoteMarkdown;
+  // Merge fields are filled now, from the document as prepared (an invoice
+  // issued by this send has its number), and the attempt keeps the result:
+  // every dispatch and retry sends exactly this text.
+  const mergeValues = (customBody || subjectOverride) ? buildEmailMergeValues({
+    meta: preparedMeta,
+    quote: preparedQuote,
+    documentType: resolvedDocumentType,
+    milestoneInvoice: preparedMilestoneInvoice,
+    config,
+    user,
+    attachmentNames: [quotePdfFilename, ...attachedDocuments.map((document) => document.filename), ...uploadNames],
+  }) : null;
+  const mergedBody = customBody && mergeValues ? applyMergeFields(customBody, mergeValues, { final: true }) : customBody;
+  const mergedSubject = subjectOverride && mergeValues ? applyMergeFieldsToText(subjectOverride, mergeValues, { final: true }) : subjectOverride;
   const pendingAttempt = buildQuoteDeliveryAttempt({
     quoteVersion: selectedVersion || preparedQuote.version || preparedMeta.quoteVersion,
     documentType: resolvedDocumentType,
     to,
     cc,
-    subject: subjectOverride || null,
+    subject: mergedSubject || null,
     quoteMarkdown: preparedQuoteMarkdown,
     reportMarkdown: preparedReportMarkdown,
     quotePdf: quotePdfBuffer,
     preparedQuote,
     preparedMeta,
+    messageIdHost,
   });
   Object.assign(pendingAttempt, {
+    // Field documents attached by uid: the reference and hash, never the
+    // bytes. A dispatch reads them again from the issued-document store.
+    documents: attachedDocuments.map(documentAttachmentRecord),
     bcc: Array.isArray(bcc) ? bcc : [],
-    customBody: customBody || null,
+    customBody: mergedBody || null,
     validatedInvoicePaidAmount,
     selectedVersion,
     preparedMilestoneInvoice,
@@ -1972,7 +2147,13 @@ export async function sendJobQuote({
   scheduledAt = null,
   sendEmail = sendQuoteEmail,
   reconcileSentDelivery = null,
+  // Field documents to attach by uid ([{ uid }], or the records a queued send
+  // kept), read from `documentService` (the issue service; the installed
+  // recorder's when not given).
+  documents = [],
+  documentService = undefined,
 }) {
+  const documentStore = documentService === undefined ? issuedDocumentRecorder().service || null : documentService;
   // Reconcile an existing attempt before reading mutable current quote state.
   // The outbox embeds the exact prepared quote/meta/bytes; retrying from the
   // current draft could deliver a different document under the old Message-ID.
@@ -1988,6 +2169,7 @@ export async function sendJobQuote({
         sendEmail,
         themeFontFamily,
         additionalAttachments,
+        documentStore,
       });
     }
     let reconciled = null;
@@ -2041,6 +2223,7 @@ export async function sendJobQuote({
       pendingArtifacts,
       scheduledEmailId: pendingDelivery.scheduledEmailId || null,
       scheduledAt: pendingDelivery.scheduledAt || null,
+      attachedDocuments: pendingDelivery.documents || [],
       expectedPreparedVersion: pendingDocumentType === "quote"
         && pendingDelivery.resendLockedQuoteVersion !== true
         && Number(pendingDelivery.quoteVersion || pendingDelivery.preparedQuote.version)
@@ -2126,6 +2309,17 @@ export async function sendJobQuote({
     && !sendPolicy.selectedIsLatest
   );
 
+  // Field documents attached by uid are read (and refused: another job's, a
+  // missing one, bytes that fail their hash, too much in total) before
+  // anything is prepared or issued.
+  const attachedDocuments = await loadDocumentAttachments({
+    service: documentStore,
+    jobId: resolvedMeta?.id || meta?.id,
+    refs: documents,
+    meta: resolvedMeta,
+  });
+  assertEmailAttachmentLimits({ documents: attachedDocuments, uploads: additionalAttachments });
+
   const prepared = await runAtomicJobGeneration(jobDir, async (stagedJobDir) => (
     prepareQuoteDeliveryAttempt({
       jobDir: stagedJobDir,
@@ -2149,6 +2343,9 @@ export async function sendJobQuote({
       sendPolicy,
       scheduledEmailId,
       scheduledAt,
+      attachedDocuments,
+      messageIdHost: resolveMessageIdHost({ config, user }),
+      uploadNames: (additionalAttachments || []).map((attachment) => attachment?.filename).filter(Boolean),
     })
   ));
   let {
@@ -2161,6 +2358,34 @@ export async function sendJobQuote({
     preparedReportMarkdown,
     pendingAttempt,
   } = prepared;
+  // Now the email's own document is known: it cannot also be attached, and
+  // with it the email must still fit. A refusal here retires the prepared
+  // attempt, which was provably never dispatched.
+  try {
+    const mainDocument = describeDeliveredDocument({
+      documentType: resolvedDocumentType,
+      preparedMeta,
+      preparedQuote,
+      preparedMilestoneInvoice,
+      version: selectedVersion || preparedQuote?.version || preparedMeta?.quoteVersion || null,
+    });
+    if (attachedDocuments.length) {
+      await loadDocumentAttachments({
+        service: documentStore,
+        jobId: resolvedMeta?.id || meta?.id,
+        refs: attachedDocuments.map(documentAttachmentRecord),
+        mainDocument: { documentType: resolvedDocumentType, number: mainDocument.number },
+        meta: resolvedMeta,
+      });
+    }
+    assertEmailAttachmentLimits({ mainBytes: quotePdfBuffer?.length || 0, documents: attachedDocuments, uploads: additionalAttachments });
+  } catch (error) {
+    await updatePendingQuoteDelivery(jobDir, pendingAttempt.attemptId, {
+      status: "failed",
+      error: String(error?.message || error),
+    }).catch(() => {});
+    throw error;
+  }
   await recordPreparedDeliverySnapshot({ jobDir, config, attempt: pendingAttempt, user });
   const claim = await claimPendingQuoteDelivery(jobDir, {
     attemptId: pendingAttempt.attemptId,
@@ -2188,13 +2413,15 @@ export async function sendJobQuote({
     to,
     cc,
     bcc,
-    customBody,
+    // As the attempt stored them, merge fields filled.
+    customBody: pendingAttempt.customBody || null,
     documentType: resolvedDocumentType,
     invoicePaidAmount: validatedInvoicePaidAmount,
     themeFontFamily,
-    subjectOverride,
-    additionalAttachments,
+    subjectOverride: pendingAttempt.subject || null,
+    additionalAttachments: [...documentMimeAttachments(attachedDocuments), ...additionalAttachments],
       deliveryAttemptId: pendingAttempt.attemptId,
+      deliveryMessageId: pendingAttempt.messageId || null,
     });
   } catch (error) {
     // A timeout or process interruption may have happened after Gmail accepted
@@ -2233,6 +2460,7 @@ export async function sendJobQuote({
     pendingAttemptId: pendingAttempt.attemptId,
     scheduledEmailId,
     scheduledAt,
+    attachedDocuments: pendingAttempt.documents || [],
     expectedPreparedVersion: resolvedDocumentType === "quote" && !resendLockedQuoteVersion
       ? expectedPreparedVersion
       : null,
@@ -2269,11 +2497,30 @@ async function dispatchPendingQuoteDelivery({
   sendEmail,
   themeFontFamily,
   additionalAttachments,
+  documentStore = null,
 }) {
   if (!pendingDelivery.preparedQuote || !pendingDelivery.preparedMeta) {
     const pendingError = new Error("pending quote delivery is missing its immutable prepared state");
     pendingError.statusCode = 409;
     throw pendingError;
+  }
+  // The attempt's Field documents, read again by uid: still the bytes that
+  // were recorded, and not credited or voided since. Otherwise the attempt
+  // is retired (never dispatched) and the send is refused for review.
+  let attachedDocuments = [];
+  try {
+    attachedDocuments = await loadDocumentAttachments({
+      service: documentStore,
+      jobId: pendingDelivery.preparedMeta?.id,
+      refs: pendingDelivery.documents || [],
+      meta: pendingDelivery.preparedMeta,
+    });
+  } catch (error) {
+    await updatePendingQuoteDelivery(jobDir, pendingDelivery.attemptId, {
+      status: "failed",
+      error: String(error?.message || error),
+    }, { expectedStatus: "pending" }).catch(() => {});
+    throw error;
   }
   await recordPreparedDeliverySnapshot({ jobDir, config, attempt: pendingDelivery, user });
   const claim = await claimPendingQuoteDelivery(jobDir, {
@@ -2309,8 +2556,9 @@ async function dispatchPendingQuoteDelivery({
       invoicePaidAmount: attempt.validatedInvoicePaidAmount ?? null,
       themeFontFamily,
       subjectOverride: attempt.subject || null,
-      additionalAttachments,
+      additionalAttachments: [...documentMimeAttachments(attachedDocuments), ...(additionalAttachments || [])],
       deliveryAttemptId: attempt.attemptId,
+      deliveryMessageId: attempt.messageId || null,
     });
   } catch (error) {
     const outcomeUnknown = !isProvablyRejectedDeliveryError(error);
@@ -2353,6 +2601,7 @@ async function dispatchPendingQuoteDelivery({
       pendingArtifacts: artifacts,
       scheduledEmailId: attempt.scheduledEmailId || null,
       scheduledAt: attempt.scheduledAt || null,
+      attachedDocuments: attempt.documents || [],
       expectedPreparedVersion: documentType === "quote"
         && attempt.resendLockedQuoteVersion !== true
         && Number(attempt.quoteVersion || attempt.preparedQuote.version)
@@ -2372,6 +2621,25 @@ async function finalizeAndProjectDelivery({ jobDir, finalization, config = null 
   ));
   await recordSentDeliverySnapshot({ config, finalization, issuance: finalized?.issuance || null });
   await recordDeliveredDocument({ finalization, issuance: finalized?.issuance || null });
+  if (finalization.attachedDocuments?.length) {
+    const documentType = finalization.resolvedDocumentType || "quote";
+    const main = describeDeliveredDocument({
+      documentType,
+      preparedMeta: finalization.preparedMeta,
+      preparedQuote: finalization.preparedQuote,
+      preparedMilestoneInvoice: finalization.preparedMilestoneInvoice,
+      version: finalization.selectedVersion || finalization.preparedQuote?.version || finalization.preparedMeta?.quoteVersion || null,
+    });
+    await recordAttachedDocumentsEmailed({
+      jobId: finalization.preparedMeta?.id,
+      attachments: finalization.attachedDocuments,
+      result: { to: finalization.to, ...(finalization.result || {}) },
+      user: finalization.user || null,
+      sentAt: finalized?.issuance?.issuedAt || finalization.quoteSentAt,
+      attemptId: finalization.pendingAttemptId || null,
+      withDocument: main.number ? { documentType, number: main.number } : null,
+    });
+  }
   // Quote rows (#6): the commit above already marked the version sent; now
   // that its issued document exists, link it. Never throws.
   if ((finalization.resolvedDocumentType || "quote") === "quote") {
@@ -3223,6 +3491,7 @@ export async function creditAndReissueJobMilestoneInvoice({
     paymentSchedule: generated.paymentSchedule,
     milestoneInvoices: generated.milestoneInvoices,
     artifactMilestoneIndex: currentInvoice.milestoneIndex,
+    requireArtifact: true,
     writeAllArtifacts: true,
     actor,
   });
@@ -3275,6 +3544,152 @@ export async function creditAndReissueJobMilestoneInvoice({
     invoice: change,
     revision: change,
     quoteLifecycle,
+  };
+}
+
+const SETTLEMENT_LABELS = {
+  "sent-copy": "the copy Field emailed",
+  "stored-pdf": "the stored PDF",
+  "milestone-record": "the milestone record",
+};
+
+/**
+ * Settle which amounts an issued legacy invoice was issued for, when its
+ * milestone record and its PDFs disagree (server/invoices/amount-evidence.js).
+ *
+ * The owner chooses one of the sets Field holds — the milestone record, the
+ * stored PDF, or the copy Field emailed — never types an amount: `total` is
+ * the total of the set they saw, and a mismatch (the evidence changed) is a
+ * 409. The choice is recorded on the revision with who, when and why; the
+ * amounts the record held before are kept beside it. The PDF is never
+ * touched, and payments are never changed: settling below what is already
+ * paid against the invoice is refused. What is owed, the job page, the
+ * invoices list and the invoice rows then follow the settled amounts.
+ */
+export async function settleJobMilestoneInvoiceAmounts({
+  jobDir,
+  meta,
+  config,
+  invoiceNumber,
+  choose,
+  total = null,
+  reason = null,
+  actor = null,
+  issuedDocuments = undefined,
+  now = null,
+}) {
+  const settleReason = String(reason ?? "").trim();
+  if (!settleReason) throw createJobActionError("a reason is required to settle an invoice's amounts", 400);
+  const number = String(invoiceNumber ?? "").trim();
+  if (!number) throw createJobActionError("an invoice number is required", 400);
+  if (!SETTLEMENT_LABELS[choose]) {
+    throw createJobActionError(`choose one of ${Object.keys(SETTLEMENT_LABELS).join(", ")}`, 400);
+  }
+  const documents = issuedDocuments === undefined ? (issuedDocumentRecorder().service || null) : issuedDocuments;
+
+  const {
+    meta: resolvedMeta,
+    selectedQuoteArtifacts,
+  } = await readDocumentQuoteArtifacts({ jobDir, meta, documentType: "invoice" });
+  const quote = selectedQuoteArtifacts?.quote || await readPersistedQuote(jobDir);
+  // The same rebuild every milestone action starts with: a legacy invoice
+  // gets its frozen revision here, so there is a revision to settle.
+  const generated = buildMilestoneInvoices({
+    meta: resolvedMeta,
+    quote,
+    config,
+    existingMilestoneInvoices: resolvedMeta?.milestoneInvoices || [],
+  });
+  const evidence = await invoiceAmountEvidence({
+    jobDir,
+    meta: { ...resolvedMeta, milestoneInvoices: generated.milestoneInvoices },
+    issuedDocuments: documents,
+  });
+  const entry = evidence.invoices.find((candidate) => candidate.number === number);
+  if (!entry) throw createJobActionError(`no issued invoice ${number} on this job`, 404);
+  if (entry.state === "settled") {
+    throw createJobActionError(`invoice ${number} was already settled on ${entry.settlement?.decidedAt || "an earlier date"}`, 409);
+  }
+  if (entry.state === "agrees") {
+    throw createJobActionError(`invoice ${number}'s record and PDFs agree; there is nothing to settle`, 409);
+  }
+  const option = entry.options.find((candidate) => candidate.choose === choose);
+  if (!option) {
+    if (entry.sent) {
+      throw createJobActionError(`Field holds the copy it emailed for ${number} (${entry.sent.totals.total}, checked against its recorded hash): that is what was issued, so only "sent-copy" can be chosen`, 409);
+    }
+    throw createJobActionError(`${SETTLEMENT_LABELS[choose]} gives no amounts for ${number}; choose one of ${entry.options.map((candidate) => candidate.choose).join(", ")}`, 409);
+  }
+  const givenCents = Number.isFinite(Number(total)) && total !== "" && total != null ? toCents(Number(total)) : null;
+  if (givenCents === null || givenCents !== toCents(option.total)) {
+    throw createJobActionError(`${SETTLEMENT_LABELS[choose]} for ${number} totals ${option.total}, not ${total ?? "(none given)"}; reload and choose again`, 409);
+  }
+  if (toCents(entry.paid) > toCents(option.total)) {
+    throw createJobActionError(`${entry.paid} is already paid against ${number}, more than ${option.total}; void or move that payment first`, 409);
+  }
+
+  const at = now || new Date().toISOString();
+  const settled = settleMilestoneInvoiceRevision({
+    milestoneInvoices: generated.milestoneInvoices,
+    invoiceNumber: number,
+    source: choose,
+    amounts: { subtotal: option.subtotal, gst: option.taxTotal, total: option.total },
+    storedPdfSha256: entry.storedPdf?.sha256 || null,
+    storedPdfTotal: entry.storedPdf?.totals?.total ?? null,
+    sentSha256: entry.sent?.sha256 || null,
+    actor: actor || { kind: "system", label: "Field" },
+    reason: settleReason,
+    at,
+  });
+  // The current issued invoices must stay within the quote: a settlement
+  // that over-claims would leave the open milestones nothing and the job
+  // refused by every sync, and a settlement is made once.
+  if (entry.current) {
+    const quoteTotal = toCents(getCustomerPresentationFinancials(quote).total);
+    const claimed = normalizeStoredMilestoneInvoices(settled.milestoneInvoices)
+      .filter((milestone) => isMilestoneInvoiceIssued(milestone))
+      .reduce((sum, milestone) => sum + toCents(milestone.total), 0n);
+    if (claimed > quoteTotal) {
+      throw createJobActionError(`settling ${number} at ${option.total} would make the issued invoices claim ${(Number(claimed) / 100).toFixed(2)}, more than the quote's ${(Number(quoteTotal) / 100).toFixed(2)}; revise or credit another invoice first`, 409);
+    }
+  }
+  // Rebuild once more so milestones still open re-spread around the settled amount.
+  const rebuilt = buildMilestoneInvoices({
+    meta: { ...resolvedMeta, milestoneInvoices: settled.milestoneInvoices },
+    quote,
+    paymentSchedule: generated.paymentSchedule,
+    config,
+    existingMilestoneInvoices: settled.milestoneInvoices,
+  });
+  const persisted = await persistMilestoneInvoiceState({
+    jobDir,
+    meta: resolvedMeta,
+    quote,
+    paymentSchedule: rebuilt.paymentSchedule,
+    milestoneInvoices: rebuilt.milestoneInvoices,
+  });
+
+  const others = [
+    toCents(entry.recorded.total) !== toCents(option.total) ? `the milestone record held ${entry.recorded.total}` : null,
+    entry.storedPdf?.totals && toCents(entry.storedPdf.totals.total) !== toCents(option.total) ? `the stored PDF prints ${entry.storedPdf.totals.total}` : null,
+  ].filter(Boolean);
+  await appendJobActivity({
+    jobDir,
+    activity: {
+      kind: "invoice.amounts_settled",
+      ts: at,
+      actor: actor || { kind: "system", label: "Field" },
+      title: "Invoice amounts settled",
+      body: `${number} was issued for ${option.total}, from ${SETTLEMENT_LABELS[choose]}${others.length ? ` (${others.join("; ")})` : ""}. Reason: ${settleReason}.`,
+    },
+  });
+
+  return {
+    ...persisted,
+    quote,
+    paymentSchedule: rebuilt.paymentSchedule,
+    milestoneInvoices: persisted.meta.milestoneInvoices || [],
+    settlement: { invoiceNumber: number, milestoneIndex: settled.milestoneIndex, source: choose, ...option, recorded: entry.recorded },
   };
 }
 
@@ -3499,7 +3914,7 @@ export async function markJobMilestoneUnpaid({
       ts: new Date().toISOString(),
       actor: actor || { kind: "system", label: "Field" },
       title: "Milestone reset to unpaid",
-      body: `${updated.milestoneInvoice.invoiceNumber} reset to unpaid. Receipt artifact removed.`,
+      body: `${updated.milestoneInvoice.invoiceNumber} reset to unpaid. ${updated.milestoneInvoice.issuedReceipt ? `Receipt ${updated.milestoneInvoice.issuedReceipt.number} voided.` : "Receipt artifact removed."}`,
     },
   });
 
