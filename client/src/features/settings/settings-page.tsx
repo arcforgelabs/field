@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { useShell } from "@/components/shell/shell-context";
 import { AppearanceSection } from "./appearance-section";
 import { PeopleSection } from "./people-section";
+import { InvoicingPanel } from "./invoicing-panel";
 import "./settings-page.css";
 
 const ClerkAccount = lazy(() => import("./clerk-account"));
@@ -73,7 +74,12 @@ export function SettingsPage() {
                 : <p className="fx-dim" style={{ margin: 0 }}>Sign in with a verified owner sign-in to manage the team.</p>}
             </Panel>
           )}
-          {active === "documents" && <TermsPanel />}
+          {active === "documents" && (
+            <>
+              <TermsPanel />
+              <InvoicingPanel />
+            </>
+          )}
           {active === "appearance" && (
             <Panel title="Appearance" description="Saved in this browser. Clerk's account screens follow the same choice.">
               <AppearanceSection />

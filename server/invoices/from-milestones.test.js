@@ -79,10 +79,13 @@ describe("milestone state to invoice rows", () => {
     ]);
     const [r1, r2] = mapped.invoices;
     assert.deepEqual([r1.revision, r2.revision, r2.supersedesKey, r2.revisionReason, r2.revisedBy], [1, 2, "EI-2605-04-M1", "Approved variation", "Test Operator"]);
-    assert.match(r1.note, /superseded by EI-2605-04-M1-R2/);
+    assert.match(r1.note, /Revised in place before credit notes: superseded by EI-2605-04-M1-R2\. No credit note was issued\./);
     assert.equal(r1.lines[0].name, "Deposit, 50 % of EQ-2605-04 v1", "the credited invoice claimed against the quote it was issued from");
     assert.equal(r2.lines[0].name, "Deposit, 50 % of EQ-2605-04 v2");
     assert.ok(r1.supersededAt);
+    // Revised in place before credit notes: no credit note is invented for it
+    // (owner's decision, 2026-10-13).
+    assert.deepEqual(mapped.creditNotes, []);
   });
 
   test("a voided payment keeps voided_at and pays nothing; no receipt", () => {

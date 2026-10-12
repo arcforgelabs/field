@@ -1188,7 +1188,7 @@ export function buildMilestoneInvoices({
     // revision synthesized from that legacy record, to be threaded into the
     // revision-state resolution below instead of `null`. This synthesis must
     // run for authorized indexes too: authorization is exactly the moment
-    // `reviseJobMilestoneInvoice` needs a legacy revision to retire into
+    // `creditAndReissueJobMilestoneInvoice` needs a legacy revision to retire into
     // history. Only the allocation freeze (`frozenByIndex`) may skip an
     // authorized index so the rebalance can move its claim.
     const legacyRevision = normalizeInvoiceRevision({

@@ -15,7 +15,7 @@ import {
   markJobMilestoneUnpaid,
   markJobMilestoneUnsent,
   recordJobMilestonePayment,
-  reviseJobMilestoneInvoice,
+  creditAndReissueJobMilestoneInvoice,
   updateJobMilestone,
   voidJobMilestonePayment,
 } from "../job-actions.js";
@@ -34,6 +34,16 @@ export const PRE_4B_ISSUER = Object.freeze({
   async issueInvoice({ invoice, issuedAt, render }) {
     const pdfBytes = Buffer.from(await render(invoice.number));
     return { replayed: false, number: invoice.number, reference: null, invoiceUid: null, issuedDocumentUid: null, pdfSha256: sha256Hex(pdfBytes), pdfBytes, issuedAt: new Date(issuedAt).toISOString() };
+  },
+  // Before credit notes, an approved change revised the invoice in place:
+  // the new revision took the next -R<k> number and nothing was credited.
+  async creditAndReissue({ invoice, issuedAt, render }) {
+    const pdfBytes = Buffer.from(await render(invoice.number, { creditNoteNumber: null }));
+    return {
+      replayed: false,
+      creditNote: null,
+      invoice: { number: invoice.number, reference: null, invoiceUid: null, issuedDocumentUid: null, pdfSha256: sha256Hex(pdfBytes), pdfBytes, issuedAt: new Date(issuedAt).toISOString() },
+    };
   },
 });
 
@@ -107,7 +117,7 @@ export const actions = {
   voidPayment: (jobDir, milestoneIndex, paymentId) => act(jobDir, voidJobMilestonePayment, { milestoneIndex, paymentId, reason: "Entered twice" }),
   unpaid: (jobDir, milestoneIndex) => act(jobDir, markJobMilestoneUnpaid, { milestoneIndex }),
   unsent: (jobDir, milestoneIndex) => act(jobDir, markJobMilestoneUnsent, { milestoneIndex }),
-  revise: (jobDir, milestoneIndex, expectedRevisionNumber = 1) => act(jobDir, reviseJobMilestoneInvoice, { milestoneIndex, reason: "Approved variation", expectedRevisionNumber }),
+  revise: (jobDir, milestoneIndex, expectedRevisionNumber = 1) => act(jobDir, creditAndReissueJobMilestoneInvoice, { milestoneIndex, reason: "Approved variation", expectedRevisionNumber }),
 };
 
 /** A landed job with its quote, ready for milestones. Returns { jobDir, meta, quote }. */
@@ -163,6 +173,17 @@ export const scenarios = {
     const { jobDir, quote } = await createLandedJob(join(dataDir, "2026-05-01", "job-revised"), { id: "job-revised", number: "2605-04", rows: [["Fencing", 200]] });
     await actions.generate(jobDir, [{ label: "Deposit", percentage: 50 }, { label: "Final", percentage: 50 }]);
     await actions.issue(jobDir, 0);
+    await applyVariation(jobDir, quote);
+    await actions.revise(jobDir, 0);
+    return jobDir;
+  },
+  // Deposit issued and paid, then revised in place to -R2: the payment was
+  // recorded against the original number.
+  async revisedPaid(dataDir) {
+    const { jobDir, quote } = await createLandedJob(join(dataDir, "2026-05-01", "job-revised-paid"), { id: "job-revised-paid", number: "2605-07", rows: [["Fencing", 200]] });
+    await actions.generate(jobDir, [{ label: "Deposit", percentage: 50 }, { label: "Final", percentage: 50 }]);
+    await actions.issue(jobDir, 0);
+    await actions.pay(jobDir, 0, 50);
     await applyVariation(jobDir, quote);
     await actions.revise(jobDir, 0);
     return jobDir;

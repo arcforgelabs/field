@@ -4,7 +4,8 @@
 // process.
 //
 // What goes: request bodies, cookies, headers (except User-Agent), query
-// strings, the user, console breadcrumbs, local variables, and any value whose
+// strings (also the bare `http.query` and `url.query` span attributes, which
+// have no `?` to find), the user, console breadcrumbs, local variables, and any value whose
 // key names customer, contact, address, money or credential details. What is
 // rewritten in free text (error messages, URLs, paths, breadcrumbs): email
 // addresses, Australian phone numbers, BSBs, query strings, and job folder or
@@ -13,7 +14,7 @@
 // short.
 
 const SENSITIVE_KEY =
-  /email|phone|mobile|address|customer|client|contact|recipient|attention|site|title|subject|notes?$|body$|html$|pdf|attachment|abn|bsb|bank|account.?(number|name)|password|passphrase|token|secret|authorization|cookie|api.?key|dsn/i;
+  /email|phone|mobile|address|customer|client|contact|recipient|attention|site|title|subject|notes?$|body$|html$|pdf|attachment|abn|bsb|bank|account.?(number|name)|password|passphrase|token|secret|authorization|cookie|api.?key|dsn|query$/i;
 
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 // Australian numbers: +61 or 0, then 9 digits, with optional spaces, dashes

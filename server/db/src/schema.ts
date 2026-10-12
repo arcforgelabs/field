@@ -1462,7 +1462,14 @@ export const invoiceLines = pgTable(
   ],
 );
 
-/** A credit (adjustment) note against one issued invoice (written from step 4b). */
+/**
+ * A credit (adjustment) note against one issued invoice (step 4b, #28). An
+ * issued invoice is never revised in place: it is credited in full by a
+ * credit note, and replaced by a new invoice (`replacement_invoice_uid`).
+ * Numbered CN-YYYY-M-N from document_number_counters, with their own PDF.
+ * Credit notes apply from step 4b on: an invoice revised in place before
+ * them has none (owner's decision, 2026-10-13).
+ */
 export const creditNotes = pgTable(
   "credit_notes",
   {
@@ -1485,6 +1492,10 @@ export const creditNotes = pgTable(
     taxTotalReason: text("tax_total_reason"),
     issuedDocumentUid: text("issued_document_uid"),
     reference: text("reference"),
+    /** The invoice issued in place of the one credited. */
+    replacementInvoiceUid: text("replacement_invoice_uid"),
+    /** The issue service's idempotency key. */
+    issueKey: text("issue_key"),
     createdAt: createdAt(),
     createdBy: text("created_by"),
     updatedAt: updatedAt(),
@@ -1494,10 +1505,18 @@ export const creditNotes = pgTable(
   (t) => [
     uniqueIndex("credit_notes_org_uid_key").on(t.orgUid, t.uid),
     uniqueIndex("credit_notes_org_number_key").on(t.orgUid, t.number),
+    uniqueIndex("credit_notes_org_issue_key").on(t.orgUid, t.issueKey),
+    /** An invoice is credited once. */
+    uniqueIndex("credit_notes_org_invoice_key").on(t.orgUid, t.invoiceUid).where(sql`${t.status} = 'issued'`),
     index("credit_notes_invoice_idx").on(t.orgUid, t.invoiceUid),
     foreignKey({
       name: "credit_notes_invoice_fk",
       columns: [t.orgUid, t.invoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    foreignKey({
+      name: "credit_notes_replacement_invoice_fk",
+      columns: [t.orgUid, t.replacementInvoiceUid],
       foreignColumns: [invoices.orgUid, invoices.uid],
     }),
     foreignKey({
@@ -1513,6 +1532,7 @@ export const creditNotes = pgTable(
     check("credit_notes_total_check", sql`${t.total} = ${t.subtotal} + ${t.taxTotal} and ${t.total} >= 0`),
     check("credit_notes_tax_total_source_check", sql`${t.taxTotalSource} in ('computed','printed') and (${t.taxTotalSource} = 'computed' or ${t.taxTotalReason} is not null)`),
     check("credit_notes_version_check", sql`${t.version} > 0`),
+    check("credit_notes_issue_check", sql`${t.issueKey} is null or (${t.issuedAt} is not null and ${t.number} ~ '^CN-[0-9]{4}-([1-9]|1[0-2])-[1-9][0-9]*$')`),
     tenantIsolation("credit_notes"),
   ],
 );
@@ -1669,6 +1689,96 @@ export const receipts = pgTable(
   ],
 );
 
+/**
+ * A payment moved to the invoice that replaced the one it was recorded
+ * against (step 4b): when a credit note credits an invoice, every active
+ * payment that invoice holds moves to the replacement. Append-only; the
+ * payment itself never changes. The invoice that holds a payment is the
+ * `to_invoice_uid` of its latest allocation, else the invoice it was
+ * recorded against.
+ */
+export const paymentAllocations = pgTable(
+  "payment_allocations",
+  {
+    /** `pal_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    jobId: text("job_id").notNull(),
+    paymentUid: text("payment_uid").notNull(),
+    fromInvoiceUid: text("from_invoice_uid").notNull(),
+    toInvoiceUid: text("to_invoice_uid").notNull(),
+    creditNoteUid: text("credit_note_uid").notNull(),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    allocatedAt: timestamp("allocated_at", { withTimezone: true, mode: "date" }).notNull(),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+  },
+  (t) => [
+    uniqueIndex("payment_allocations_org_uid_key").on(t.orgUid, t.uid),
+    uniqueIndex("payment_allocations_org_payment_credit_key").on(t.orgUid, t.paymentUid, t.creditNoteUid),
+    index("payment_allocations_payment_idx").on(t.orgUid, t.paymentUid, t.allocatedAt),
+    index("payment_allocations_job_idx").on(t.orgUid, t.jobId),
+    foreignKey({
+      name: "payment_allocations_payment_fk",
+      columns: [t.orgUid, t.paymentUid],
+      foreignColumns: [payments.orgUid, payments.uid],
+    }),
+    foreignKey({
+      name: "payment_allocations_from_invoice_fk",
+      columns: [t.orgUid, t.fromInvoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    foreignKey({
+      name: "payment_allocations_to_invoice_fk",
+      columns: [t.orgUid, t.toInvoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    foreignKey({
+      name: "payment_allocations_credit_note_fk",
+      columns: [t.orgUid, t.creditNoteUid],
+      foreignColumns: [creditNotes.orgUid, creditNotes.uid],
+    }),
+    check("payment_allocations_uid_check", sql`${t.uid} ~ '^pal_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("payment_allocations_amount_check", sql`${t.amount} > 0`),
+    check("payment_allocations_invoices_check", sql`${t.fromInvoiceUid} <> ${t.toInvoiceUid}`),
+    tenantIsolation("payment_allocations"),
+  ],
+);
+
+export type PaymentAllocation = typeof paymentAllocations.$inferSelect;
+
+/**
+ * When an invoice returned to draft is issued again with different content,
+ * whether the issue service credits the earlier one with a credit note first
+ * (step 4b, #28): `when-emailed` (the default) only when Field has evidence it
+ * was sent to the customer, `always`, or `never`. "Credit and reissue" always
+ * credits, whatever this says.
+ */
+export const CREDIT_NOTE_ON_REISSUE = ["when-emailed", "always", "never"] as const;
+export type CreditNoteOnReissue = (typeof CREDIT_NOTE_ON_REISSUE)[number];
+
+/**
+ * The organisation's business settings: one row per organisation (none means
+ * every default). Only what Field reads from the database lives here so far;
+ * the business profile is still config (docs/PRICING_ENGINE.md "Business
+ * settings").
+ */
+export const businessSettings = pgTable(
+  "business_settings",
+  {
+    orgUid: orgUid().primaryKey(),
+    creditNoteOnReissue: text("credit_note_on_reissue").$type<CreditNoteOnReissue>().notNull().default("when-emailed"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => [
+    check("business_settings_credit_note_on_reissue_check", sql`${t.creditNoteOnReissue} in ('when-emailed','always','never')`),
+    tenantIsolation("business_settings"),
+  ],
+);
+
+export type BusinessSettings = typeof businessSettings.$inferSelect;
 export type PaymentMilestone = typeof paymentMilestones.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceLine = typeof invoiceLines.$inferSelect;

@@ -234,7 +234,7 @@ export async function syncJobInvoiceRows({
     result.ok = false;
     for (const conflict of summary.conflicts) result.failures.push({ ...conflict, kind: "conflict", conflict: conflict.kind });
   }
-  const wrote = ["milestones", "invoices", "payments", "receipts"].some((table) => Object.entries(summary[table])
+  const wrote = ["milestones", "invoices", "creditNotes", "payments", "allocations", "receipts"].some((table) => Object.entries(summary[table] || {})
     .some(([action, count]) => action !== "unchanged" && action !== "kept" && count > 0));
   result.action = wrote ? (dryRun ? "would-write" : "written") : "unchanged";
   return result;

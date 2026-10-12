@@ -2,7 +2,7 @@
 // not zero-padded, and ordered by period and sequence, never by their text.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compareDocumentNumbers, formatInvoiceNumber, invoicePeriod, isSequenceInvoiceNumber, parseSequenceNumber } from "./numbers.js";
+import { compareDocumentNumbers, formatCreditNoteNumber, formatInvoiceNumber, formatSequenceNumber, invoicePeriod, isSequenceInvoiceNumber, parseSequenceNumber } from "./numbers.js";
 
 test("the month is printed without a leading zero; the counter's period keeps it", () => {
   assert.equal(invoicePeriod(new Date(2026, 0, 15, 9)), "2026-01");
@@ -33,4 +33,17 @@ test("numbers sort by year, month and sequence, never as text; older EI-… numb
   ]);
   // As text, October would come before September.
   assert.ok("INV-2026-10-1" < "INV-2026-9-1");
+});
+
+test("credit notes take the same format: CN-2026-1-1", () => {
+  assert.equal(formatCreditNoteNumber("2026-01", 1), "CN-2026-1-1");
+  assert.equal(formatCreditNoteNumber("2026-10", 3), "CN-2026-10-3");
+  assert.deepEqual(["CN-2026-10-1", "CN-2026-9-2"].sort(compareDocumentNumbers), ["CN-2026-9-2", "CN-2026-10-1"]);
+});
+
+test("one allocator format for every series; an unknown series is refused", () => {
+  assert.equal(formatSequenceNumber("invoice", "2026-01", 7), "INV-2026-1-7");
+  assert.equal(formatSequenceNumber("credit_note", "2026-11", 1), "CN-2026-11-1");
+  assert.throws(() => formatSequenceNumber("quote", "2026-01", 1), /no number series/);
+  assert.throws(() => formatSequenceNumber("invoice", "2026-01", 0), /not a sequence value/);
 });

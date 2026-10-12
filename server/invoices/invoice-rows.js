@@ -15,6 +15,9 @@
 //   - delete a payment. A payment the files no longer hold (a "mark unpaid"
 //     removes them) is voided.
 //   - delete a receipt. One the files no longer hold is voided.
+//   - change or delete a credit note or a payment allocation (step 4b, #28).
+//     A credited invoice's credit note is written once; every active payment
+//     the credited invoice holds moves to its replacement, as an allocation.
 //
 // A draft invoice is rewritten freely and deleted when the files no longer
 // have it. Totals are computed here: quoteTotals over the lines, with the GST
@@ -29,14 +32,17 @@ import { orgScope } from "../db-runtime/tenancy.js";
 import { centsToText, fixed, quoteTotals, toCents } from "../quotes/totals.js";
 import { compareDocumentNumbers } from "./numbers.js";
 import {
+  newCreditNoteLineUid,
+  newCreditNoteUid,
   newInvoiceLineUid,
   newInvoiceUid,
+  newPaymentAllocationUid,
   newPaymentMilestoneUid,
   newPaymentUid,
   newReceiptUid,
 } from "./uid.js";
 
-const { paymentMilestones, invoices, invoiceLines, payments, receipts } = schema;
+const { paymentMilestones, invoices, invoiceLines, creditNotes, creditNoteLines, payments, paymentAllocations, receipts } = schema;
 
 class DryRunRollback extends Error {
   constructor(summary) {
@@ -171,6 +177,56 @@ function paymentFromRow(row) {
   };
 }
 
+function creditNoteFromRow(row, lines = []) {
+  return {
+    uid: row.uid,
+    jobId: row.jobId,
+    number: row.number,
+    invoiceUid: row.invoiceUid,
+    replacementInvoiceUid: row.replacementInvoiceUid,
+    status: row.status,
+    reason: row.reason,
+    issuedAt: iso(row.issuedAt),
+    issuedOn: row.issuedOn,
+    currency: row.currency,
+    subtotal: row.subtotal,
+    taxTotal: row.taxTotal,
+    total: row.total,
+    taxTotalSource: row.taxTotalSource,
+    taxTotalReason: row.taxTotalReason,
+    issuedDocumentUid: row.issuedDocumentUid,
+    reference: row.reference,
+    createdBy: row.createdBy,
+    lines: lines.map((line) => ({
+      uid: line.uid,
+      invoiceLineUid: line.invoiceLineUid,
+      sortOrder: line.sortOrder,
+      lineType: line.lineType,
+      name: line.name,
+      description: line.description,
+      quantity: line.quantity,
+      unitCode: line.unitCode,
+      unitSell: line.unitSell,
+      taxRate: line.taxRate,
+      lineTotal: line.lineTotal,
+      lineTotalSource: line.lineTotalSource,
+      lineTotalReason: line.lineTotalReason,
+    })),
+  };
+}
+
+function allocationFromRow(row) {
+  return {
+    uid: row.uid,
+    paymentUid: row.paymentUid,
+    fromInvoiceUid: row.fromInvoiceUid,
+    toInvoiceUid: row.toInvoiceUid,
+    creditNoteUid: row.creditNoteUid,
+    amount: row.amount,
+    allocatedAt: iso(row.allocatedAt),
+  };
+}
+
 function receiptFromRow(row) {
   return {
     uid: row.uid,
@@ -298,10 +354,134 @@ export async function insertIssuedInvoiceRow(tx, { jobId, invoice, issueKey, iss
   const withLinks = { ...invoice, quoteUid: quoteUid || invoice.quoteUid || null, issuedDocumentUid: issuedDocumentUid || invoice.issuedDocumentUid || null };
   const totals = invoiceTotals(withLinks);
   const uid = newInvoiceUid(at.getTime());
-  await tx.insert(invoices).values({ uid, jobId, ...headerValues(withLinks, totals, refs), status: "draft", amountPaid: "0.00", createdAt: at, createdBy: actor, updatedAt: at, updatedBy: actor });
+  await tx.insert(invoices).values({ uid, jobId, ...headerValues(withLinks, totals, refs), supersedesInvoiceUid: invoice.supersedesInvoiceUid || null, status: "draft", amountPaid: "0.00", createdAt: at, createdBy: actor, updatedAt: at, updatedBy: actor });
   await insertLines(tx, uid, withLinks, refs, actor, at);
   await tx.update(invoices).set({ ...issueValues(withLinks), issueKey, updatedAt: at, updatedBy: actor }).where(eq(invoices.uid, uid));
   return uid;
+}
+
+/**
+ * Write one credit note inside the caller's organisation transaction: its
+ * row as a draft, its lines (each crediting the credited invoice's line in
+ * the same place), then its issue fields, so it is frozen as written (0013's
+ * triggers). `creditNote` is mapped like an invoice (from-milestones.js).
+ * Returns the new credit note's uid.
+ */
+export async function insertCreditNoteRow(tx, { jobId, creditNote, invoiceUid, replacementInvoiceUid, issueKey = null, issuedDocumentUid = null, actor = null, at = new Date() }) {
+  if (!creditNote.issuedAt) throw invalid(`credit note ${creditNote.number}: only an issued credit note is written here`);
+  const totals = invoiceTotals(creditNote);
+  const uid = newCreditNoteUid(at.getTime());
+  await tx.insert(creditNotes).values({
+    uid,
+    jobId,
+    number: creditNote.number,
+    invoiceUid,
+    status: "draft",
+    reason: creditNote.reason,
+    currency: creditNote.currency || "AUD",
+    subtotal: totals.subtotal,
+    taxTotal: totals.taxTotal,
+    total: totals.total,
+    taxTotalSource: totals.taxTotalSource,
+    taxTotalReason: totals.taxTotalReason,
+    reference: creditNote.reference || null,
+    replacementInvoiceUid: replacementInvoiceUid || null,
+    createdAt: at,
+    createdBy: creditNote.createdBy || actor,
+    updatedAt: at,
+    updatedBy: actor,
+  });
+  const credited = await tx.select().from(invoiceLines).where(eq(invoiceLines.invoiceUid, invoiceUid)).orderBy(asc(invoiceLines.sortOrder));
+  if (creditNote.lines.length) {
+    await tx.insert(creditNoteLines).values(creditNote.lines.map((line, index) => ({
+      uid: newCreditNoteLineUid(at.getTime()),
+      creditNoteUid: uid,
+      invoiceLineUid: credited[index]?.uid || null,
+      sortOrder: line.sortOrder ?? index,
+      lineType: line.lineType,
+      name: line.name,
+      description: line.description || null,
+      quantity: fixed(line.quantity ?? 1, 4),
+      unitCode: line.unitCode || "lot",
+      unitSell: line.unitSell == null ? null : fixed(line.unitSell, 4),
+      taxCode: line.taxCode || "GST",
+      taxRate: fixed(line.taxRate ?? 10, 3),
+      lineTotal: fixed(line.lineTotal, 2),
+      lineTotalSource: line.lineTotalSource === "printed" ? "printed" : "computed",
+      lineTotalReason: line.lineTotalSource === "printed" ? (line.lineTotalReason || null) : null,
+      createdAt: at,
+      createdBy: actor,
+    })));
+  }
+  await tx.update(creditNotes).set({
+    status: "issued",
+    issuedAt: date(creditNote.issuedAt),
+    issuedOn: creditNote.issuedOn || new Date(creditNote.issuedAt).toISOString().slice(0, 10),
+    issuedDocumentUid,
+    issueKey,
+    updatedAt: at,
+    updatedBy: actor,
+  }).where(eq(creditNotes.uid, uid));
+  return uid;
+}
+
+/**
+ * Move every active payment a credited invoice still holds to the invoice
+ * that replaced it, as a payment allocation, for every credit note of the
+ * job (inside the caller's transaction). A payment is held by the invoice of
+ * its latest allocation, else the invoice it was recorded against. Never
+ * moves a payment twice for one credit note. Returns the number written.
+ */
+export async function allocateCreditedPayments(tx, { jobId, actor = null, at = new Date() }) {
+  const notes = (await tx.select().from(creditNotes).where(eq(creditNotes.jobId, jobId)).orderBy(asc(creditNotes.issuedAt), asc(creditNotes.createdAt)))
+    .filter((note) => note.status === "issued" && note.replacementInvoiceUid);
+  if (!notes.length) return 0;
+  const jobPayments = await tx.select().from(payments).where(eq(payments.jobId, jobId));
+  const allocations = await tx.select().from(paymentAllocations).where(eq(paymentAllocations.jobId, jobId)).orderBy(asc(paymentAllocations.allocatedAt), asc(paymentAllocations.createdAt));
+  const holder = new Map(jobPayments.map((payment) => [payment.uid, payment.invoiceUid]));
+  const moved = new Set(allocations.map((allocation) => `${allocation.paymentUid}:${allocation.creditNoteUid}`));
+  for (const allocation of allocations) holder.set(allocation.paymentUid, allocation.toInvoiceUid);
+  let written = 0;
+  for (const note of notes) {
+    for (const payment of jobPayments) {
+      if (payment.voidedAt || holder.get(payment.uid) !== note.invoiceUid || moved.has(`${payment.uid}:${note.uid}`)) continue;
+      await tx.insert(paymentAllocations).values({
+        uid: newPaymentAllocationUid(at.getTime()),
+        jobId,
+        paymentUid: payment.uid,
+        fromInvoiceUid: note.invoiceUid,
+        toInvoiceUid: note.replacementInvoiceUid,
+        creditNoteUid: note.uid,
+        amount: payment.amount,
+        allocatedAt: at,
+        createdAt: at,
+        createdBy: actor,
+      });
+      holder.set(payment.uid, note.replacementInvoiceUid);
+      moved.add(`${payment.uid}:${note.uid}`);
+      written += 1;
+    }
+  }
+  return written;
+}
+
+/** Each invoice's amount paid: the active payments it holds (after allocations). */
+export async function refreshAmountsPaid(tx, { jobId, actor, at }) {
+  const holder = new Map();
+  for (const row of await tx.select().from(payments).where(eq(payments.jobId, jobId))) {
+    if (!row.voidedAt) holder.set(row.uid, { invoiceUid: row.invoiceUid, amount: row.amount });
+  }
+  for (const allocation of await tx.select().from(paymentAllocations).where(eq(paymentAllocations.jobId, jobId)).orderBy(asc(paymentAllocations.allocatedAt), asc(paymentAllocations.createdAt))) {
+    const held = holder.get(allocation.paymentUid);
+    if (held) held.invoiceUid = allocation.toInvoiceUid;
+  }
+  const activeByInvoice = new Map();
+  for (const { invoiceUid, amount } of holder.values()) activeByInvoice.set(invoiceUid, (activeByInvoice.get(invoiceUid) || 0n) + toCents(amount));
+  for (const row of await tx.select().from(invoices).where(eq(invoices.jobId, jobId))) {
+    const paid = centsToText(activeByInvoice.get(row.uid) || 0n);
+    if (sameMoney(row.amountPaid, paid)) continue;
+    await tx.update(invoices).set({ amountPaid: paid, updatedAt: at, updatedBy: actor, version: row.version + 1 }).where(eq(invoices.uid, row.uid));
+  }
 }
 
 /**
@@ -324,7 +504,15 @@ export function createInvoiceRowService({ db, orgUid = undefined, now = () => ne
     for (const line of lineRows) linesByInvoice.get(line.invoiceUid).push(line);
     const paymentRows = await tx.select().from(payments).where(eq(payments.jobId, jobId)).orderBy(asc(payments.recordedAt));
     const receiptRows = await tx.select().from(receipts).where(eq(receipts.jobId, jobId)).orderBy(asc(receipts.issuedAt));
-    return { milestoneRows, invoiceRows, linesByInvoice, paymentRows, receiptRows };
+    const creditNoteRows = (await tx.select().from(creditNotes).where(eq(creditNotes.jobId, jobId)))
+      .sort((a, b) => new Date(a.issuedAt) - new Date(b.issuedAt) || compareDocumentNumbers(a.number, b.number));
+    const creditLineRows = creditNoteRows.length
+      ? await tx.select().from(creditNoteLines).where(inArray(creditNoteLines.creditNoteUid, creditNoteRows.map((row) => row.uid))).orderBy(asc(creditNoteLines.sortOrder))
+      : [];
+    const linesByCreditNote = new Map(creditNoteRows.map((row) => [row.uid, []]));
+    for (const line of creditLineRows) linesByCreditNote.get(line.creditNoteUid).push(line);
+    const allocationRows = await tx.select().from(paymentAllocations).where(eq(paymentAllocations.jobId, jobId)).orderBy(asc(paymentAllocations.allocatedAt), asc(paymentAllocations.createdAt));
+    return { milestoneRows, invoiceRows, linesByInvoice, paymentRows, receiptRows, creditNoteRows, linesByCreditNote, allocationRows };
   }
 
   /** Fields of an issued invoice that never change, compared with the mapping. */
@@ -356,7 +544,9 @@ export function createInvoiceRowService({ db, orgUid = undefined, now = () => ne
       jobId,
       milestones: { created: 0, updated: 0, unchanged: 0, deleted: 0, kept: 0 },
       invoices: { created: 0, replaced: 0, issued: 0, updated: 0, unchanged: 0, deleted: 0 },
+      creditNotes: { created: 0, unchanged: 0 },
       payments: { created: 0, voided: 0, unchanged: 0 },
+      allocations: { created: 0 },
       receipts: { created: 0, voided: 0, updated: 0, unchanged: 0 },
       conflicts: [],
       kept: [],
@@ -493,6 +683,32 @@ export function createInvoiceRowService({ db, orgUid = undefined, now = () => ne
       await tx.update(invoices).set({ supersedesInvoiceUid: supersedes, updatedAt: at, updatedBy: actor, version: row.version + 1 }).where(eq(invoices.uid, uid));
     }
 
+    // 2b. Credit notes: each credited invoice's note, written once. One
+    // issued with the issue service is already here (issue.js); one for a
+    // revision made in place before credit notes is recorded now.
+    const creditByInvoice = new Map(existing.creditNoteRows.filter((row) => row.status === "issued").map((row) => [row.invoiceUid, row]));
+    for (const note of mapped.creditNotes || []) {
+      const invoiceUid = invoiceUids.get(note.invoiceKey);
+      const replacementUid = invoiceUids.get(note.replacementKey);
+      if (!invoiceUid || !replacementUid) throw invalid(`credit note ${note.number}: no invoice ${invoiceUid ? note.replacementKey : note.invoiceKey}`);
+      const row = creditByInvoice.get(invoiceUid);
+      if (!row) {
+        await insertCreditNoteRow(tx, { jobId, creditNote: note, invoiceUid, replacementInvoiceUid: replacementUid, actor, at });
+        summary.creditNotes.created += 1;
+        continue;
+      }
+      const totals = invoiceTotals(note);
+      const differences = [];
+      const check = (field, ok, stored, mappedValue) => { if (!ok) differences.push({ field, stored, mapped: mappedValue }); };
+      check("number", same(row.number, note.number), row.number, note.number);
+      check("replacementInvoice", same(row.replacementInvoiceUid, replacementUid), row.replacementInvoiceUid, replacementUid);
+      check("subtotal", sameMoney(row.subtotal, totals.subtotal), row.subtotal, totals.subtotal);
+      check("taxTotal", sameMoney(row.taxTotal, totals.taxTotal), row.taxTotal, totals.taxTotal);
+      check("total", sameMoney(row.total, totals.total), row.total, totals.total);
+      if (differences.length) summary.conflicts.push({ kind: "credit-note-differs", number: row.number, differences, reason: "this credit note's row was written earlier and the files now map to different values; the row was kept as issued" });
+      summary.creditNotes.unchanged += 1;
+    }
+
     // 3. Payments: never deleted; one the files no longer hold is voided.
     const paymentUids = new Map();
     const paymentsBySource = new Map(existing.paymentRows.map((row) => [row.sourcePaymentId, row]));
@@ -560,17 +776,11 @@ export function createInvoiceRowService({ db, orgUid = undefined, now = () => ne
       summary.payments.voided += 1;
     }
 
-    // 4. Each invoice's amount paid: the sum of its active payments.
-    const activeByInvoice = new Map();
-    for (const row of await tx.select().from(payments).where(eq(payments.jobId, jobId))) {
-      if (row.voidedAt) continue;
-      activeByInvoice.set(row.invoiceUid, (activeByInvoice.get(row.invoiceUid) || 0n) + toCents(row.amount));
-    }
-    for (const row of await tx.select().from(invoices).where(eq(invoices.jobId, jobId))) {
-      const paid = centsToText(activeByInvoice.get(row.uid) || 0n);
-      if (sameMoney(row.amountPaid, paid)) continue;
-      await tx.update(invoices).set({ amountPaid: paid, updatedAt: at, updatedBy: actor, version: row.version + 1 }).where(eq(invoices.uid, row.uid));
-    }
+    // 3b. Payments a credited invoice holds move to its replacement.
+    summary.allocations.created = await allocateCreditedPayments(tx, { jobId, actor, at });
+
+    // 4. Each invoice's amount paid: the active payments it holds.
+    await refreshAmountsPaid(tx, { jobId, actor, at });
 
     // 5. Receipts: one the files no longer have is voided first, so a new
     // receipt may take its number.
@@ -672,7 +882,9 @@ export function createInvoiceRowService({ db, orgUid = undefined, now = () => ne
         return {
           milestones: loaded.milestoneRows.map(milestoneFromRow),
           invoices: loaded.invoiceRows.map((row) => invoiceFromRow(row, loaded.linesByInvoice.get(row.uid))),
+          creditNotes: loaded.creditNoteRows.map((row) => creditNoteFromRow(row, loaded.linesByCreditNote.get(row.uid))),
           payments: loaded.paymentRows.map(paymentFromRow),
+          allocations: loaded.allocationRows.map(allocationFromRow),
           receipts: loaded.receiptRows.map(receiptFromRow),
         };
       });

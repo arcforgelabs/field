@@ -35,9 +35,24 @@ function printedPeriod(period) {
   return `${match[1]}-${Number(match[2])}`;
 }
 
+// The series, by document type (document_number_counters.document_type).
+// Adding one (receipts, quotes) is a prefix here and a check in the schema.
+export const SEQUENCE_PREFIXES = Object.freeze({
+  invoice: "INV",
+  credit_note: "CN",
+});
+
+/** PREFIX-YYYY-M-N for a document type, from the period YYYY-MM and the counter's value. */
+export function formatSequenceNumber(documentType, period, value) {
+  const prefix = SEQUENCE_PREFIXES[documentType];
+  if (!prefix) throw new Error(`no number series for ${JSON.stringify(documentType)}`);
+  if (!(Number.isInteger(value) && value > 0)) throw new Error(`not a sequence value: ${JSON.stringify(value)}`);
+  return `${prefix}-${printedPeriod(period)}-${value}`;
+}
+
 /** INV-2026-1-1 from the period 2026-01 and the counter's value 1. */
 export function formatInvoiceNumber(period, value) {
-  return `INV-${printedPeriod(period)}-${value}`;
+  return formatSequenceNumber("invoice", period, value);
 }
 
 const SEQUENCE_PATTERN = /^([A-Z]+)-(\d{4})-([1-9]|1[0-2])-([1-9]\d*)$/;
@@ -67,3 +82,13 @@ export function compareDocumentNumbers(a, b) {
   if (right) return -1;
   return String(a ?? "").localeCompare(String(b ?? ""), "en", { numeric: true });
 }
+
+// Credit (adjustment) notes (#28, step 4b): CN-YYYY-M-N from the same
+// counters (document type `credit_note`), allocated when the note is issued;
+// the month not zero-padded either (CN-2026-1-1).
+export const CREDIT_NOTE_NUMBER_PATTERN = /^CN-(\d{4})-([1-9]|1[0-2])-([1-9]\d*)$/;
+
+export function formatCreditNoteNumber(period, value) {
+  return formatSequenceNumber("credit_note", period, value);
+}
+

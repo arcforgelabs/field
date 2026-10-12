@@ -32,6 +32,7 @@ import { generateEvidenceQuoteMarkdown } from "./generate-evidence-quote.js";
 import {
   buildQuotePdfFilename,
   deleteMilestoneReceiptArtifact,
+  generateCreditNotePdfBuffer,
   generateQuotePdfBuffer,
   listQuoteVersions,
   parseQuoteVersion,
@@ -56,8 +57,9 @@ import { invoiceRowRecorder } from "./invoices/recorder.js";
 import { quoteRowsFromArtifact } from "./quotes/read-model.js";
 import { issuedDocumentRecorder } from "./documents/recorder.js";
 import { invoiceRevisionDetails, partiesDetails } from "./documents/job-sources.js";
-import { invoiceIssueKey, invoiceIssuer, mapInvoiceForIssue } from "./invoices/issue.js";
+import { creditIssueKey, invoiceIssueKey, invoiceIssuer, mapCreditNoteForIssue, mapInvoiceForIssue } from "./invoices/issue.js";
 import { quoteTaxRatePercent } from "./quotes/from-artifact.js";
+import { claimDescription, customerQuoteReference, quoteReferenceLine } from "./invoices/customer-wording.js";
 import { applyQuoteCatalogChanges, computeQuoteCatalogChanges, upgradeOrganizerCatalogLinks } from "./quote-catalog-sync.js";
 import {
   buildQuoteDeliveryAttempt,
@@ -949,7 +951,7 @@ function isNewlyIssuedRevision(entry) {
   ));
 }
 
-function withIssuedNumber(entry, { number, reference, issuedAt }) {
+function withIssuedNumber(entry, { number, reference, issuedAt, creditNoteNumber = null }) {
   const pdfPath = buildMilestoneInvoicePdfPath({ invoiceNumber: number, milestoneIndex: entry.milestoneIndex });
   const at = issuedAt || entry.issuedRevision.issuedAt || entry.issuedAt;
   return {
@@ -957,16 +959,49 @@ function withIssuedNumber(entry, { number, reference, issuedAt }) {
     invoiceNumber: number,
     issuedAt: at,
     pdfPath,
-    issuedRevision: { ...entry.issuedRevision, invoiceNumber: number, jobReference: reference, issuedAt: at, pdfPath },
+    issuedRevision: {
+      ...entry.issuedRevision,
+      invoiceNumber: number,
+      jobReference: reference,
+      issuedAt: at,
+      pdfPath,
+      ...(creditNoteNumber ? { creditNoteNumber } : {}),
+    },
   };
 }
 
-// Issue every invoice this call issues (an authorise, a send, a revision),
+// The issued revision a newly issued revision replaces, and when to credit it
+// (step 4b):
+//   - an approved change ("Credit and reissue") replaces a revision that is
+//     still issued: it is always credited in full by a credit note;
+//   - a revision issued after the invoice was returned to draft (unsent, or
+//     marked unpaid) with different content replaces one that was issued
+//     before: the issue service credits it as the organisation's
+//     `creditNoteOnReissue` setting says (by default only when Field has
+//     evidence the customer was sent it), else issues the new one on its own.
+// Returns { previous, whenToCredit } or null.
+function revisionToCredit(entry) {
+  const revision = entry?.issuedRevision;
+  if (!revision?.supersedesRevisionNumber) return null;
+  const previous = (entry.revisionHistory || []).find((historical) => historical.revisionNumber === revision.supersedesRevisionNumber);
+  if (!previous || previous.creditNote || deriveArtifactState(previous) === ARTIFACT_STATE.UNWRITTEN) return null;
+  if (previous.supersededByRevisionNumber === revision.revisionNumber) return { previous, whenToCredit: "always" };
+  if (previous.supersededByRevisionNumber == null) return { previous, whenToCredit: "by-setting" };
+  return null;
+}
+
+function moneyOf(revision) {
+  return { subtotal: roundMoney(revision.subtotal), gst: roundMoney(revision.gst), total: roundMoney(revision.total) };
+}
+
+// Issue every invoice this call issues (an authorise, a send, a reissue),
 // through the invoice issue service (server/invoices/issue.js): it allocates
 // the INV-YYYY-M-N number, renders the PDF once with it, stores the bytes
-// and the issued invoice row, in one PostgreSQL transaction. The milestone
-// then carries that number, and the exact stored bytes are written at its
-// PDF path, so the artifact write below adopts them instead of rendering
+// and the issued invoice row, in one PostgreSQL transaction. A revision that
+// replaces an invoice still issued is issued with the credit note that
+// credits that invoice (CN-YYYY-M-N), in the same transaction. The milestone
+// then carries the numbers, and the exact stored bytes are written at their
+// PDF paths, so the artifact write below adopts them instead of rendering
 // again. A server that cannot issue (no database) refuses the action: an
 // invoice is never issued outside the issue service.
 async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule = null, milestoneInvoices = [], actor = null }) {
@@ -979,50 +1014,143 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
     number: String(quote?.quoteNumber || meta?.quoteNumber || "").trim() || null,
     taxRate: quoteTaxRatePercent(quote),
   };
+  const issuedBy = actorLabel(actor);
   let current = milestoneInvoices;
+  const renderInvoice = (entry, issuing) => {
+    const prepared = prepareMilestoneInvoiceDocument({
+      meta: { ...meta, ...(schedule ? { paymentSchedule: schedule } : {}), milestoneInvoices: current.map((other) => (other.milestoneIndex === entry.milestoneIndex ? issuing : other)) },
+      quote,
+      milestoneInvoice: issuing,
+    });
+    return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "invoice" });
+  };
+  const stored = (issued, result) => ({
+    ...issued,
+    issuedRevision: transitionArtifactState(issued.issuedRevision, {
+      toState: ARTIFACT_STATE.STORED,
+      pdfSha256: result.pdfSha256,
+      pdfIssuedAt: result.issuedAt,
+    }),
+  });
   for (const entry of milestoneInvoices.filter(isNewlyIssuedRevision)) {
     const revision = entry.issuedRevision;
-    const invoice = mapInvoiceForIssue({
-      milestoneInvoices: normalizeStoredMilestoneInvoices(current),
-      paymentSchedule: schedule,
-      milestoneIndex: entry.milestoneIndex,
-      basis,
-      reference,
-    });
-    const result = await invoiceIssuer().issueInvoice({
+    const normalized = normalizeStoredMilestoneInvoices(current);
+    const mapped = { milestoneInvoices: normalized, paymentSchedule: schedule, milestoneIndex: entry.milestoneIndex, basis, reference };
+    const invoice = mapInvoiceForIssue(mapped);
+    const issuedAt = revision.issuedAt || entry.issuedAt || new Date().toISOString();
+    const details = { ...invoiceRevisionDetails(entry, revision), ...partiesDetails({ meta, quote }) };
+    const toCredit = revisionToCredit(entry);
+    const credited = toCredit?.previous || null;
+
+    if (!credited) {
+      const result = await invoiceIssuer().issueInvoice({
+        jobId,
+        idempotencyKey: invoiceIssueKey({ jobId, milestoneIndex: entry.milestoneIndex, revisionNumber: revision.revisionNumber, fingerprint: buildInvoiceRevisionFingerprint(revision) }),
+        reference,
+        issuedAt,
+        issuedBy,
+        invoice,
+        details,
+        render: (number) => renderInvoice(entry, withIssuedNumber(entry, { number, reference, issuedAt: revision.issuedAt })),
+      });
+      const issued = withIssuedNumber(entry, result);
+      await writeIssuedInvoicePdf({ jobDir, relativePdfPath: issued.pdfPath, pdfBuffer: result.pdfBytes });
+      current = current.map((other) => (other.milestoneIndex === entry.milestoneIndex ? stored(issued, result) : other));
+      continue;
+    }
+
+    // Credit the revision it replaces, in full, and issue this one in its
+    // place. Mapped as the files will map it once credited: the replaced
+    // revision superseded by this one.
+    // (Its number is allocated in the issue; "pending" stands in for it.)
+    const asCredited = {
+      ...mapped,
+      milestoneInvoices: normalizeStoredMilestoneInvoices(current.map((other) => (other.milestoneIndex === entry.milestoneIndex
+        ? {
+            ...other,
+            revisionHistory: other.revisionHistory.map((historical) => (historical.revisionNumber === credited.revisionNumber
+              ? { ...historical, supersededByRevisionNumber: revision.revisionNumber, creditNote: { number: "pending", reason: revision.revisionReason || null } }
+              : historical)),
+          }
+        : other))),
+    };
+    const creditedInvoice = mapInvoiceForIssue({ ...asCredited, number: credited.invoiceNumber });
+    const creditNote = mapCreditNoteForIssue({ ...asCredited, creditedNumber: credited.invoiceNumber });
+    const reason = revision.revisionReason || "Credited and reissued";
+    // What the adjustment note prints for the line it credits: plain words,
+    // and the quote it claimed against (customer-wording.js).
+    const creditedQuote = await customerQuoteReference({ jobDir, meta, milestone: entry, quote, quoteVersion: credited.quoteVersion });
+    const result = await invoiceIssuer().creditAndReissue({
       jobId,
-      idempotencyKey: invoiceIssueKey({
+      idempotencyKey: creditIssueKey({
         jobId,
         milestoneIndex: entry.milestoneIndex,
+        creditedRevisionNumber: credited.revisionNumber,
         revisionNumber: revision.revisionNumber,
         fingerprint: buildInvoiceRevisionFingerprint(revision),
       }),
       reference,
-      issuedAt: revision.issuedAt || entry.issuedAt || new Date().toISOString(),
-      issuedBy: actorLabel(actor),
-      invoice,
-      details: { ...invoiceRevisionDetails(entry, revision), ...partiesDetails({ meta, quote }) },
-      render: async (number) => {
-        const issuing = withIssuedNumber(entry, { number, reference, issuedAt: revision.issuedAt });
-        const prepared = prepareMilestoneInvoiceDocument({
-          meta: { ...meta, ...(schedule ? { paymentSchedule: schedule } : {}), milestoneInvoices: current.map((other) => (other.milestoneIndex === entry.milestoneIndex ? issuing : other)) },
-          quote,
-          milestoneInvoice: issuing,
-        });
-        return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "invoice" });
-      },
-    });
-    const issued = withIssuedNumber(entry, result);
-    await writeIssuedInvoicePdf({ jobDir, relativePdfPath: issued.pdfPath, pdfBuffer: result.pdfBytes });
-    const stored = {
-      ...issued,
-      issuedRevision: transitionArtifactState(issued.issuedRevision, {
-        toState: ARTIFACT_STATE.STORED,
-        pdfSha256: result.pdfSha256,
-        pdfIssuedAt: result.issuedAt,
+      issuedAt,
+      issuedBy: issuedBy || revision.revisedBy || null,
+      reason,
+      credited: { number: credited.invoiceNumber, invoice: creditedInvoice },
+      creditNote,
+      creditNoteDetails: { milestoneIndex: entry.milestoneIndex, ...moneyOf(credited), ...partiesDetails({ meta, quote }) },
+      renderCreditNote: (number, { invoiceNumber }) => generateCreditNotePdfBuffer({
+        meta,
+        quote,
+        reference,
+        creditNote: {
+          number,
+          issuedAt,
+          reason,
+          currency: credited.currency || "AUD",
+          ...moneyOf(credited),
+          lines: creditNote.lines.map(() => ({
+            name: `Credit of ${credited.invoiceNumber}: ${claimDescription(entry)}`,
+            detail: quoteReferenceLine(creditedQuote),
+            ...moneyOf(credited),
+          })),
+        },
+        credited: { number: credited.invoiceNumber, issuedAt: credited.issuedAt, ...moneyOf(credited) },
+        replacement: { number: invoiceNumber, ...moneyOf(revision) },
       }),
-    };
-    current = current.map((other) => (other.milestoneIndex === entry.milestoneIndex ? stored : other));
+      invoice,
+      details,
+      render: (number, { creditNoteNumber }) => renderInvoice(entry, withIssuedNumber(entry, { number, reference, issuedAt: revision.issuedAt, creditNoteNumber })),
+      whenToCredit: toCredit.whenToCredit,
+    });
+    const note = result.creditNote;
+    const issued = withIssuedNumber(entry, { ...result.invoice, creditNoteNumber: note?.number || null });
+    await writeIssuedInvoicePdf({ jobDir, relativePdfPath: issued.pdfPath, pdfBuffer: result.invoice.pdfBytes });
+    let next = stored(issued, result.invoice);
+    if (note) {
+      const notePath = buildMilestoneInvoicePdfPath({ invoiceNumber: note.number, milestoneIndex: entry.milestoneIndex });
+      await writeIssuedInvoicePdf({ jobDir, relativePdfPath: notePath, pdfBuffer: note.pdfBytes });
+      next = {
+        ...next,
+        revisionHistory: (next.revisionHistory || []).map((historical) => (historical.revisionNumber === credited.revisionNumber
+          ? {
+              ...historical,
+              // Credited and replaced by this revision (already so for an
+              // approved change; now also for one returned to draft).
+              supersededByRevisionNumber: revision.revisionNumber,
+              creditNote: {
+                number: note.number,
+                reason,
+                issuedAt: note.issuedAt,
+                issuedBy: issuedBy || revision.revisedBy || null,
+                ...moneyOf(credited),
+                currency: credited.currency || "AUD",
+                replacementInvoiceNumber: result.invoice.number,
+                pdfPath: notePath,
+                pdfSha256: note.pdfSha256,
+              },
+            }
+          : historical)),
+      };
+    }
+    current = current.map((other) => (other.milestoneIndex === entry.milestoneIndex ? next : other));
   }
   return current;
 }
@@ -2661,7 +2789,7 @@ export async function migrateJobMilestoneInvoices({
     throw createJobActionError("target quote version not found", 404);
   }
   const resolvedMigrateTargetVersion = Number(targetArtifacts.quote.version || targetArtifacts.version || 0) || null;
-  // Identical guard to reviseJobMilestoneInvoice:
+  // Identical guard to creditAndReissueJobMilestoneInvoice:
   // this writes targetArtifacts.quote straight over root via
   // persistCurrentQuoteLockArtifacts below, with no archive of the
   // displaced content (root artifacts are only ever archived on fork).
@@ -2898,15 +3026,19 @@ export async function migrateJobMilestoneInvoices({
 }
 
 /**
- * Issue an audited revised invoice for a milestone after an approved job
- * change.
+ * Credit an issued milestone invoice and issue its replacement, after an
+ * approved job change (step 4b, #28; it replaces revising the invoice in
+ * place under an -R<k> number).
  *
- * The sent invoice and its PDF are never touched. The approved quote revision
- * becomes the customer-facing basis, the superseded revision is retained in
- * full, and the milestone gains a new numbered invoice reflecting the approved
- * current values.
+ * The issued invoice and its PDF are never touched. A credit (adjustment)
+ * note credits it in full, with the reason and who did it, and a new invoice
+ * reflecting the approved current values is issued in its place, both with
+ * numbers from the sequence and stored PDFs, in one transaction
+ * (server/invoices/issue.js `creditAndReissue`). Payments it held move to the
+ * new invoice. The approved quote revision becomes the customer-facing basis,
+ * and the credited revision is retained in full with its credit note.
  */
-export async function reviseJobMilestoneInvoice({
+export async function creditAndReissueJobMilestoneInvoice({
   jobDir,
   meta,
   config,
@@ -2918,12 +3050,12 @@ export async function reviseJobMilestoneInvoice({
 }) {
   const revisionReason = String(reason ?? "").trim();
   if (!revisionReason) {
-    throw createJobActionError("a revision reason is required to reissue an invoice", 400);
+    throw createJobActionError("a reason is required to credit and reissue an invoice", 400);
   }
 
   const hydratedMeta = await hydrateJobMeta(jobDir, meta);
   if (normalizePipelineStage(hydratedMeta?.pipelineStage || hydratedMeta?.deliveryStatus) !== "landed") {
-    throw createJobActionError("only landed jobs can issue a revised invoice", 409);
+    throw createJobActionError("only landed jobs can credit and reissue an invoice", 409);
   }
 
   const currentInvoice = findMilestoneInvoice(hydratedMeta?.milestoneInvoices || [], milestoneIndex);
@@ -3057,13 +3189,13 @@ export async function reviseJobMilestoneInvoice({
       === buildInvoiceRevisionFingerprint(nextInvoice.issuedRevision)
   ) {
     throw createJobActionError(
-      `invoice ${currentInvoice.invoiceNumber} already reflects the approved values; there is nothing to revise`,
+      `invoice ${currentInvoice.invoiceNumber} already reflects the approved values; there is nothing to credit and reissue`,
       409,
     );
   }
   if (roundMoney(nextInvoice.total) < roundMoney(currentInvoice.amountPaid)) {
     throw createJobActionError(
-      "a revised invoice cannot be lower than the amount already paid; void the payment first",
+      "the new invoice cannot be lower than the amount already paid on the one it replaces; void the payment first",
       409,
     );
   }
@@ -3094,12 +3226,15 @@ export async function reviseJobMilestoneInvoice({
     writeAllArtifacts: true,
     actor,
   });
-  // Described from the revision as issued: its number comes from the
-  // sequence when it is issued (persistMilestoneInvoiceState).
+  // Described from the documents as issued: their numbers come from the
+  // sequence when they are issued (persistMilestoneInvoiceState).
+  const issuedRevision = persisted.milestoneInvoice?.issuedRevision || nextInvoice.issuedRevision;
   const change = describeInvoiceRevisionChange({
     previous: currentInvoice.issuedRevision,
-    next: persisted.milestoneInvoice?.issuedRevision || nextInvoice.issuedRevision,
+    next: issuedRevision,
   });
+  const creditNote = (persisted.milestoneInvoice?.revisionHistory || [])
+    .find((entry) => entry.revisionNumber === issuedRevision?.supersedesRevisionNumber)?.creditNote || null;
   const quoteLifecycle = await recordQuoteCustomerVersionAccepted({
     jobDir,
     meta: persisted.meta,
@@ -3110,12 +3245,14 @@ export async function reviseJobMilestoneInvoice({
   await appendJobActivity({
     jobDir,
     activity: {
-      kind: "invoice.revised",
+      kind: "invoice.credited",
       ts: revisedAt,
       actor: actor || { kind: "system", label: "Field" },
-      title: "Revised invoice issued",
+      title: "Invoice credited and reissued",
       body: [
-        `${change.invoiceNumber} (revision ${change.revisionNumber}) supersedes ${change.supersedesInvoiceNumber}`,
+        creditNote
+          ? `${change.supersedesInvoiceNumber} credited by ${creditNote.number}; ${change.invoiceNumber} issued in its place`
+          : `${change.invoiceNumber} (revision ${change.revisionNumber}) supersedes ${change.supersedesInvoiceNumber}`,
         `total ${change.supersededTotal} → ${change.total}`,
         change.supersededQuoteVersion || change.quoteVersion
           // A legacy-synthesized predecessor's quote version is pinned to
@@ -3134,6 +3271,8 @@ export async function reviseJobMilestoneInvoice({
     quote: finalizedArtifacts.quote || targetArtifacts.quote,
     paymentSchedule: generated.paymentSchedule,
     milestoneInvoices: persisted.meta.milestoneInvoices || [],
+    creditNote,
+    invoice: change,
     revision: change,
     quoteLifecycle,
   };
