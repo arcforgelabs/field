@@ -3,6 +3,7 @@
 #
 #   scripts/github-sync.sh status                 # remote, upstream, ahead/behind, auth
 #   scripts/github-sync.sh pull                   # fast-forward the default branch from GitHub
+#                                                 # (drops Replit's empty "Published your App" commits; no token needed for a public repo)
 #   scripts/github-sync.sh push-branch [name]     # push current (or named) branch
 #   scripts/github-sync.sh open-pr "<title>" [body-file]   # push + open PR from current branch
 #   scripts/github-sync.sh handoff                # print a handoff block when no token is available
@@ -101,12 +102,33 @@ cmd_status() {
   fi
 }
 
+# Replit commits "Published your App" (and checkpoints) on the current branch.
+# When the local-only commits together change no files, they are noise: drop
+# them so the pull can fast-forward. Local commits that change files stop here.
+drop_empty_local_commits() {
+  local r="$1" base
+  [ -n "$(git -C "$ROOT" rev-list "$r/$MAIN..HEAD")" ] || return 0
+  base="$(git -C "$ROOT" merge-base HEAD "$r/$MAIN")" \
+    || die "$MAIN shares no history with $r/$MAIN; follow the replit-github repair procedure"
+  if git -C "$ROOT" diff --quiet "$base" HEAD; then
+    echo "dropping local-only commits that change no files:"
+    git -C "$ROOT" log --format='  %h %s' "$r/$MAIN..HEAD"
+    git -C "$ROOT" reset -q --hard "$base"
+  else
+    git -C "$ROOT" log --format='  %h %s' "$r/$MAIN..HEAD" >&2
+    die "$MAIN has local commits that change files; move them to a branch and open a PR"
+  fi
+}
+
+# Pulling a public repository needs no token; with one set, it is used.
 cmd_pull() {
-  require_token
-  local r; r="$(ensure_remote)"; ensure_helper
+  local r; r="$(ensure_remote)"
+  if have_token; then ensure_helper; fi
   [ "$(git -C "$ROOT" branch --show-current)" = "$MAIN" ] || die "switch to $MAIN first"
   [ -z "$(git -C "$ROOT" status --porcelain)" ] || die "working tree is dirty; commit or stash first"
-  git -C "$ROOT" fetch "$r" "$MAIN"
+  git -C "$ROOT" fetch "$r" "$MAIN" \
+    || die "fetch failed; a private repository needs the GITHUB_TOKEN secret (see: $0 handoff)"
+  drop_empty_local_commits "$r"
   git -C "$ROOT" merge --ff-only "$r/$MAIN"
   git -C "$ROOT" branch --set-upstream-to="$r/$MAIN" "$MAIN" >/dev/null
   echo "$MAIN is now $(git -C "$ROOT" rev-parse --short HEAD)"
