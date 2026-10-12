@@ -11,7 +11,7 @@
     "start": "node server/index.js",
     "dev": "FIELD_PGLITE=\"${FIELD_PGLITE:-1}\" node --watch server/index.js",
     "dev:client": "cd client && npx vite",
-    "test": "npm run db:build && bash -lc 'find server scripts shared -name \"*.test.js\" -print0 | xargs -0 node --test'",
+    "test": "npm run db:build && bash -lc 'find server scripts shared -name \"*.test.js\" -print0 | xargs -0 node --test --test-concurrency=\"${FIELD_TEST_CONCURRENCY:-8}\"'",
     "test:client": "npm --prefix client test",
     "build": "npm run db:build && npm run build:client",
     "build:client": "cd client && npm ci --no-audit --no-fund && npm run build",
