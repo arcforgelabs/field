@@ -15,6 +15,7 @@
 // that does not is counted under `mismatches`, with both numbers in
 // `lastMismatch`, and its draft rows are removed, so the rows never disagree
 // with Field. A sent version's rows are never rewritten.
+import { describeRowFailure } from "../observability/row-failure-log.js";
 import { syncJobQuoteRows } from "./sync.js";
 
 const NOOP = Object.freeze({
@@ -100,9 +101,8 @@ export function createQuoteRowRecorder({ service, issuedDocuments = null, logger
             number: version.number || null,
             failures: version.failures.slice(0, 10),
           };
-          logger.warn(`[quote-rows] job ${result.jobId} v${version.version}: rows not written (${version.failures.map((failure) => failure.kind === "totals"
-            ? `${failure.field} rows ${failure.rows} vs ${failure.against} ${failure.shown}`
-            : failure.reason || failure.kind).join("; ")}); the job files still hold it`);
+          // By uid and kind only: the line reaches Sentry Logs.
+          logger.warn(`[quote-rows] job ${result.jobId} v${version.version}: rows not written (${version.failures.map((failure) => describeRowFailure(failure, { documentUid: version.issuedDocumentUid || null })).join("; ")}); the job files still hold it`);
         }
       }
       return result;

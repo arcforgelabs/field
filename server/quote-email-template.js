@@ -190,7 +190,9 @@ export function renderQuoteEmailHtml({
 
   const { html, errors } = mjml2html(mjmlTemplate);
   if (errors?.length) {
-    console.warn("[quote-email-template] MJML warnings:", errors.map((e) => e.formattedMessage).join("\n"));
+    // Where, not what: the template holds the customer's details, and a
+    // warning can quote an attribute value.
+    console.warn(`[quote-email-template] ${errors.length} MJML warning(s): ${errors.map((e) => `line ${e.line} ${e.tagName}`).join(", ")}`);
   }
   return html;
 }

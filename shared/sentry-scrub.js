@@ -7,11 +7,11 @@
 // strings (also the bare `http.query` and `url.query` span attributes, which
 // have no `?` to find), the user, console breadcrumbs, local variables, and any value whose
 // key names customer, contact, address, money or credential details. What is
-// rewritten in free text (error messages, URLs, paths, breadcrumbs): email
-// addresses, Australian phone numbers, BSBs, query strings, and job folder or
-// job route segments that are not UUIDs, route parameters or single words
-// (older job folders were named after the site address). Long strings are cut
-// short.
+// rewritten in free text (error messages, URLs, paths, breadcrumbs, log
+// lines): email addresses, document numbers, money amounts, Australian phone
+// numbers, BSBs, query strings, and job folder or job route segments that are
+// not UUIDs, route parameters or single words (older job folders were named
+// after the site address). Long strings are cut short.
 
 const SENSITIVE_KEY =
   /email|phone|mobile|address|customer|client|contact|recipient|attention|site|title|subject|notes?$|body$|html$|pdf|attachment|abn|bsb|bank|account.?(number|name)|password|passphrase|token|secret|authorization|cookie|api.?key|dsn|query$/i;
@@ -21,6 +21,17 @@ const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 // or brackets (04xx xxx xxx, (08) 8xxx xxxx, +61 4xx xxx xxx), and 13/1300/1800.
 const PHONE = /(?<![\w-])(?:\+?61[\s-]?[2-478]|\(0[2-478]\)|0[2-478])(?:[\s-]?\d){8}(?![\w-])|(?<![\w-])1[38]00(?:[\s-]?\d){6}(?![\w-])|(?<![\w-])13(?:[\s-]?\d){4}(?![\w-])/g;
 const BSB = /(?<![\w-])\d{3}-\d{3}(?![\w-])/g;
+// Quote, invoice, receipt and credit-note numbers: EQ-2501-01, EI-2501-01-M1,
+// EI-2501-01-M1-R2, ER-2501-01-M1, INV-2026-10-3, RCT-2026-10-3, CN-2026-1-1,
+// with a version (" v2") when one follows.
+const DOCUMENT_NUMBER = /(?<![A-Za-z0-9])(?:EQ|EI|ER|INV|RCT|CN)-\d+(?:-[MR]?\d+)*(?:[\s_-]?v\d+)?(?![A-Za-z0-9])/g;
+// Money: anything with a currency sign ($1,234.56, A$90, AUD 925), and a
+// plain number with exactly two decimals (925.50, 1,018.05, -12.00). A
+// version (1.2.3, 24.10.0), a timestamp (12:30:45.12), a duration (12.34ms),
+// an IP address, a UUID, a status code or a count has no currency sign and
+// is not a lone two-decimal number, so it stays.
+const CURRENCY_AMOUNT = /(?:-\s?)?(?:\bAUD\s?|A?\$)\s?-?\d[\d,]*(?:\.\d+)?/g;
+const DECIMAL_AMOUNT = /(?<![\w.,:/-])-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}(?!\w|[.,]\d)/g;
 const QUERY = /([\w\-./:%@#]+)\?[^\s"'<>)]+/g;
 const JOB_SEGMENT = /(\/\d{4}-\d{2}-\d{2}\/|\/jobs\/)([^/\s?#"'<>]+)/gi;
 // A single lowercase word (`manual`, `bulk-archive` has a hyphen and stays
@@ -38,6 +49,9 @@ export function scrubText(value, max = MAX_TEXT) {
     .replace(EMAIL, "[email]")
     .replace(QUERY, "$1?[query]")
     .replace(JOB_SEGMENT, (match, prefix, segment) => (UUID.test(segment) || segment.startsWith(":") || ROUTE_WORD.test(segment) ? match : `${prefix}[job]`))
+    .replace(DOCUMENT_NUMBER, "[doc]")
+    .replace(CURRENCY_AMOUNT, "[amount]")
+    .replace(DECIMAL_AMOUNT, "[amount]")
     .replace(PHONE, "[phone]")
     .replace(BSB, "[bsb]");
   if (text.length > max) text = `${text.slice(0, max)}…[cut]`;
@@ -165,6 +179,19 @@ export function createEventThrottle({ windowMs = 60 * 60 * 1000, maxPerWindow = 
   };
 }
 
+// Console arguments after the first become `sentry.message.parameter.<n>`
+// attributes. A number there with a fraction may be money; whole numbers are
+// counts, ids and status codes, and stay.
+const LOG_PARAMETER = /^sentry\.message\.parameter\./;
+
+function scrubLogAttributes(attributes) {
+  const out = scrubValue(attributes);
+  for (const [key, value] of Object.entries(out)) {
+    if (LOG_PARAMETER.test(key) && typeof value === "number" && !Number.isInteger(value)) out[key] = "[amount]";
+  }
+  return out;
+}
+
 // A log line (server console output sent to Sentry Logs): the same free-text
 // rewriting as error messages, and the same key rules for its attributes.
 export function scrubLog(log) {
@@ -172,6 +199,6 @@ export function scrubLog(log) {
   return {
     ...log,
     message: scrubText(typeof log.message === "string" ? log.message : String(log.message ?? "")),
-    attributes: log.attributes ? scrubValue(log.attributes) : log.attributes,
+    attributes: log.attributes && typeof log.attributes === "object" ? scrubLogAttributes(log.attributes) : log.attributes,
   };
 }
