@@ -180,7 +180,9 @@ prices.
   tools pass these, so an edit landing between their re-read and their write
   is refused, not overwritten. Every catalogue write locks the `catalog_meta`
   row, so writes are serialised, and bumps `catalog_meta.version` in the same
-  transaction. A write's response is read after its own commit. The catalogue
+  transaction. A write reads the clock only once it holds that lock, so a
+  write that queued behind another is dated after it: the other write's price
+  is current to it, not scheduled, and its own price lands on top. A write's response is read after its own commit. The catalogue
   ETag is `W/"catalog-<version>-<priceEpoch>"`; over HTTP it also carries the
   build revision (`FIELD_REVISION`, else one id per boot), because item rows
   depend on the recipes a deploy ships.
