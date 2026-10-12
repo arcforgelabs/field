@@ -447,10 +447,14 @@ function isClusterRoleConflict(error) {
   return false;
 }
 
-async function migrateWithRoleConflictRetry(lockedDb) {
+// Apply the migrations to one PostgreSQL drizzle instance, repeating a run a
+// cluster-wide role conflict rolled back. runMigrations uses it under the
+// migration lock; tests that migrate databases of their own call it directly,
+// so databases migrating side by side on one server never collide.
+export async function migratePostgresDatabase(db, { migrationsFolder = MIGRATIONS_FOLDER } = {}) {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await migratePostgres(lockedDb, { migrationsFolder: MIGRATIONS_FOLDER });
+      return await migratePostgres(db, { migrationsFolder });
     } catch (error) {
       if (attempt > ROLE_CONFLICT_RETRIES || !isClusterRoleConflict(error)) throw error;
       await new Promise((wake) => setTimeout(wake, 50 * attempt + Math.floor(Math.random() * 100)));
@@ -472,7 +476,7 @@ async function migrateDb(db, config) {
       await takeMigrationLock(client);
       const lockedDb = drizzlePostgres(client, { schema });
       before = await appliedMigrationCount(lockedDb);
-      await migrateWithRoleConflictRetry(lockedDb);
+      await migratePostgresDatabase(lockedDb);
       await client`select pg_advisory_unlock(${MIGRATION_LOCK_KEY.toString()}::bigint)`;
     } finally {
       await client.end({ timeout: 5 });

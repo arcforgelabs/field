@@ -8,9 +8,8 @@ import { randomBytes } from "node:crypto";
 import { after, before, test } from "node:test";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
-import { MIGRATIONS_FOLDER, queryRows, schema } from "../db-runtime/index.js";
+import { migratePostgresDatabase, queryRows, schema } from "../db-runtime/index.js";
 import { startTestPostgres, testPostgresMode } from "../db-runtime/test-postgres.js";
 import { DEFAULT_ORG_UID, inspectRowSecurity, withOrg } from "../db-runtime/tenancy.js";
 import { createIssuedDocumentService } from "./issued-documents.js";
@@ -70,7 +69,7 @@ test("as a table owner without CREATEROLE: isolation, immutability and bytes rou
     url.username = role;
     url.pathname = `/${database}`;
     const { db } = connect(url.toString());
-    await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+    await migratePostgresDatabase(db);
     const mode = await inspectRowSecurity(db);
     assert.equal(mode.enforced, true);
     await db.execute(sql`insert into organizations (uid, name, slug) values (${ORG_B}, 'Second Org', 'second')`);
@@ -108,7 +107,7 @@ test("as a table owner without CREATEROLE: isolation, immutability and bytes rou
 
 test("through SET ROLE field_app: the replica record is readable, insertable and updatable while pending, never deletable", { skip: !enabled && "set FIELD_DB_TEST_DOCKER=1 or FIELD_DB_TEST_DATABASE_URL" }, async () => {
   const { db } = connect(server.url);
-  await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  await migratePostgresDatabase(db);
   const mode = await inspectRowSecurity(db);
   assert.equal(mode.via, "set-role");
   const service = createIssuedDocumentService({ db, orgUid: DEFAULT_ORG_UID });

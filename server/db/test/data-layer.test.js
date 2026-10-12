@@ -16,7 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import test, { after, before } from "node:test";
 
 import { eq } from "drizzle-orm";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { migratePostgresDatabase } from "../../db-runtime/index.js";
 
 import { resolveDatabaseTestMode } from "./data-layer-mode.js";
 
@@ -229,7 +229,7 @@ test("generated migration applies and the typed probe can be queried", async (t)
     return;
   }
 
-  await migrate(connection.db, { migrationsFolder: migrationFolder });
+  await migratePostgresDatabase(connection.db, { migrationsFolder: migrationFolder });
 
   const probe = await dataLayer.insertToolchainProbe(connection.db, {
     probeKey: `del-75-${Date.now()}`,

@@ -506,12 +506,11 @@ const needsPostgres = pg ? {} : { skip: "set FIELD_DB_TEST_DATABASE_URL or FIELD
 
 async function migrated(url) {
   const { drizzle } = await import("drizzle-orm/postgres-js");
-  const { migrate } = await import("drizzle-orm/postgres-js/migrator");
   const postgres = (await import("postgres")).default;
-  const { MIGRATIONS_FOLDER } = await import("../db-runtime/index.js");
+  const { migratePostgresDatabase } = await import("../db-runtime/index.js");
   const client = postgres(url, { max: 1, onnotice: () => {} });
   try {
-    await migrate(drizzle(client), { migrationsFolder: MIGRATIONS_FOLDER });
+    await migratePostgresDatabase(drizzle(client));
   } finally {
     await client.end();
   }
