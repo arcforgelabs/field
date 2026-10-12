@@ -17,7 +17,7 @@
 //     when the quote moves on (both directions).
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -34,6 +34,7 @@ import { listInvoiceAmountDisagreements } from "./amount-evidence.js";
 import { createInvoiceAmountDisagreementsHandler, createInvoiceAmountSettleHandler } from "./amount-routes.js";
 import { backfillInvoiceRows } from "./backfill.js";
 import { createInvoiceRowService } from "./invoice-rows.js";
+import { syncJobInvoiceRows } from "./sync.js";
 import { act, actions, applyVariation, createLegacyVersionMismatchJob, renderLegacyInvoicePdf } from "./test-fixtures.js";
 
 const OWNER = { kind: "user", label: "Owner Test" };
@@ -300,6 +301,120 @@ describe("legacy milestone invoices from two quote versions", () => {
     await handler({ body: { jobId: "job-routes", invoiceNumber: job.number, choose: "stored-pdf", total: "3960.00", reason: "the v1 PDF was sent" } }, ok);
     assert.equal(ok.statusCode, 200);
     assert.deepEqual(calls, [{ invoiceNumber: job.number, choose: "stored-pdf", total: "3960.00", reason: "the v1 PDF was sent" }]);
+
+    const logged = [];
+    const failing = createInvoiceAmountSettleHandler({
+      findJob: async (id) => ({ dir: job.jobDir, meta: { id } }),
+      settle: async () => { throw new Error(`ENOENT: ${job.jobDir}/milestone-invoices/state.json`); },
+      logger: { error: (line) => logged.push(line) },
+    });
+    const broken = fakeResponse();
+    await failing({ body: { jobId: "job-routes", invoiceNumber: job.number, choose: "stored-pdf", total: "3960.00", reason: "x" } }, broken);
+    assert.equal(broken.statusCode, 500);
+    assert.equal(broken.body.error, "The invoice could not be settled. The server log has the reason.");
+    assert.equal(JSON.stringify([broken.body, logged]).includes(job.jobDir), false, "no path in the answer or the log");
+  });
+
+  test("after a sent-copy backfill every later sync keeps the emailed amounts; the owner can only settle with the sent copy, and then the job bills it too", async () => {
+    const fresh = await createTestDb();
+    try {
+      const service = createInvoiceRowService({ db: fresh.db, orgUid: DEFAULT_ORG_UID });
+      const dataDir = dataDirFor("sent-then-sync");
+      const job = await createLegacyVersionMismatchJob(dataDir, { id: "job-sent-then-sync", number: "2607-71", recordVersion: 2, pdfVersion: 1 });
+      await actions.update(job.jobDir, 1, { dueDate: "2026-09-30" });
+      await ledgerSend(job.jobDir, job.number, job.pdf, 1);
+      const backfilled = await backfillInvoiceRows({ dataDir, service });
+      assert.equal(backfilled.jobsRefused, 0, JSON.stringify(backfilled.mismatches));
+
+      // A later milestone action, then the dual-write sync (no PDF checks).
+      await actions.update(job.jobDir, 1, { dueDate: "2026-10-30" });
+      const synced = await syncJobInvoiceRows({ jobDir: job.jobDir, service });
+      assert.equal(synced.ok, true, JSON.stringify(synced.failures));
+      assert.equal(synced.failures.length, 0);
+      const row = (await service.readJob("job-sent-then-sync")).invoices.find((invoice) => invoice.number === job.number);
+      assert.equal(row.total, "3960.00", "the row keeps what was emailed");
+
+      // The report offers only the copy emailed, and says the record still bills.
+      const [entry] = (await listInvoiceAmountDisagreements({ dataDir })).invoices;
+      assert.equal(entry.state, "sent-differs-from-recorded");
+      assert.deepEqual(entry.options.map((option) => [option.choose, option.total]), [["sent-copy", "3960.00"]]);
+      assert.match(entry.note, /still bill the record's 5115.00 until you settle with "sent-copy"/);
+      assert.equal((await deposit(job.jobDir)).amountDue, 5115, "until settled, the job bills the record");
+      await assert.rejects(() => settle(job.jobDir, { invoiceNumber: job.number, choose: "milestone-record", total: "5115.00", reason: "x" }), /only "sent-copy" can be chosen/);
+
+      await settle(job.jobDir, { invoiceNumber: job.number, choose: "sent-copy", total: "3960.00", reason: "The ledger holds the PDF emailed" });
+      const settled = await deposit(job.jobDir);
+      assert.deepEqual([settled.invoiceNumber, settled.revisionNumber, settled.total, settled.amountDue], [job.number, 1, 3960, 3960]);
+      const after = await syncJobInvoiceRows({ jobDir: job.jobDir, service, verifyIssued: true });
+      assert.equal(after.ok, true, JSON.stringify(after.failures));
+      assert.equal(after.summary.conflicts.length, 0);
+    } finally {
+      await fresh.close();
+    }
+  });
+
+  test("a legacy invoice whose PDF is missing takes the hash-verified copy Field emailed, and a payment on it goes ahead", async () => {
+    const dataDir = dataDirFor("missing-sent");
+    const job = await createLegacyVersionMismatchJob(dataDir, { id: "job-missing-sent", number: "2607-72", recordVersion: 1, pdfVersion: 1 });
+    await ledgerSend(job.jobDir, job.number, job.pdf, 1);
+    await runAtomicJobGeneration(job.jobDir, async (staged) => rm(join(staged, job.deposit.pdfPath)));
+    await actions.pay(job.jobDir, 0, 500);
+    const paid = await deposit(job.jobDir);
+    assert.equal(paid.amountPaid, 500);
+    assert.equal(paid.issuedRevision.artifactState, "stored");
+    assert.equal(paid.issuedRevision.pdfSha256, sha256Hex(job.pdf));
+    assert.deepEqual(await readPdf(job.jobDir, job.deposit.pdfPath), job.pdf, "restored byte for byte from the ledger");
+    const { activity } = await readJobState(job.jobDir);
+    assert.ok(activity.some((entry) => entry.kind === "invoice.artifact_restored_from_sent_copy"));
+  });
+
+  test("settling is refused when it would make the issued invoices claim more than the quote", async () => {
+    const dataDir = dataDirFor("settle-overclaim");
+    // Record 3960.00 (v1), stored PDF 5115.00 (v2); the completion is then
+    // issued for the rest of v2 (13090.00).
+    const job = await createLegacyVersionMismatchJob(dataDir, { id: "job-settle-overclaim", number: "2607-73", recordVersion: 1, pdfVersion: 2 });
+    await actions.issue(job.jobDir, 1);
+    const before = await readJobMeta(job.jobDir);
+    assert.equal(before.milestoneInvoices[1].total, 13090);
+    await assert.rejects(
+      () => settle(job.jobDir, { invoiceNumber: job.number, choose: "stored-pdf", total: "5115.00", reason: "x" }),
+      (error) => error.statusCode === 409 && /claim 18205.00, more than the quote's 17050.00/.test(error.message),
+    );
+    const after = await readJobMeta(job.jobDir);
+    assert.equal(after.milestoneInvoices[0].issuedRevision.amountsSettlement, undefined, "nothing was settled");
+    assert.equal(after.milestoneInvoices[1].total, 13090);
+  });
+
+  test("settling a superseded revision (a deposit revised since) changes only that revision's amounts, under the same number", async () => {
+    const dataDir = dataDirFor("settle-superseded");
+    // The record was re-allocated to v2 (5115.00) after the v1 PDF (3960.00)
+    // was emailed; a later variation (v3) revised the deposit to -R2.
+    const job = await createLegacyVersionMismatchJob(dataDir, { id: "job-settle-superseded", number: "2607-74", recordVersion: 2, pdfVersion: 1 });
+    await actions.update(job.jobDir, 1, { dueDate: "2026-09-30" });
+    await applyVariation(job.jobDir, job.quotes[2], ["Extra drainage", 2000]);
+    await actions.revise(job.jobDir, 0);
+    const revised = await deposit(job.jobDir);
+    const current = revised.issuedRevision;
+    assert.notEqual(current.invoiceNumber, job.number);
+
+    const listed = await listInvoiceAmountDisagreements({ dataDir });
+    const entry = listed.invoices.find((candidate) => candidate.invoiceNumber === job.number);
+    assert.deepEqual([entry.status, entry.revision, entry.recorded.total, entry.storedPdf.total], ["superseded", 1, "5115.00", "3960.00"]);
+
+    await settle(job.jobDir, { invoiceNumber: job.number, choose: "stored-pdf", total: "3960.00", reason: "The archived email was built against v1" });
+    const after = await deposit(job.jobDir);
+    const r1 = after.revisionHistory.find((revision) => revision.invoiceNumber === job.number);
+    assert.deepEqual([r1.invoiceNumber, r1.revisionNumber, r1.total, r1.amountsSettlement.recorded.total], [job.number, 1, 3960, 5115]);
+    assert.deepEqual(
+      [after.issuedRevision.invoiceNumber, after.issuedRevision.revisionNumber, after.issuedRevision.total, after.total, after.amountDue],
+      [current.invoiceNumber, current.revisionNumber, current.total, revised.total, revised.amountDue],
+      "the current revision and what is owed are unchanged",
+    );
+    assert.deepEqual(await readPdf(job.jobDir, job.deposit.pdfPath), job.pdf);
+    const report = await backfillInvoiceRows({ dataDir });
+    assert.equal(report.jobsRefused, 0, JSON.stringify(report.mismatches));
+    const row = report.entries[0].invoices.find((invoice) => invoice.number === job.number);
+    assert.deepEqual([row.status, row.rows.total], ["credited", "3960.00"]);
   });
 
   describe("today's code keeps issued history (regressions, both directions)", () => {

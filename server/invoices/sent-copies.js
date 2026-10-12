@@ -68,6 +68,8 @@ function copyFrom({ source, reference, bytes, sentAt, number = null }) {
     number: number || facts?.number || null,
     totals: facts?.totals || null,
     contractValue: facts?.contractValue || null,
+    // The bytes themselves, for adopting a missing legacy PDF; never reported.
+    bytes,
   };
 }
 

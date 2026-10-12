@@ -358,8 +358,13 @@ An issued invoice is a money document, not a projection of the current quote.
     the file can come from different quote versions.
   - When the adopted file claims a different total, the job activity says so
     (`invoice.adopted_pdf_differs`).
-  - A missing legacy PDF is never redrawn from its inferred version. It stays
-    unrecoverable (410) until someone restores the file.
+  - A missing legacy PDF is never redrawn from its inferred version. If
+    Field holds the hash-verified copy that it emailed, that copy is
+    restored to the PDF path (`invoice.artifact_restored_from_sent_copy`).
+    Otherwise the PDF stays MISSING until someone restores the file.
+  - A MISSING PDF stops only the actions that deliver it: download and send
+    answer 410. Payment and status actions go ahead and leave it
+    MISSING.
 - **What was sent decides (#60).** The sources, strongest first
   (`server/invoices/sent-copies.js`):
   1. An `issued_documents` row with an `emailed` event.

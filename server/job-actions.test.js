@@ -5503,7 +5503,7 @@ test("a job stored before artifactState (pdfIssuedAt/pdfUnrecoverable, no artifa
   }
 });
 
-test("a legacy issued invoice with a missing PDF is never redrawn from its inferred quote version: the action targeting it answers 410 until the file is restored", async () => {
+test("a legacy issued invoice with a missing PDF is never redrawn from its inferred quote version, yet a payment on it is recorded; restoring the file is the way back", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-legacy-reconstruct-"));
 
   try {
@@ -5559,26 +5559,34 @@ test("a legacy issued invoice with a missing PDF is never redrawn from its infer
     // revision gets (v2, current at the freeze) is inferred, not the one its
     // PDF was drawn from. Field must not redraw the PDF from that guess and
     // store it under the original issue time as if it were the document the
-    // customer was sent: the action that targets it answers 410, as for any
-    // unrecoverable issued invoice, and writes nothing.
+    // customer was sent. Its PDF stays MISSING (downloads answer 410), but
+    // payment and status actions do not need the bytes and go ahead.
     const hydrated = await readJobMeta(jobDir);
-    await assert.rejects(
-      () => updateJobMilestone({
-        jobDir,
-        meta: hydrated,
-        config: {},
-        milestoneIndex: 0,
-        patch: { dueDate: "2026-06-01" },
-      }),
-      (err) => {
-        assert.equal(err.statusCode, 410);
-        assert.match(err.message, /not redrawn from a guessed version/);
-        return true;
-      },
-    );
+    const paid = await recordJobMilestonePayment({
+      jobDir,
+      meta: hydrated,
+      config: {},
+      milestoneIndex: 0,
+      payment: { amount: 100, date: "2026-06-01", method: "bank_transfer" },
+    });
+    const legacy = paid.meta.milestoneInvoices[0];
+    assert.equal(legacy.amountPaid, 100, "the payment is recorded");
+    assert.equal(legacy.issuedRevision.artifactState, ARTIFACT_STATE.MISSING);
+    assert.match(legacy.issuedRevision.pdfUnrecoverableReason, /not redrawn from a guessed version/);
     assert.ok(!existsSync(join(jobDir, "milestone-invoices", "EI-RECON-01-M1.pdf")), "no PDF was drawn");
+    const updated = await updateJobMilestone({
+      jobDir,
+      meta: await readJobMeta(jobDir),
+      config: {},
+      milestoneIndex: 0,
+      patch: { dueDate: "2026-06-01" },
+    });
+    assert.equal(updated.meta.milestoneInvoices[0].dueDate, "2026-06-01");
     const { activity } = await readJobState(jobDir);
     assert.ok(!activity.some((entry) => entry.kind === "invoice.artifact_reconstructed"));
+    assert.equal(activity.filter((entry) => entry.kind === "invoice.artifact_unrecoverable").length, 1, "said once, not on every action");
+    const read = await resolveIssuedMilestoneInvoiceArtifact({ jobDir, documentType: "invoice", milestoneInvoice: updated.meta.milestoneInvoices[0] });
+    assert.equal(read.gone, true, "the download still answers 410");
 
     // Restoring the file is the way back: the next action adopts it as it is.
     const restored = Buffer.from("%PDF-1.3 restored copy of the sent invoice\n");
@@ -5726,31 +5734,25 @@ test("an unrecoverable issued artifact on one milestone does not block a mutatio
   }
 });
 
-test("an explicit action targeting the unrecoverable invoice itself still fails loudly with a 410", async () => {
+test("a status action on the unrecoverable invoice itself goes ahead and leaves it MISSING; its download still answers 410", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-unrecoverable-explicit-"));
 
   try {
     await seedJobWithBrokenLegacyMilestoneZero(jobDir, { pinPdfVersion: false });
 
     const hydrated = await readJobMeta(jobDir);
-    await assert.rejects(
-      () => updateJobMilestone({
-        jobDir,
-        meta: hydrated,
-        config: {},
-        milestoneIndex: 0,
-        patch: { dueDate: "2026-06-01" },
-      }),
-      (err) => {
-        assert.equal(err.statusCode, 410);
-        return true;
-      },
-    );
-
-    // The failed explicit action must not have persisted a partial/degraded
-    // state — the previous meta.json is untouched.
-    const stillHydrated = await readJobMeta(jobDir);
-    assert.equal(stillHydrated.milestoneInvoices[0].dueDate ?? null, null);
+    const updated = await updateJobMilestone({
+      jobDir,
+      meta: hydrated,
+      config: {},
+      milestoneIndex: 0,
+      patch: { dueDate: "2026-06-01" },
+    });
+    const milestone0 = updated.meta.milestoneInvoices[0];
+    assert.equal(milestone0.dueDate, "2026-06-01");
+    assert.equal(milestone0.issuedRevision.artifactState, ARTIFACT_STATE.MISSING);
+    const read = await resolveIssuedMilestoneInvoiceArtifact({ jobDir, documentType: "invoice", milestoneInvoice: milestone0 });
+    assert.equal(read.gone, true);
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }

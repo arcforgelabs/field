@@ -351,6 +351,10 @@ export async function writeMilestoneInvoiceArtifact({
   meta,
   quote,
   milestoneInvoice,
+  // async (invoiceNumber) => hash-verified copies Field emailed, each with
+  // its bytes (server/invoices/sent-copies.js); a legacy revision whose PDF
+  // is missing adopts one instead of being unrecoverable.
+  findSentCopy = null,
 }) {
   jobDir = await resolveWritableJobGeneration(jobDir);
   if (!milestoneInvoice) {
@@ -391,15 +395,11 @@ export async function writeMilestoneInvoiceArtifact({
     // not a bolted-on guard: it falls directly out of "any money-document
     // state re-verifies disk before acting," which is exactly what the
     // state model is for.
-    if (existsSync(pdfPath)) {
-      const existingBytes = await readFile(pdfPath);
-      const pdfSha256 = createHash("sha256").update(existingBytes).digest("hex");
-      // Prefer the revision's own official issue date over a previously
-      // recorded artifact timestamp — consistent with the reconstruct
-      // branch below and with the self-heal's original intent, which stamps
-      // pdfIssuedAt from the record's own issuedAt rather than the current
-      // time. Both preserve history; only the preference order
-      // was inconsistent between the two branches.
+    // Adopt bytes as this revision's issued PDF: read, hashed and stamped
+    // with the revision's own issue time (preferred over a previously
+    // recorded artifact timestamp, as in the reconstruct branch below).
+    const adopt = (bytes, adoptedFrom = null) => {
+      const pdfSha256 = createHash("sha256").update(bytes).digest("hex");
       const pdfIssuedAt = identitySource?.issuedAt || identitySource?.pdfIssuedAt || null;
       // A legacy file adopted for the first time: before revisions were
       // frozen, Field re-rendered a milestone's PDF only when an action
@@ -408,20 +408,21 @@ export async function writeMilestoneInvoiceArtifact({
       // the file regardless (it is never overwritten), and say so when its
       // claim differs from the record, so an owner settles which was sent.
       let adoptedClaimDiffers = null;
-      if (state === ARTIFACT_STATE.ADOPT_PENDING && identitySource) {
-        const printed = extractInvoicePdfTotals(existingBytes);
+      if ((state === ARTIFACT_STATE.ADOPT_PENDING || adoptedFrom) && identitySource) {
+        const printed = extractInvoicePdfTotals(bytes);
         const recordedTotal = Math.round(Number(identitySource.total || 0) * 100);
         if (printed && Math.round(Number(printed.total) * 100) !== recordedTotal) {
           adoptedClaimDiffers = { printedTotal: printed.total, recordedTotal: (recordedTotal / 100).toFixed(2) };
         }
       }
       return {
-        pdfBuffer: existingBytes,
+        pdfBuffer: bytes,
         pdfPath,
         relativePdfPath,
         alreadyIssued: true,
         selfHealed: state !== ARTIFACT_STATE.STORED,
         adoptedClaimDiffers,
+        adoptedFrom,
         // Convenience top-level mirrors of the transition's data fields —
         // callers that only care about the bytes/hash/timestamp (tests,
         // simple consumers) don't need to unpack `artifactTransition`.
@@ -434,6 +435,9 @@ export async function writeMilestoneInvoiceArtifact({
           pdfIssuedAt,
         },
       };
+    };
+    if (existsSync(pdfPath)) {
+      return adopt(await readFile(pdfPath));
     }
 
     // No file at all. A legacy revision (issued before revisions recorded
@@ -441,8 +445,18 @@ export async function writeMilestoneInvoiceArtifact({
     // was current when it was first frozen, not the one its PDF was drawn
     // from. Redrawing it from that guess would store a document the customer
     // was never sent under the original issue time, so it is unrecoverable
-    // until the file itself is restored (the adopt branch above takes it).
+    // until the file itself is restored (the adopt branch above takes it),
+    // unless Field holds the copy it emailed.
     if (identitySource?.quoteVersionInferred) {
+      // The copy Field emailed, verified by its hash, is the document the
+      // customer received: adopt it when it is unambiguous.
+      const copies = findSentCopy ? await findSentCopy(identitySource.invoiceNumber || milestoneInvoice.invoiceNumber) : [];
+      const distinct = new Set(copies.map((copy) => copy.sha256));
+      if (copies.length && distinct.size === 1 && copies[0].bytes) {
+        await mkdir(dirname(pdfPath), { recursive: true });
+        await writeFile(pdfPath, copies[0].bytes);
+        return adopt(copies[0].bytes, copies[0].source);
+      }
       const message = `the PDF for invoice ${milestoneInvoice.invoiceNumber || relativePdfPath} is missing, and it was issued before Field recorded which quote version an invoice was drawn from, so it is not redrawn from a guessed version; restore the file to ${relativePdfPath}`;
       const err = new Error(message);
       err.statusCode = 410;

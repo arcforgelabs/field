@@ -140,10 +140,13 @@ export async function invoiceAmountEvidence({ jobDir, meta = null, issuedDocumen
         }
       : null;
     const settlement = revision.amountsSettlement || null;
-    const options = [{ choose: "milestone-record", ...recorded }];
-    if (storedPdf?.totals) options.push({ choose: "stored-pdf", ...storedPdf.totals });
-    if (sent) options.push({ choose: "sent-copy", ...sent.totals });
-    const distinct = options.filter((option, index) => options.findIndex((other) => sameTotals(other, option)) === index);
+    const candidates = [{ choose: "milestone-record", ...recorded }];
+    if (storedPdf?.totals) candidates.push({ choose: "stored-pdf", ...storedPdf.totals });
+    if (sent) candidates.push({ choose: "sent-copy", ...sent.totals });
+    const distinct = candidates.filter((option, index) => candidates.findIndex((other) => sameTotals(other, option)) === index);
+    // Where Field holds the hash-verified copy it emailed, that copy is what
+    // was issued: the invoice rows already hold it, so it is the only choice.
+    const options = sent ? [{ choose: "sent-copy", ...sent.totals }] : distinct;
 
     let state;
     if (settlement) state = "settled";
@@ -168,11 +171,27 @@ export async function invoiceAmountEvidence({ jobDir, meta = null, issuedDocumen
       sends: collected.sendsFor(number).map(({ sentAt, quoteVersion, hashed }) => ({ sentAt, quoteVersion, hashed })),
       paid: fixed(Number(paidAgainst(milestone, number, current)) / 100, 2),
       settlement,
-      options: state === "agrees" || state === "settled" ? [] : distinct,
+      options: state === "agrees" || state === "settled" ? [] : options,
       state,
     });
   }
   return { jobId, versionTotals, invoices: out };
+}
+
+/** What the owner needs to know about one entry, in numbers only. */
+function noteFor(entry) {
+  if (entry.state === "settled") return `Settled: Field bills ${money(entry.settlement.total)}.`;
+  if (entry.state === "sent-differs-from-recorded") {
+    return `Field holds the copy it emailed (${entry.sent.totals.total}), and the invoice rows hold it, but the job page and amount due still bill the record's ${entry.recorded.total} until you settle with "sent-copy".`;
+  }
+  if (entry.state === "recorded-matches-sent") {
+    return `The record matches the copy Field emailed (${entry.sent.totals.total}); the stored PDF prints ${entry.storedPdf?.totals?.total ?? "something else"} and is not what was sent. Settle with "sent-copy" to record it.`;
+  }
+  if (entry.state === "needs-owner-decision") {
+    return `No copy of what was emailed is held. Field bills the record's ${entry.recorded.total} until you settle; the emails list the quote version each send was built against.`;
+  }
+  if (entry.state === "sent-copies-differ") return "The copies Field emailed claim different amounts. Check the emails before you settle.";
+  return null;
 }
 
 /** One report entry: ids, numbers, versions, dates and amounts only. */
@@ -201,6 +220,7 @@ function publicEntry(jobId, entry, versionTotals) {
       ? { source: entry.settlement.source, total: money(entry.settlement.total), recordedTotal: entry.settlement.recorded ? money(entry.settlement.recorded.total) : null, decidedAt: entry.settlement.decidedAt }
       : null,
     options: entry.options,
+    note: noteFor(entry),
   };
 }
 

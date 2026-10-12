@@ -73,7 +73,7 @@ const CHOICES = new Set(["milestone-record", "stored-pdf", "sent-copy"]);
  * req)` runs the settle action as a committed job generation and resolves to
  * its result.
  */
-export function createInvoiceAmountSettleHandler({ findJob, settle }) {
+export function createInvoiceAmountSettleHandler({ findJob, settle, logger = console }) {
   return async function settleInvoiceAmounts(req, res) {
     const body = req.body || {};
     const jobId = typeof body.jobId === "string" ? body.jobId.trim() : "";
@@ -89,7 +89,11 @@ export function createInvoiceAmountSettleHandler({ findJob, settle }) {
       const result = await settle(job, { invoiceNumber, choose: body.choose, total: body.total, reason }, req);
       return res.json({ ok: true, settlement: result.settlement, milestones: result.milestoneInvoices || [] });
     } catch (error) {
-      return res.status(error.statusCode || 500).json({ error: error.message });
+      const status = error.statusCode || 500;
+      if (status < 500) return res.status(status).json({ error: error.message });
+      // An unexpected failure can name paths or files: log its kind only.
+      logger.error?.(`[invoice-amounts] settling an invoice failed (${error.code || error.name || "Error"})`);
+      return res.status(status).json({ error: "The invoice could not be settled. The server log has the reason.", code: "INVOICE_AMOUNT_SETTLE_FAILED" });
     }
   };
 }

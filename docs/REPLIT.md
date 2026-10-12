@@ -171,7 +171,9 @@ The invoice rows backfill uses what was emailed:
 
 - **Field holds a hash-verified copy of the emailed PDF.** This is an issued
   document with an `emailed` event, or an issuance ledger record. The rows
-  take the amounts that were emailed, and the job is written.
+  take the amounts that were emailed, and the job is written. Later syncs
+  keep those amounts. The job page and the amount due still bill the
+  milestone record until you settle the invoice with `sent-copy`.
 - **Field holds no such copy.** The job is refused. Invoices emailed before
   the issuance ledger have no such copy.
 
@@ -187,8 +189,10 @@ PDF and in the emailed copy (when Field has one). It shows the quote version
 that each was drawn from. It also lists the archived emails of the invoice,
 with the quote version that each was built against.
 
-Use the archived email to decide which set the customer received, and the
-payments to support it. Then record your choice:
+Each entry has a note that says what Field bills now. Use the archived
+email to decide which set the customer received, and the payments to
+support it. When Field holds the emailed copy, `sent-copy` is the only
+choice. Then record your choice:
 
 ```text
 POST /api/admin/invoices/amount-disagreements/settle
@@ -201,6 +205,8 @@ POST /api/admin/invoices/amount-disagreements/settle
   payments do not change.
 - Field refuses a choice below the amount already paid. Void or move the
   payment first.
+- Field refuses a choice that would make the job's issued invoices claim
+  more than the quote. A settlement is made once.
 - The next boot writes the job.
 
 ### Checking a release in production

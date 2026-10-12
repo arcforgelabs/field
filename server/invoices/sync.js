@@ -106,6 +106,39 @@ function versionLabel(versions) {
 }
 
 /**
+ * The rows of an issued invoice take the amounts of the hash-verified copy
+ * Field emailed, marked printed, with a reason naming both quote versions.
+ * Nothing when they already agree.
+ */
+async function takeSentAmounts({ invoice, entry, sent, evidence, result }) {
+  if (sameTotals(entry.rows, sent.totals)) return true;
+  const totals = await evidence.versionTotals();
+  const line = invoice.lines[0];
+  const recorded = { ...entry.rows };
+  const sentVersions = versionsWithTotal(totals, sent.copy.contractValue);
+  const reason = `Amounts as sent: the PDF Field emailed (${sent.copy.source}, sha256 ${sent.copy.sha256.slice(0, 12)}) claims ${sent.totals.total}${versionLabel(sentVersions)}; `
+    + `the milestone record holds ${recorded.total}${invoice.quoteVersion ? ` (quote v${invoice.quoteVersion}${invoice.quoteVersionInferred ? ", inferred" : ""})` : ""}, `
+    + "taken from a different quote version than the invoice sent.";
+  const money = claimMoney({ subtotal: sent.totals.subtotal, gst: sent.totals.taxTotal, total: sent.totals.total, taxRate: line.taxRate, milestoneKey: line.milestoneKey, name: line.name, description: line.description });
+  if (money.failure) {
+    result.failures.push({ ...money.failure, kind: "sent-copy", number: invoice.number });
+    return false;
+  }
+  Object.assign(invoice, {
+    lines: money.lines,
+    ...money.totals,
+    computedTaxTotal: money.computedTaxTotal,
+    taxTotalSource: "printed",
+    taxTotalReason: reason,
+  });
+  entry.rows = { subtotal: money.totals.subtotal, taxTotal: money.totals.taxTotal, total: money.totals.total };
+  entry.taxTotalSource = "printed";
+  entry.rowsFrom = sent.copy.source;
+  result.warnings.push({ kind: "rows-from-sent-copy", number: invoice.number, rows: recorded.total, shown: sent.totals.total, reason });
+  return true;
+}
+
+/**
  * An issued invoice whose rows disagree with one of its PDFs. What the
  * customer was sent decides (sent-copies.js):
  *
@@ -155,31 +188,8 @@ async function resolveAgainstSent({ jobDir, invoice, entry, readable, differing,
     return;
   }
 
+  if (!(await takeSentAmounts({ invoice, entry, sent, evidence, result }))) return;
   const totals = await evidence.versionTotals();
-  if (!sameTotals(entry.rows, sent.totals)) {
-    const line = invoice.lines[0];
-    const recorded = { ...entry.rows };
-    const sentVersions = versionsWithTotal(totals, sent.copy.contractValue);
-    const reason = `Amounts as sent: the PDF Field emailed (${sent.copy.source}, sha256 ${sent.copy.sha256.slice(0, 12)}) claims ${sent.totals.total}${versionLabel(sentVersions)}; `
-      + `the milestone record holds ${recorded.total}${invoice.quoteVersion ? ` (quote v${invoice.quoteVersion}${invoice.quoteVersionInferred ? ", inferred" : ""})` : ""}, `
-      + "taken from a different quote version than the invoice sent.";
-    const money = claimMoney({ subtotal: sent.totals.subtotal, gst: sent.totals.taxTotal, total: sent.totals.total, taxRate: line.taxRate, milestoneKey: line.milestoneKey, name: line.name, description: line.description });
-    if (money.failure) {
-      result.failures.push({ ...money.failure, kind: "sent-copy", number: invoice.number });
-      return;
-    }
-    Object.assign(invoice, {
-      lines: money.lines,
-      ...money.totals,
-      computedTaxTotal: money.computedTaxTotal,
-      taxTotalSource: "printed",
-      taxTotalReason: reason,
-    });
-    entry.rows = { subtotal: money.totals.subtotal, taxTotal: money.totals.taxTotal, total: money.totals.total };
-    entry.taxTotalSource = "printed";
-    entry.rowsFrom = sent.copy.source;
-    result.warnings.push({ kind: "rows-from-sent-copy", number: invoice.number, rows: recorded.total, shown: sent.totals.total, reason });
-  }
   for (const copy of readable.filter((candidate) => !sameTotals(candidate.totals, sent.totals))) {
     const versions = versionsWithTotal(totals, copy.contractValue);
     result.warnings.push({ kind: "stored-copy-not-sent", number: invoice.number, against: copy.source, rows: copy.totals.total, shown: sent.totals.total, reason: `${copy.source} prints ${copy.totals.total}${versionLabel(versions)}, not the ${sent.totals.total} Field emailed` });
@@ -271,7 +281,18 @@ export async function syncJobInvoiceRows({
       result.warnings.push({ kind: "tax-total-printed", number: invoice.number, reason: invoice.taxTotalReason });
     }
     if (invoice.status === "draft") continue;
-    for (const difference of compare(entry.rows, invoice.snapshot)) {
+    // A legacy invoice (from before revisions were frozen) that the owner has
+    // not settled: where Field holds a hash-verified copy of the PDF it
+    // emailed, the rows hold what was emailed, in the backfill and in every
+    // later sync alike, so the two never disagree (#60).
+    if ((invoice.quoteVersionInferred || invoice.issuedRevision === false) && !invoice.settlement) {
+      const sent = agreedSentTotals((await sentEvidence.copies()).copiesFor(invoice.number));
+      if (sent?.totals) await takeSentAmounts({ invoice, entry, sent, evidence: sentEvidence, result });
+    }
+    // Rows taken from the copy emailed are not compared with the record: its
+    // amounts are in the warning.
+    const againstSnapshot = entry.rowsFrom ? [] : compare(entry.rows, invoice.snapshot);
+    for (const difference of againstSnapshot) {
       result.failures.push({ kind: "totals", against: "snapshot", number: invoice.number, ...difference });
     }
     if (!verifyIssued) continue;

@@ -1108,8 +1108,9 @@ nothing reads the rows yet. No customer document changes.
     document with an `emailed` event, or an issuance-ledger delivery;
     `sent-copies.js`). If they agree, the rows take the emailed amounts, with
     `tax_total_source = printed` and a reason that names both versions. That
-    is a warning, not a refusal. A stored PDF that differs from the emailed
-    copy is reported as not the copy that was sent.
+    is a warning, not a refusal. Every later sync of an unsettled legacy
+    invoice does the same, so the rows never conflict. A stored PDF that
+    differs from the emailed copy is reported as not the copy that was sent.
   - Without such a copy, the job is refused. Its entry lists the archived
     emails of the invoice: when it was sent, and the quote version it was
     built against.
