@@ -3,16 +3,53 @@ import test from "node:test";
 import { sql } from "drizzle-orm";
 
 import { createTestDb } from "../db-runtime/index.js";
+import { DEFAULT_ORG_UID, orgScope } from "../db-runtime/tenancy.js";
 import { openCatalogStore } from "./index.js";
 import { createSupplier, upsertItemSupplier } from "./price-book.js";
 import { applyImport, discardImport, getImport, inspectPriceList, stageImport } from "./price-import.js";
 import { selectRows } from "./state.js";
+import { createCatalogStore } from "./store.js";
 
 async function freshStore(t, options = {}) {
   const handle = await createTestDb();
   t.after(() => handle.close());
   const store = await openCatalogStore({ db: handle.db, ...options });
   return { store, db: handle.db };
+}
+
+// Two stores on one database, like two server processes, sharing a clock the
+// test moves. hold() parks the queued store's next transaction at a gate:
+// `arrived` resolves once its write has started, and open() lets it queue for
+// the catalogue lock. So one write can start before another that commits
+// first, with no timing involved.
+async function racingStores(t, clock) {
+  const handle = await createTestDb();
+  t.after(() => handle.close());
+  const store = await openCatalogStore({ db: handle.db, clock });
+  const scope = orgScope(handle.db, DEFAULT_ORG_UID);
+  let gate = null;
+  const gated = {
+    ...scope,
+    transaction: async (fn, config) => {
+      const held = gate;
+      gate = null;
+      if (held) {
+        held.arrive();
+        await held.opened;
+      }
+      return scope.transaction(fn, config);
+    },
+  };
+  const queued = createCatalogStore({ db: gated, clock });
+  const hold = () => {
+    let arrive;
+    let open;
+    const arrived = new Promise((resolve) => { arrive = resolve; });
+    const opened = new Promise((resolve) => { open = resolve; });
+    gate = { arrive, opened };
+    return { arrived, open };
+  };
+  return { store, queued, hold };
 }
 
 // A small synthetic catalogue: a fixed-sell item and a pack item linked by
@@ -182,6 +219,52 @@ test("concurrency: two applies of one batch apply it once", async (t) => {
   for (const result of results.filter((entry) => entry.status === "rejected")) assert.equal(result.reason.code, "IMPORT_NOT_STAGED");
   const [count] = await selectRows(db, sql`select count(*)::int as n from item_prices where source = 'import' and item_uid = (select uid from items where code = 'gravel')`);
   assert.equal(count.n, winners[0] === 2 ? 0 : 1, "applied exactly once, or not at all when the discard won");
+});
+
+test("concurrency: an apply that queued behind a manual edit sees the edit as current and is refused", async (t) => {
+  let now = new Date("2026-10-01T00:00:00.000Z");
+  const clock = () => now;
+  const { store, queued, hold } = await racingStores(t, clock);
+  const supplier = await seed(store);
+  const staged = await stage(store, supplier, { clock });
+  const gate = hold();
+  const applying = applyImport(queued, staged.uid);
+  await gate.arrived;
+  // The edit starts after the apply but takes the catalogue lock first.
+  now = new Date("2026-10-01T00:01:00.000Z");
+  await store.updateItem("gravel", { buy_price: 52 }, { author: "Someone else" });
+  now = new Date("2026-10-01T00:02:00.000Z");
+  gate.open();
+  // Not PENDING_PRICE_CHANGE: the edit is the current price, not a scheduled one.
+  await assert.rejects(applying, { code: "VERSION_CONFLICT", message: /Gravel 20mm \(gravel\) was re-priced/ });
+  assert.equal((await store.getItem("gravel")).buy_price, 52);
+  assert.equal((await store.getItem("pipe")).buy_price, 10, "nothing from the refused batch");
+  assert.equal((await getImport(store, staged.uid)).status, "staged");
+});
+
+test("concurrency: a manual edit that queued behind an apply lands on top of it", async (t) => {
+  let now = new Date("2026-10-01T00:00:00.000Z");
+  const clock = () => now;
+  const { store, queued, hold } = await racingStores(t, clock);
+  const supplier = await seed(store);
+  const staged = await stage(store, supplier, { clock });
+  const gate = hold();
+  const editing = queued.updateItem("gravel", { buy_price: 52 }, { author: "Someone else" });
+  await gate.arrived;
+  // The apply starts after the edit but takes the catalogue lock first.
+  now = new Date("2026-10-01T00:01:00.000Z");
+  await applyImport(store, staged.uid);
+  now = new Date("2026-10-01T00:02:00.000Z");
+  gate.open();
+  // Not PENDING_PRICE_CHANGE: the import's price is current, and the edit replaces it.
+  await editing;
+  const gravel = await store.getItem("gravel");
+  assert.equal(gravel.buy_price, 52, "the later manual edit is current");
+  const [latest] = await store.getPriceHistory("gravel");
+  assert.equal(latest.source, "manual");
+  assert.equal(latest.current, true);
+  assert.equal(latest.effective_from, "2026-10-01T00:02:00.000Z", "dated when it took the lock, after the import");
+  assert.equal((await store.getItem("pipe")).buy_price, 11);
 });
 
 test("a future effective date schedules the prices; they become current on the date", async (t) => {

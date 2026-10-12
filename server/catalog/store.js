@@ -330,9 +330,13 @@ export function createCatalogStore({ db: database, orgUid = DEFAULT_ORG_UID, clo
   // expectedCatalogVersion the write is refused (VERSION_CONFLICT) when any
   // other catalogue write committed since the caller read that version.
   async function write(fn, { expectedCatalogVersion = null } = {}) {
-    const now = clock();
     const outcome = await db.transaction(async (tx) => {
       await lockCatalogForWrite(tx);
+      // Read the clock only once this write holds the lock. A write that
+      // queued behind another must not date itself before that one: its
+      // just-committed price would look scheduled, not current, and a price
+      // written here would sort under it.
+      const now = clock();
       const state = await loadCatalogState(tx, { now, inTransaction: true });
       if (expectedCatalogVersion != null && Number(expectedCatalogVersion) !== state.version) {
         throw new CatalogError("VERSION_CONFLICT", `The catalogue is at version ${state.version}, not ${expectedCatalogVersion}; reload it and try again`, { path: "expectedCatalogVersion", details: { currentVersion: state.version } });
