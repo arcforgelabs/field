@@ -5,9 +5,11 @@ import {
   getDisplayableJobReport,
   getDisplayableQuoteMarkdown,
   serializeClientJobDetail,
+  sanitizeClientJobMeta,
   sanitizeQuoteDocumentSurfaces,
   sanitizeQuoteForPricingDisplay,
 } from "./quote-pricing-visibility.js";
+import { applyPresentationToQuote } from "./quote-presentation.js";
 import {
   assertQuoteLineItemCostsComplete,
   buildQuotePricingAttestation,
@@ -374,4 +376,47 @@ test("verified pricing attestation is bound to the canonical monetary output", (
     },
   };
   assert.equal(isQuotePricingDisplayable(legacyDigestlessV2, { current: true }), false);
+});
+
+test("job summaries carry the quote's customer-facing total, not the engine's $0 for an editor-built quote", () => {
+  // A quote built in the editor has no compiled line items, so the engine's
+  // quote.totals stay at 0 while the organizer holds the priced rows the PDF
+  // prints. The job list and job detail used to show $0.00 for every such job.
+  const quote = applyPresentationToQuote({
+    quote: {
+      version: 2,
+      quoteNumber: "EQ-TEST-01",
+      quoteCatalog: { gstRate: 0.1 },
+      summary: "Editor-built quote",
+      lineItems: [],
+      totals: { subtotal: 0, gst: 0, total: 0, currency: "AUD" },
+    },
+    overrides: {
+      presentation: {
+        organizer: {
+          root: ["manual:fee"],
+          nodes: {
+            "manual:fee": {
+              kind: "source",
+              origin: "manual",
+              sourceCode: "manual-fee",
+              labelOverride: "Site works",
+              quantity: 2,
+              unit: "each",
+              sellRate: 150,
+              buyRate: 100,
+              rateMode: "catalog-linked",
+              catalogItemCode: "FEE",
+            },
+          },
+        },
+      },
+    },
+  });
+  const meta = { id: "job-1", pipelineStage: "sent", quoteTotal: 0, quoteSubtotal: 0 };
+  const listed = sanitizeClientJobMeta(meta, quote, { issuedVersion: true });
+  assert.equal(listed.quoteSubtotal, 300);
+  assert.equal(listed.quoteGst, 30);
+  assert.equal(listed.quoteTotal, 330);
+  assert.equal(listed.quoteVersion, 2);
 });

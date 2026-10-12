@@ -1,4 +1,5 @@
 import { isQuotePricingDisplayable } from "./quote-pricing-attestation.js";
+import { getCustomerPresentationFinancials } from "./quote-presentation.js";
 
 const EXPLICIT_MONETARY_FIELD_KEYS = new Set([
   "authorityUnitPrice",
@@ -129,7 +130,10 @@ export function sanitizeClientJobMeta(
     // Financial summary fields belong to the selected quote version, not to
     // the job's mutable current meta projection. This keeps an issued v1
     // response from displaying v2 totals when a newer draft is current.
-    const totals = quote?.totals || {};
+    // They are the customer-facing totals the PDF prints. `quote.totals` is
+    // only the pricing engine's compiled lines, which is $0 for a quote built
+    // in the editor.
+    const totals = quote ? getCustomerPresentationFinancials(quote) : {};
     return {
       ...meta,
       quoteVersion: quote?.version ?? meta.quoteVersion ?? null,
