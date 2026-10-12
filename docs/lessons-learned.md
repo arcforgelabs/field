@@ -7,6 +7,31 @@ the commit that landed it — so future debugging has the full trail.
 
 ---
 
+## 2026-10-12 — Jobs open by their link but are missing from the jobs board (#32)
+
+**Symptom:** On a live installation the board listed 57 jobs while the data
+directory held 65. The 8 missing jobs, all created in April 2026, were not
+archived and opened by direct link.
+
+**Root cause:** `GET /api/jobs` lists the `field.db` job index and never
+checked it against the job folders. The index was filled from disk only once,
+on a boot with an empty index (`syncExistingJobs`, which also read only the
+job root's `meta.json`, not the active generation). After that, a job got its
+row only from the route that created it. From April 2026 recorded jobs were
+indexed under `<day>/<id>` and then renamed to `<day>/<slug>--<id8>`, and the
+row was never updated (`upsertJob` did not update `dir` on conflict, so even a
+direct read that found the job did not fix it). The list read the row's
+missing folder, found no meta, and skipped the job silently. A job created by
+the recording-session finalize route got no row at all.
+
+**Fix:** `reconcileJobIndex` runs on every boot (after durable storage has
+restored the data directory): it reads each folder the index does not point at
+through `readJobMeta`, adds jobs that have no row and repoints rows whose
+folder moved. The list reconciles again when a row's folder is gone, and
+`upsertJob` records the folder a job is in now.
+
+---
+
 ## 2026-04-12 — "Make Current" on archived quote version freezes the page
 
 **Symptom:** Clicking **Make Current** on an archived quote version caused the
