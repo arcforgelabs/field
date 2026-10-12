@@ -211,7 +211,7 @@ for (const backend of backends) {
         ],
       }]);
       assert.deepEqual(first.lines.slice(1), [
-        `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: incomplete (7 job(s) with milestones, 14 invoice(s): 6 job(s) written, 0 already present, 1 job(s) refused; ${invoices.summary.warnings} warning(s)); not recorded (1 job(s) refused), runs again at next boot`,
+        `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: incomplete (7 job(s) with milestones, 14 invoice(s): 6 job(s) written, 0 already present, 1 job(s) refused; ${invoices.summary.warnings} warning(s); an owner settles refused legacy invoices at GET /api/admin/invoices/amount-disagreements); not recorded (1 job(s) refused), runs again at next boot`,
         `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: refused job job-deposit: EI-2605-02-M1 totals: subtotal rows 900.00 vs revision-pdf 925.50; EI-2605-02-M1 totals: taxTotal rows 90.00 vs revision-pdf 92.55; EI-2605-02-M1 totals: total rows 990.00 vs revision-pdf 1018.05`,
       ]);
       const logged = first.lines.join("\n");

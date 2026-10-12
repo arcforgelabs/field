@@ -17,6 +17,35 @@ export function extractInvoicePdfTotals(bytes) {
   } catch {
     return null;
   }
+  return claimTotals(runs);
+}
+
+/**
+ * What an invoice PDF says about itself: its claim ({ subtotal, taxTotal,
+ * total }, or null), the invoice number printed under "Invoice", and the
+ * "Contract value (inc GST)" of the quote it was drawn from. The contract
+ * value tells which quote version a PDF was rendered against. Null when the
+ * bytes are not a readable PDF.
+ */
+export function extractInvoicePdfFacts(bytes) {
+  let runs;
+  try {
+    runs = pdfTextRuns(bytes);
+  } catch {
+    return null;
+  }
+  const at = (pattern) => runs.findIndex((run) => pattern.test(run));
+  // "Invoice" on PDFs drawn before tax invoices (#47), "Tax invoice" since.
+  const numberAt = at(/^(Tax )?invoice$/i);
+  const contractAt = at(/^Contract value\b/);
+  return {
+    totals: claimTotals(runs),
+    number: numberAt >= 0 && runs[numberAt + 1] ? runs[numberAt + 1].trim() : null,
+    contractValue: contractAt >= 0 ? parseMoneyText(runs[contractAt + 1]) : null,
+  };
+}
+
+function claimTotals(runs) {
   let found = null;
   for (let index = 0; index + 5 < runs.length; index += 1) {
     if (!/^This claim\b/.test(runs[index])) continue;

@@ -6,7 +6,11 @@
 //   issued      with `verifyIssued`, each issued invoice's totals equal the
 //               totals printed on its PDF: the issued document's bytes, else
 //               the revision's stored PDF (hash-checked). Read from the PDF's
-//               own text (issued-totals.js), never re-rendered
+//               own text (issued-totals.js), never re-rendered. Where they
+//               disagree, what was emailed decides (#60, sent-copies.js):
+//               a hash-verified sent copy gives the rows its amounts (a
+//               warning), an owner's settlement is kept, and otherwise the
+//               job is refused
 //   payments    per milestone, the active payments add up to the amount paid
 //               Field shows
 //   reconcile   the milestones' current invoices add up to the total of the
@@ -23,8 +27,9 @@ import { readJobFile } from "../documents/job-sources.js";
 import { sha256Hex } from "../documents/blob-store.js";
 import { quoteTaxRatePercent } from "../quotes/from-artifact.js";
 import { centsToText, fixed, toCents } from "../quotes/totals.js";
-import { mapMilestoneState } from "./from-milestones.js";
-import { extractInvoicePdfTotals } from "./issued-totals.js";
+import { claimMoney, mapMilestoneState } from "./from-milestones.js";
+import { extractInvoicePdfFacts } from "./issued-totals.js";
+import { agreedSentTotals, collectSentInvoiceCopies, quoteVersionTotals, sameTotals, versionsWithTotal } from "./sent-copies.js";
 
 function text(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -77,7 +82,8 @@ async function issuedCopies({ jobDir, invoice, document, issuedDocuments }) {
     const sha256 = sha256Hex(bytes);
     if (seen.has(sha256)) return;
     seen.add(sha256);
-    copies.push({ source, reference, sha256, totals: extractInvoicePdfTotals(bytes) });
+    const facts = extractInvoicePdfFacts(bytes);
+    copies.push({ source, reference, sha256, totals: facts?.totals || null, contractValue: facts?.contractValue || null });
   };
   if (document && issuedDocuments) {
     try {
@@ -93,6 +99,101 @@ async function issuedCopies({ jobDir, invoice, document, issuedDocuments }) {
     else copies.push({ source: "revision-pdf", reference: invoice.pdfPath, totals: null, unreadable: file.reason });
   }
   return copies;
+}
+
+function versionLabel(versions) {
+  return versions.length ? ` (quote v${versions.join(" or v")})` : "";
+}
+
+/**
+ * The rows of an issued invoice take the amounts of the hash-verified copy
+ * Field emailed, marked printed, with a reason naming both quote versions.
+ * Nothing when they already agree.
+ */
+async function takeSentAmounts({ invoice, entry, sent, evidence, result }) {
+  if (sameTotals(entry.rows, sent.totals)) return true;
+  const totals = await evidence.versionTotals();
+  const line = invoice.lines[0];
+  const recorded = { ...entry.rows };
+  const sentVersions = versionsWithTotal(totals, sent.copy.contractValue);
+  const reason = `Amounts as sent: the PDF Field emailed (${sent.copy.source}, sha256 ${sent.copy.sha256.slice(0, 12)}) claims ${sent.totals.total}${versionLabel(sentVersions)}; `
+    + `the milestone record holds ${recorded.total}${invoice.quoteVersion ? ` (quote v${invoice.quoteVersion}${invoice.quoteVersionInferred ? ", inferred" : ""})` : ""}, `
+    + "taken from a different quote version than the invoice sent.";
+  const money = claimMoney({ subtotal: sent.totals.subtotal, gst: sent.totals.taxTotal, total: sent.totals.total, taxRate: line.taxRate, milestoneKey: line.milestoneKey, name: line.name, description: line.description });
+  if (money.failure) {
+    result.failures.push({ ...money.failure, kind: "sent-copy", number: invoice.number });
+    return false;
+  }
+  Object.assign(invoice, {
+    lines: money.lines,
+    ...money.totals,
+    computedTaxTotal: money.computedTaxTotal,
+    taxTotalSource: "printed",
+    taxTotalReason: reason,
+  });
+  entry.rows = { subtotal: money.totals.subtotal, taxTotal: money.totals.taxTotal, total: money.totals.total };
+  entry.taxTotalSource = "printed";
+  entry.rowsFrom = sent.copy.source;
+  result.warnings.push({ kind: "rows-from-sent-copy", number: invoice.number, rows: recorded.total, shown: sent.totals.total, reason });
+  return true;
+}
+
+/**
+ * An issued invoice whose rows disagree with one of its PDFs. What the
+ * customer was sent decides (sent-copies.js):
+ *
+ *   - an owner already settled it: a copy the owner saw when deciding is
+ *     expected to differ (a warning); any other is a failure.
+ *   - hash-verified sent copies that agree: the rows take the amounts sent,
+ *     marked printed with the version mismatch as the reason (a warning), and
+ *     a stored PDF that differs from them is reported as not the copy sent.
+ *   - otherwise the job is refused with both numbers, and the entry carries
+ *     the archived emails of the invoice for the owner to settle it.
+ */
+async function resolveAgainstSent({ jobDir, invoice, entry, readable, differing, result, evidence }) {
+  const failAll = () => {
+    for (const copy of differing) {
+      for (const difference of compare(entry.rows, copy.totals)) {
+        result.failures.push({ kind: "totals", against: copy.source, reference: copy.reference, number: invoice.number, ...difference });
+      }
+    }
+  };
+
+  if (invoice.settlement) {
+    const seen = new Set([invoice.settlement.storedPdfSha256, invoice.settlement.sentSha256].filter(Boolean));
+    const unexpected = differing.filter((copy) => !seen.has(copy.sha256));
+    for (const copy of differing.filter((candidate) => seen.has(candidate.sha256))) {
+      result.warnings.push({ kind: "settled-copy-differs", number: invoice.number, against: copy.source, rows: entry.rows.total, shown: copy.totals.total, reason: `the owner settled ${invoice.number} at ${entry.rows.total}; this copy prints ${copy.totals.total} and was not what was sent` });
+    }
+    if (unexpected.length) {
+      for (const copy of unexpected) {
+        for (const difference of compare(entry.rows, copy.totals)) {
+          result.failures.push({ kind: "totals", against: copy.source, reference: copy.reference, number: invoice.number, ...difference });
+        }
+      }
+    }
+    return;
+  }
+
+  const collected = await evidence.copies();
+  const sent = agreedSentTotals(collected.copiesFor(invoice.number));
+  entry.sends = collected.sendsFor(invoice.number).map(({ sentAt, quoteVersion, hashed }) => ({ sentAt, quoteVersion, hashed }));
+  if (!sent) {
+    failAll();
+    return;
+  }
+  if (sent.conflict) {
+    result.failures.push({ kind: "sent-copies-differ", number: invoice.number, reason: `the emailed copies of ${invoice.number} claim different amounts: ${sent.conflict.map((copy) => copy.totals.total).join(", ")}` });
+    failAll();
+    return;
+  }
+
+  if (!(await takeSentAmounts({ invoice, entry, sent, evidence, result }))) return;
+  const totals = await evidence.versionTotals();
+  for (const copy of readable.filter((candidate) => !sameTotals(candidate.totals, sent.totals))) {
+    const versions = versionsWithTotal(totals, copy.contractValue);
+    result.warnings.push({ kind: "stored-copy-not-sent", number: invoice.number, against: copy.source, rows: copy.totals.total, shown: sent.totals.total, reason: `${copy.source} prints ${copy.totals.total}${versionLabel(versions)}, not the ${sent.totals.total} Field emailed` });
+  }
 }
 
 /**
@@ -152,6 +253,15 @@ export async function syncJobInvoiceRows({
     return document && document.jobId === jobId ? document : null;
   };
 
+  // What the customer was sent, read only when an issued invoice disagrees
+  // with one of its PDFs (sent-copies.js).
+  let sentCopies = null;
+  let versionTotals = null;
+  const sentEvidence = {
+    copies: async () => (sentCopies ??= await collectSentInvoiceCopies({ jobDir, jobId, issuedDocuments })),
+    versionTotals: async () => (versionTotals ??= await quoteVersionTotals(jobDir)),
+  };
+
   for (const invoice of mapped.invoices) {
     invoice.quoteUid = quoteUidByVersion.get(invoice.quoteVersion) || null;
     const document = invoice.status !== "draft" ? await findDocument("invoice", invoice.number) : null;
@@ -171,7 +281,18 @@ export async function syncJobInvoiceRows({
       result.warnings.push({ kind: "tax-total-printed", number: invoice.number, reason: invoice.taxTotalReason });
     }
     if (invoice.status === "draft") continue;
-    for (const difference of compare(entry.rows, invoice.snapshot)) {
+    // A legacy invoice (from before revisions were frozen) that the owner has
+    // not settled: where Field holds a hash-verified copy of the PDF it
+    // emailed, the rows hold what was emailed, in the backfill and in every
+    // later sync alike, so the two never disagree (#60).
+    if ((invoice.quoteVersionInferred || invoice.issuedRevision === false) && !invoice.settlement) {
+      const sent = agreedSentTotals((await sentEvidence.copies()).copiesFor(invoice.number));
+      if (sent?.totals) await takeSentAmounts({ invoice, entry, sent, evidence: sentEvidence, result });
+    }
+    // Rows taken from the copy emailed are not compared with the record: its
+    // amounts are in the warning.
+    const againstSnapshot = entry.rowsFrom ? [] : compare(entry.rows, invoice.snapshot);
+    for (const difference of againstSnapshot) {
       result.failures.push({ kind: "totals", against: "snapshot", number: invoice.number, ...difference });
     }
     if (!verifyIssued) continue;
@@ -187,11 +308,9 @@ export async function syncJobInvoiceRows({
           : "issued, but no copy of its PDF was found",
       });
     }
-    for (const copy of readable) {
-      for (const difference of compare(entry.rows, copy.totals)) {
-        result.failures.push({ kind: "totals", against: copy.source, reference: copy.reference, number: invoice.number, ...difference });
-      }
-    }
+    const differing = readable.filter((copy) => compare(entry.rows, copy.totals).length);
+    if (!differing.length) continue;
+    await resolveAgainstSent({ jobDir, invoice, entry, readable, differing, result, evidence: sentEvidence });
   }
   for (const receipt of mapped.receipts) {
     receipt.issuedDocumentUid = (await findDocument("receipt", receipt.number))?.uid || null;

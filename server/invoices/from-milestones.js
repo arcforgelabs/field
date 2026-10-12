@@ -119,6 +119,25 @@ export function claimMoney({ subtotal, gst, total, taxRate, name, description, m
   };
 }
 
+const SETTLED_FROM = {
+  "sent-copy": "the copy Field emailed",
+  "stored-pdf": "the stored PDF",
+  "milestone-record": "the milestone record",
+};
+
+/** Why a settled invoice's amounts are what they are: the owner's decision, numbers only. */
+export function settlementReason(settlement, revision = null) {
+  const version = revision?.quoteVersion ? ` (quote v${revision.quoteVersion}${revision.quoteVersionInferred ? ", inferred" : ""})` : "";
+  const recorded = settlement.recorded ? money(settlement.recorded.total) : null;
+  const pdf = settlement.storedPdfTotal != null ? money(settlement.storedPdfTotal) : null;
+  const parts = [
+    `Amounts as issued, settled by the owner on ${String(settlement.decidedAt || "").slice(0, 10) || "record"} from ${SETTLED_FROM[settlement.source] || settlement.source}: ${money(settlement.total)}`,
+    recorded && toCents(recorded) !== toCents(money(settlement.total)) ? `the milestone record held ${recorded}${version}` : null,
+    pdf && toCents(pdf) !== toCents(money(settlement.total)) ? `the stored PDF prints ${pdf}, drawn from a different quote version` : null,
+  ].filter(Boolean);
+  return `${parts.join("; ")}.`;
+}
+
 /** The GST rate of the quote basis as a percent with three decimals (10.000). */
 function taxRateOf(quoteTaxRate) {
   return quoteTaxRate || "10.000";
@@ -201,6 +220,13 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
         failures.push({ ...moneyResult.failure, milestone: index, number: revision.invoiceNumber });
         return null;
       }
+      const settlement = revision.amountsSettlement || null;
+      if (settlement) {
+        // An owner settled which amounts this invoice was issued for: they
+        // are kept as printed on the document chosen, with the decision.
+        moneyResult.taxTotalSource = "printed";
+        moneyResult.taxTotalReason = settlementReason(settlement, revision);
+      }
       return addInvoice({
         key: revision.invoiceNumber,
         number: revision.invoiceNumber,
@@ -231,6 +257,7 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
         pdfPath: text(revision.pdfPath),
         pdfSha256: text(revision.pdfSha256),
         issuedRevision: true,
+        settlement,
       });
     };
 

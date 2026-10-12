@@ -30,6 +30,7 @@ import { createDisabledReplicator, createDocumentReplicator } from "./documents/
 import { startDurableStorage } from "./storage/durable-store.js";
 import { heldDataMigrations, runDataMigrations } from "./data-migrations/index.js";
 import { createDataMigrationDryRunHandler, DRY_RUN_PATH as DATA_MIGRATIONS_DRY_RUN_PATH } from "./data-migrations/dry-run-route.js";
+import { AMOUNT_DISAGREEMENTS_PATH, AMOUNT_SETTLE_PATH, createInvoiceAmountDisagreementsHandler, createInvoiceAmountSettleHandler } from "./invoices/amount-routes.js";
 import { businessDisplayName } from "./business-profile.js";
 import { registerSqliteImage } from "./storage/durable-hooks.js";
 import {
@@ -129,6 +130,7 @@ import {
   creditAndReissueJobMilestoneInvoice,
   sendJobQuote,
   setJobPipelineStage,
+  settleJobMilestoneInvoiceAmounts,
   updateJobMilestone,
   updateJobQuote,
   voidJobMilestonePayment,
@@ -1056,6 +1058,28 @@ app.get(DATA_MIGRATIONS_DRY_RUN_PATH, requireAuth, requireAdmin, createDataMigra
       logger: { log() {}, warn() {} },
     });
   },
+}));
+
+// Legacy invoices whose milestone record and PDFs disagree
+// (server/invoices/amount-routes.js): the read-only report of every one, and
+// the owner's decision about which amounts each was issued for. Admin (owner)
+// only.
+app.get(AMOUNT_DISAGREEMENTS_PATH, requireAuth, requireAdmin, createInvoiceAmountDisagreementsHandler({
+  dataDir: DATA_DIR,
+  issuedDocuments: () => issuedDocumentRecorder.service || null,
+}));
+app.post(AMOUNT_SETTLE_PATH, requireAuth, requireAdmin, createInvoiceAmountSettleHandler({
+  findJob,
+  settle: (job, input, req) => runExclusiveJobMutation(job.meta.id, "settle invoice amounts", async () => (
+    runAtomicJobGeneration(job.dir, async (stagedJobDir) => settleJobMilestoneInvoiceAmounts({
+      jobDir: stagedJobDir,
+      meta: await readNormalizedJobMeta(stagedJobDir) || normalizeJobMeta(job.meta),
+      config,
+      ...input,
+      actor: getRequestActor(req),
+      issuedDocuments: issuedDocumentRecorder.service || null,
+    }), { timeoutMs: 120_000 })
+  )),
 }));
 
 app.get("/api/users", requireAuth, requireAdmin, (_req, res) => {

@@ -138,6 +138,9 @@ async function runInvoiceRows(context, { dryRun }) {
       alreadyPresent: report.actions.unchanged || 0,
       refusedJobs: refused.length,
       warnings: report.warnings.length,
+      // Legacy invoices whose milestone record disagreed with the PDF Field
+      // emailed: their rows hold the amounts emailed.
+      invoicesFromSentCopy: report.warnings.filter((warning) => warning.kind === "rows-from-sent-copy").length,
       rows: report.written,
     },
     refused,
@@ -149,7 +152,9 @@ function describeQuoteRows(summary) {
 }
 
 function describeInvoiceRows(summary) {
-  return `${summary.jobsWithMilestones} job(s) with milestones, ${summary.invoices} invoice(s): ${summary.written} job(s) written, ${summary.alreadyPresent} already present, ${summary.refusedJobs} job(s) refused; ${summary.warnings} warning(s)`;
+  return `${summary.jobsWithMilestones} job(s) with milestones, ${summary.invoices} invoice(s): ${summary.written} job(s) written, ${summary.alreadyPresent} already present, ${summary.refusedJobs} job(s) refused; ${summary.warnings} warning(s)`
+    + `${summary.invoicesFromSentCopy ? `; ${summary.invoicesFromSentCopy} invoice(s) take the amounts Field emailed` : ""}`
+    + `${summary.refusedJobs ? "; an owner settles refused legacy invoices at GET /api/admin/invoices/amount-disagreements" : ""}`;
 }
 
 /** One log line for a refused job: its id and both numbers of each mismatch. */
