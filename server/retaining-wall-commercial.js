@@ -12,7 +12,7 @@ import {
   selectSteelStockForLength,
 } from "./retaining-wall-steel.js";
 import { requireRate } from "./local-pricing.js";
-import { applyBusinessProfileOverride, configuredTradingName } from "./business-profile.js";
+import { applyBusinessProfileOverride, businessDisplayName } from "./business-profile.js";
 import { WALL_RATE_CARD_ITEMS } from "./retaining-wall-items.js";
 import { formatCatalogUnit, formatCatalogUnitText } from "../shared/catalog-units.js";
 
@@ -1070,6 +1070,23 @@ export function buildQuoteFromWallModel({ model, design, rateCard, meta, version
     },
   ];
 
+  // The sample business profile, under the installation's configured one.
+  const wallBusinessProfile = applyBusinessProfileOverride({
+    legalName: "Your Business Pty Ltd",
+    abn: "",
+    address: "Your business address",
+    phone: "",
+    email: "quotes@example.com",
+    paymentMethods: {
+      bankTransfer: {
+        accountName: "",
+        bsb: "000-000",
+        accountNumber: "0000 0000 0",
+        bank: "Your bank",
+      },
+    },
+  });
+
   return {
     kind: "quote",
     version: Number(version || 1),
@@ -1090,24 +1107,9 @@ export function buildQuoteFromWallModel({ model, design, rateCard, meta, version
       name: "Sample Catalogue",
       currency: "AUD",
       gstRate: 0.1,
-      businessProfile: applyBusinessProfileOverride({
-        tradingName: "Your Business",
-        legalName: "Your Business Pty Ltd",
-        abn: "",
-        address: "Your business address",
-        phone: "",
-        email: "quotes@example.com",
-        paymentMethods: {
-          bankTransfer: {
-            accountName: "Your Business Pty Ltd",
-            bsb: "000-000",
-            accountNumber: "0000 0000 0",
-            bank: "Your bank",
-          },
-        },
-      }),
+      businessProfile: wallBusinessProfile,
       deliveryDefaults: {
-        issuerName: configuredTradingName() || "Your Business",
+        issuerName: businessDisplayName(wallBusinessProfile),
         validityDays: 30,
         paymentTerms: "10% deposit due upon acceptance of this quote to secure booking. 30% progress payment due upon commencement of works. Remaining balance due within 7 days of project completion.",
         footerNote: "This quote is based on the listed scope, rate card, and assumptions current at issue time.",

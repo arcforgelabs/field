@@ -110,7 +110,8 @@ export function renderEmailTemplate(template, context = {}) {
   const clientName = String(context.clientName || "").trim();
   const jobTitle = String(context.jobTitle || "").trim();
   const milestoneLabel = String(context.milestoneLabel || "").trim().toLowerCase();
-  const businessName = String(context.businessName || "").trim() || "Your Business";
+  // The server supplies it (ui.businessName: trading name, else legal name).
+  const businessName = String(context.businessName || "").trim();
   const escapedJobTitle = escapeHtml(jobTitle);
   const values = {
     greeting: clientName ? `Hi ${escapeHtml(clientName)},` : "Hi,",

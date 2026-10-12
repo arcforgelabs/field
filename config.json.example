@@ -14,9 +14,8 @@
     "retentionDays": 7,
     "maxBackups": 7
   },
-  "_comment_businessProfile": "Your business identity and payment details, printed on quotes, invoices and receipts and used in email. Merged over the quote catalogue's businessProfile: a field left out keeps the catalogue's value, an empty string clears it. Keep real values in your secret store (FIELD_CONFIG_JSON), never in the repository.",
+  "_comment_businessProfile": "Your business identity and payment details, printed on quotes, invoices and receipts and used in email. Merged over the quote catalogue's businessProfile: a field left out keeps the catalogue's value, an empty string clears it. tradingName is optional (add \"tradingName\": \"...\" if you trade under another name); without it, documents and email use legalName. Keep real values in your secret store (FIELD_CONFIG_JSON), never in the repository.",
   "businessProfile": {
-    "tradingName": "Your Business",
     "legalName": "Your Business Pty Ltd",
     "abn": "00 000 000 000",
     "address": "1 Example Street, Exampleton SA 5000",

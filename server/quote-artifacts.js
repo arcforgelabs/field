@@ -29,7 +29,7 @@ import {
 import { resolveActiveJobGeneration, resolveWritableJobGeneration, runAtomicJobGeneration } from "./job-generation.js";
 import { isIssuedQuoteVersion } from "./quote-pricing-attestation.js";
 import { findAnyIssuedDocument, readQuoteIssuanceLedger } from "./quote-issuance.js";
-import { applyBusinessProfileOverride, configuredTradingName } from "./business-profile.js";
+import { applyBusinessProfileOverride, businessDisplayName, configuresBusinessName } from "./business-profile.js";
 import { loadQuoteRows } from "./quotes/read-model.js";
 
 const QUOTE_VERSIONS_DIR = "quote-versions";
@@ -37,15 +37,13 @@ const QUOTE_VERSIONS_DIR = "quote-versions";
 // ── Business details — fallback defaults, overridden by quoteCatalog.businessProfile,
 // and both by the installation's configured businessProfile (server/business-profile.js) ──
 const BUSINESS_DEFAULTS = {
-  tradingName: "Your Business",
-  legalName: "Your Business Pty Ltd",
   abn: "",
   address: "Your business address",
   phone: "",
   email: "quotes@example.com",
   paymentMethods: {
     bankTransfer: {
-      accountName: "Your Business Pty Ltd",
+      accountName: "", // empty: the account name printed is the business's legal name
       bsb: "000-000",
       accountNumber: "00000000",
       bank: "Your bank",
@@ -923,7 +921,7 @@ export async function generateQuotePdfBuffer({
       margins: { top: 50, bottom: 60, left: 50, right: 50 },
       info: {
         Title: `${documentLabel} ${documentRef}`,
-        Author: pdfBusiness.tradingName,
+        Author: businessDisplayName(pdfBusiness),
         Subject: `${documentLabel} for ${meta.title || "Earthworks"}`,
         ...(creationDate ? { CreationDate: creationDate } : {}),
       },
@@ -1025,7 +1023,7 @@ function renderQuotePdf(doc, {
   // Stash footer info so ensurePageSpace can render it before page breaks
   doc._footerRef = quoteRef;
   doc._footerV = vLabel;
-  doc._footerBizName = biz.tradingName;
+  doc._footerBizName = businessDisplayName(biz);
 
   // ─── PAGE 1: HEADER ───
   renderHeader(doc, {
@@ -1145,7 +1143,7 @@ function renderHeader(doc, {
 
   // Business name block
   doc.fillColor(C.dark).font("Helvetica-Bold").fontSize(22);
-  doc.text(configuredTradingName() || deliveryDefaults.issuerName || biz.tradingName, M, 30);
+  doc.text(configuresBusinessName() ? businessDisplayName(biz) : (deliveryDefaults.issuerName || businessDisplayName(biz)), M, 30);
 
   doc.font("Helvetica").fontSize(9).fillColor(C.muted);
   const bizY = 56;
@@ -1852,7 +1850,7 @@ function renderPageFooter(doc, quoteRef) {
   const savedBottom = doc.page.margins.bottom;
   doc.page.margins.bottom = 0;
   doc.font("Helvetica").fontSize(7).fillColor(C.light);
-  const bizName = doc._footerBizName || applyBusinessProfileOverride(BUSINESS_DEFAULTS).tradingName;
+  const bizName = doc._footerBizName || businessDisplayName(applyBusinessProfileOverride(BUSINESS_DEFAULTS));
   doc.text(`${bizName}  ·  ${quoteRef}`, M, footerY, { width: CW, align: "center", lineBreak: false });
   doc.page.margins.bottom = savedBottom;
   doc.y = savedY;

@@ -1,4 +1,4 @@
-import { applyBusinessProfileOverride, configuredTradingName } from "./business-profile.js";
+import { applyBusinessProfileOverride, businessDisplayName, businessNameOf, installationBusinessName } from "./business-profile.js";
 import { google } from "googleapis";
 import {
   googleServiceAccountCacheId,
@@ -648,7 +648,7 @@ function buildEmailHtml({
     subtotal: totals ? totals.subtotal : quote.totals?.subtotal,
     gst: totals ? totals.gst : quote.totals?.gst,
     total: totals ? totals.total : quote.totals?.total,
-    companyName: biz.tradingName || fromName || installationBusinessName(),
+    companyName: businessNameOf(biz) || fromName || installationBusinessName(),
     companyAbn: biz.abn || null,
     companyAddress: biz.address || null,
     companyPhone: biz.phone || null,
@@ -663,15 +663,11 @@ function buildEmailHtml({
   });
 }
 
-// The business name an email speaks for: the configured profile's trading
-// name, else the quote catalogue's, else a placeholder.
+// The business name an email speaks for: the configured profile's merged over
+// the quote catalogue's, trading name else legal name (business-profile.js).
 function documentBusinessName(quote = null) {
   const profile = quote?.quoteCatalog?.businessProfile || quote?.profile?.businessProfile || null;
-  return applyBusinessProfileOverride(profile || {})?.tradingName || configuredTradingName() || "Your Business";
-}
-
-function installationBusinessName() {
-  return configuredTradingName() || "Your Business";
+  return businessDisplayName(applyBusinessProfileOverride(profile || {}));
 }
 
 function resolvedDocumentIntro({ quote, documentType, meta = null }) {

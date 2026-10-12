@@ -1166,7 +1166,7 @@ export interface UiConfig {
   deploymentTheme: string;
   workerDisplayName: string;
   assistantDisplayName: string;
-  /** The business stock email signatures sign with (config businessProfile, else the quote catalogue's). */
+  /** The business stock email signatures sign with: trading name, else legal name (config businessProfile over the quote catalogue's). */
   businessName?: string;
 }
 

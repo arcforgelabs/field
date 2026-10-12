@@ -11,7 +11,8 @@ import {
 import { loadAssemblies } from "./catalog/assemblies.js";
 import {
   applyBusinessProfileOverride,
-  configuredTradingName,
+  businessDisplayName,
+  configuresBusinessName,
   hasBusinessProfileOverride,
   setBusinessProfileOverride,
 } from "./business-profile.js";
@@ -314,12 +315,14 @@ function cloneQuoteCatalogs(quoteCatalogs) {
 }
 
 // The configured business profile over the catalogue's (a no-op when none is
-// configured). Its trading name is also the issuer printed on documents.
+// configured). When config names the business, that name (trading, else
+// legal) is also the issuer printed on documents.
 function withConfiguredBusinessProfile(quoteCatalog) {
   if (!hasBusinessProfileOverride()) return quoteCatalog;
   quoteCatalog.businessProfile = applyBusinessProfileOverride(quoteCatalog.businessProfile || null);
-  const tradingName = configuredTradingName();
-  if (tradingName) quoteCatalog.deliveryDefaults = { ...(quoteCatalog.deliveryDefaults || {}), issuerName: tradingName };
+  if (configuresBusinessName()) {
+    quoteCatalog.deliveryDefaults = { ...(quoteCatalog.deliveryDefaults || {}), issuerName: businessDisplayName(quoteCatalog.businessProfile) };
+  }
   return quoteCatalog;
 }
 
