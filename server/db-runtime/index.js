@@ -429,6 +429,35 @@ async function takeMigrationLock(client) {
   }
 }
 
+// Roles are cluster-wide, but MIGRATION_LOCK_KEY is an advisory lock, which
+// only serialises migrations within one database. Two databases on one server
+// migrating at once (test databases, or two installations sharing a cluster)
+// can both create, alter or grant field_app (0005) and collide. Drizzle runs
+// pending migrations in one transaction, so a run that hit this was rolled
+// back and is safe to repeat.
+const ROLE_CONFLICT_RETRIES = 5;
+
+function isClusterRoleConflict(error) {
+  for (let current = error; current; current = current.cause) {
+    const code = current.code;
+    if (code === "XX000" && /tuple concurrently updated/i.test(current.message || "")) return true;
+    if (code === "23505" && /^pg_auth(id|_members)_/.test(current.constraint_name || current.constraint || "")) return true;
+    if (code === "42710" && /\brole\b/i.test(current.message || "")) return true;
+  }
+  return false;
+}
+
+async function migrateWithRoleConflictRetry(lockedDb) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await migratePostgres(lockedDb, { migrationsFolder: MIGRATIONS_FOLDER });
+    } catch (error) {
+      if (attempt > ROLE_CONFLICT_RETRIES || !isClusterRoleConflict(error)) throw error;
+      await new Promise((wake) => setTimeout(wake, 50 * attempt + Math.floor(Math.random() * 100)));
+    }
+  }
+}
+
 async function migrateDb(db, config) {
   let before;
   if (config.driver === "pglite") {
@@ -443,7 +472,7 @@ async function migrateDb(db, config) {
       await takeMigrationLock(client);
       const lockedDb = drizzlePostgres(client, { schema });
       before = await appliedMigrationCount(lockedDb);
-      await migratePostgres(lockedDb, { migrationsFolder: MIGRATIONS_FOLDER });
+      await migrateWithRoleConflictRetry(lockedDb);
       await client`select pg_advisory_unlock(${MIGRATION_LOCK_KEY.toString()}::bigint)`;
     } finally {
       await client.end({ timeout: 5 });
