@@ -274,6 +274,13 @@ them; nothing in the app reads them yet.
 rows after 0010 is applied again, since the job files still hold every
 quote); run it before 0009's.
 
+`0011_quote_row_display` (#245) adds what the documents print besides money
+to `quote_lines` and `quote_sections`: excluded from the price, amount hidden
+or blank, collapsed, row style and notes, and on lines `row_kind`,
+`display_unit_sell` and `line_cost`. Every column has a default or is
+nullable, and 0010's triggers cover them. `rollback/0011_quote_row_display.down.sql`
+drops them (the rows and their money stay); run it before 0010's.
+
 ### Adding tables
 
 A tenant table gets `orgUid: orgUid()` and `tenantIsolation("<table>")` in

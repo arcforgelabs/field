@@ -17,12 +17,13 @@ import { DEFAULT_ORG_UID, withOrg } from "../db-runtime/tenancy.js";
 import { createIssuedDocumentService } from "../documents/issued-documents.js";
 import { mapQuoteArtifact } from "./from-artifact.js";
 import { createQuoteRowService, isFrozenQuote } from "./quote-rows.js";
-import { FIXTURE_META, HALF_CENT_PRINTED, engineQuote, floatRoundedLineQuote, halfCentGstQuote, sectionedQuote } from "./test-fixtures.js";
+import { FIXTURE_META, HALF_CENT_PRINTED, displayQuote, engineQuote, floatRoundedLineQuote, halfCentGstQuote, sectionedQuote } from "./test-fixtures.js";
 import { isQuoteUid } from "./uid.js";
 
 const ORG_A = DEFAULT_ORG_UID;
 const ORG_B = "org_01TESTSECONDORGANISATION0";
 const ROLLBACK_0010 = fileURLToPath(new URL("../db/rollback/0010_quote_rows.down.sql", import.meta.url));
+const ROLLBACK_0011 = fileURLToPath(new URL("../db/rollback/0011_quote_row_display.down.sql", import.meta.url));
 
 function rejects(promise, pattern) {
   return assert.rejects(promise, (error) => {
@@ -221,6 +222,21 @@ describe("quote rows", () => {
     await rejects(withOrg(t.db, ORG_A, (tx) => tx.execute(sql`update quotes set tax_total_source = 'printed' where uid = ${uid}`)), /quotes_tax_total_source_check/);
   });
 
+  test("a version sent before the display columns keeps its rows and is not marked current for printing", async () => {
+    const full = mapQuoteArtifact({ quote: displayQuote(), meta: FIXTURE_META });
+    // As part one stored it: the money, none of the display.
+    const bare = {
+      ...full,
+      sections: full.sections.map(({ isExcluded, amountBlank, isCollapsed, rowStyle, notes, ...rest }) => rest),
+      lines: full.lines.map(({ isExcluded, showAmount, amountBlank, isCollapsed, rowStyle, notes, rowKind, displayUnitSell, lineCost, ...rest }) => rest),
+    };
+    await a.writeVersion({ jobId: "job-v1", version: 1, mapped: bare, status: "sent", sentAt: "2026-10-01T00:00:00.000Z", sourceDigest: "v1" });
+    const again = await a.writeVersion({ jobId: "job-v1", version: 1, mapped: full, status: "sent", sentAt: "2026-10-01T00:00:00.000Z", sourceDigest: "v2" });
+    assert.equal(again.action, "unchanged");
+    assert.equal(again.displayStale, true);
+    assert.equal(again.quote.sourceDigest, "v1", "the digest is not moved, so nothing prints from these rows");
+  });
+
   test("the table checks hold: totals add up, enums, uids", async () => {
     await rejects(withOrg(t.db, ORG_A, (tx) => tx.execute(sql`insert into quotes (uid, job_id, number, version, subtotal, tax_total, total, created_at, updated_at)
       values ('qte_01JWWWWWWWWWWWWWWWWWWWWWWW', 'job-c', 'EQ-C', 1, 10, 1, 12, now(), now())`)), /quotes_total_check/);
@@ -253,26 +269,37 @@ async function schemaShape(db) {
   return rows.flat().map((row) => row.x).sort();
 }
 
-describe("migration 0010 rollback", () => {
-  test("the rollback script returns the database to its 0009 shape, and 0010 applies again", async () => {
+describe("migrations 0011 and 0010 roll back", () => {
+  test("0011's rollback returns the 0010 shape with the rows; 0010's the 0009 shape; both apply again", async () => {
     const dir0009 = migrationsUpTo(9);
+    const dir0010 = migrationsUpTo(10);
     const client = new PGlite({ parsers: { [types.NUMERIC]: (v) => v, [types.INT8]: (v) => v } });
-    const reference = new PGlite();
+    const reference9 = new PGlite();
+    const reference10 = new PGlite();
     try {
       const db = drizzle(client, { schema });
       await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
       const service = createQuoteRowService({ db, orgUid: ORG_A });
       await service.writeVersion({ jobId: "job-r", version: 1, mapped: mapQuoteArtifact({ quote: engineQuote(), meta: FIXTURE_META }), status: "sent", sentAt: "2026-10-01T00:00:00.000Z" });
+      // 0011 first: the display columns go, the rows and their money stay.
+      await client.exec(readFileSync(ROLLBACK_0011, "utf8"));
+      await migrate(drizzle(reference10, { schema }), { migrationsFolder: dir0010 });
+      assert.deepEqual(await schemaShape(db), await schemaShape(drizzle(reference10, { schema })));
+      const [kept] = await asOrg(db, ORG_A, sql`select total from quotes where job_id = 'job-r'`);
+      assert.equal(kept.total, "1686.63");
+      // Then 0010.
       await client.exec(readFileSync(ROLLBACK_0010, "utf8"));
-      await migrate(drizzle(reference, { schema }), { migrationsFolder: dir0009 });
-      assert.deepEqual(await schemaShape(db), await schemaShape(drizzle(reference, { schema })));
+      await migrate(drizzle(reference9, { schema }), { migrationsFolder: dir0009 });
+      assert.deepEqual(await schemaShape(db), await schemaShape(drizzle(reference9, { schema })));
       await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
       const [count] = await asOrg(db, ORG_A, sql`select count(*)::int as n from quotes`);
       assert.equal(count.n, 0, "0010 re-applies empty; the backfill fills it again");
     } finally {
       await client.close();
-      await reference.close();
+      await reference9.close();
+      await reference10.close();
       rmSync(dir0009, { recursive: true, force: true });
+      rmSync(dir0010, { recursive: true, force: true });
     }
   });
 });

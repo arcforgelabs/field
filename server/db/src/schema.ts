@@ -1049,11 +1049,18 @@ export const quoteSections = pgTable(
     showSubtotal: boolean("show_subtotal").notNull().default(true),
     /** The organizer node it was mapped from, while the files are the source of truth. */
     sourceNodeId: text("source_node_id"),
+    // Display (#245, migration 0011), as on quote_lines.
+    isExcluded: boolean("is_excluded").notNull().default(false),
+    amountBlank: boolean("amount_blank").notNull().default(false),
+    isCollapsed: boolean("is_collapsed").notNull().default(false),
+    rowStyle: text("row_style"),
+    notes: text("notes"),
     createdAt: createdAt(),
     createdBy: text("created_by"),
   },
   (t) => [
     uniqueIndex("quote_sections_org_uid_key").on(t.orgUid, t.uid),
+    check("quote_sections_row_style_check", sql`${t.rowStyle} is null or ${t.rowStyle} in ('branded','bold','normal')`),
     index("quote_sections_quote_idx").on(t.orgUid, t.quoteUid, t.sortOrder),
     foreignKey({
       name: "quote_sections_quote_fk",
@@ -1115,11 +1122,32 @@ export const quoteLines = pgTable(
     isSelected: boolean("is_selected").notNull().default(true),
     /** The organizer node it was mapped from, while the files are the source of truth. */
     sourceNodeId: text("source_node_id"),
+    // Display (#245, migration 0011): what the customer documents print, so
+    // a quote renders from its rows exactly as it did from its files.
+    /** Excluded from the price: not printed and never counted (kept for the editor). */
+    isExcluded: boolean("is_excluded").notNull().default(false),
+    /** false: the amount is hidden ("Included", or blank with `amount_blank`). */
+    showAmount: boolean("show_amount").notNull().default(true),
+    amountBlank: boolean("amount_blank").notNull().default(false),
+    /** The rows under it are not printed. */
+    isCollapsed: boolean("is_collapsed").notNull().default(false),
+    /** `branded`, `bold` or `normal`; null for the default by depth. */
+    rowStyle: text("row_style"),
+    /** Internal notes on the row; never printed. */
+    notes: text("notes"),
+    /** How documents style it: `row`, `group` (a heading or a group's total) or `generated` (an engine breakdown). */
+    rowKind: text("row_kind").notNull().default("row"),
+    /** The rate a document prints beside the amount when it is not `unit_sell` (a fixed price); null otherwise. */
+    displayUnitSell: numeric("display_unit_sell", { precision: 12, scale: 4 }),
+    /** The cost behind the line's amount, ex GST; internal, never printed. */
+    lineCost: numeric("line_cost", { precision: 12, scale: 2 }),
     createdAt: createdAt(),
     createdBy: text("created_by"),
   },
   (t) => [
     uniqueIndex("quote_lines_org_uid_key").on(t.orgUid, t.uid),
+    check("quote_lines_row_style_check", sql`${t.rowStyle} is null or ${t.rowStyle} in ('branded','bold','normal')`),
+    check("quote_lines_row_kind_check", sql`${t.rowKind} in ('row','group','generated')`),
     index("quote_lines_quote_idx").on(t.orgUid, t.quoteUid, t.sortOrder),
     index("quote_lines_item_idx").on(t.orgUid, t.itemUid),
     foreignKey({

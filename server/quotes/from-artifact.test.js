@@ -85,14 +85,18 @@ describe("mapQuoteArtifact", () => {
     assert.deepEqual(compareTotals(mapped.totals, mapped.shown), []);
   });
 
-  test("listed-only rows are optional and not selected; excluded rows are left out; a fixed price keeps its quantity", () => {
+  test("listed-only rows are optional and not selected; excluded rows are kept but never counted; a fixed price keeps its quantity", () => {
     const mapped = mapQuoteArtifact({ quote: listedExcludedOverrideQuote(), meta: FIXTURE_META });
     assert.equal(mapped.excludedRows, 1);
     assert.deepEqual(mapped.lines.map(summary), [
       "custom Optional turf: 3.0000 m2 x 30.0000 = 90.00",
+      "custom Removed item: 1.0000 lot x 999.0000 = 999.00",
       "custom Edging: 4.0000 m x 30.0000 = 120.00",
     ]);
-    const [listed, fixed] = mapped.lines;
+    const [listed, removed, fixed] = mapped.lines;
+    assert.deepEqual([removed.isExcluded, removed.lineCost], [true, null], "excluded: kept for the editor, its own rate and amount");
+    assert.equal(fixed.displayUnitSell, "25.0000", "the PDF printed the row's original rate beside the fixed price");
+    assert.equal(mapped.printable, true);
     assert.deepEqual([listed.isOptional, listed.isSelected], [true, false]);
     assert.equal(fixed.isPriceOverride, true);
     assert.match(fixed.overrideReason, /120\.00 for 4 m \(printed rate 25\.00\)/);

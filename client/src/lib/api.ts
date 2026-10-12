@@ -155,6 +155,25 @@ function getActorName(): string {
   return "User";
 }
 
+// The quote rows' version the server last reported for each job
+// (X-Field-Quote-Rows-Version on the job detail and on a save). A quote save
+// sends it back as If-Match, so a save over changes made elsewhere since the
+// quote was opened is refused (412) instead of overwriting them (#245).
+const quoteRowsVersions = new Map<string, string>();
+
+function rememberQuoteRowsVersion(path: string, res: Response) {
+  const tag = res.headers?.get?.("X-Field-Quote-Rows-Version");
+  const match = /^\/api\/jobs\/([^/?]+)(\/[^?]*)?(?:\?|$)/.exec(path);
+  if (!match) return;
+  const jobId = decodeURIComponent(match[1]);
+  if (tag) quoteRowsVersions.set(jobId, tag);
+  else if (!match[2] && !/[?&]version=/.test(path)) quoteRowsVersions.delete(jobId);
+}
+
+export function quoteRowsVersionFor(jobId: string): string | null {
+  return quoteRowsVersions.get(jobId) || null;
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {}
@@ -174,6 +193,7 @@ async function request<T>(
   }
 
   const res = await fetch(path, { ...options, headers });
+  rememberQuoteRowsVersion(path, res);
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     // Gmail auth expired returns 401 with a specific code — don't treat as session expiry
@@ -398,9 +418,10 @@ export const api = {
       lockStatus?: string;
     }
   ) {
+    const ifMatch = quoteRowsVersionFor(id);
     return request<QuoteUpdateResponse>(
       `/api/jobs/${id}/quote-update`,
-      { method: "POST", body: JSON.stringify(patch) }
+      { method: "POST", body: JSON.stringify(patch), ...(ifMatch ? { headers: { "If-Match": ifMatch } } : {}) }
     );
   },
   regenerateQuote(id: string) {

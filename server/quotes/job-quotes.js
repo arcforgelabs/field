@@ -30,7 +30,8 @@ import { normalizePipelineStage } from "../pipeline.js";
 import { quoteDocumentNumber } from "../documents/job-sources.js";
 
 /** Bumped when the mapping changes, so draft rows mapped the old way are rewritten. */
-export const QUOTE_ROW_MAPPING_VERSION = 1;
+// 2: display columns (#245, migration 0011).
+export const QUOTE_ROW_MAPPING_VERSION = 2;
 
 function text(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;

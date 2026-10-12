@@ -203,6 +203,42 @@ export function halfCentGstQuote() {
   });
 }
 
+// What documents print besides money (#245): a collapsed section, a section
+// whose subtotal is hidden, a blank amount, row styles, a nested group, notes,
+// an excluded row inside a kit, a cost override on a group and a top-level
+// row between sections.
+export function displayQuote() {
+  return organizerQuote({
+    quoteNumber: "EQ-2501-10",
+    root: ["group:collapsed", "manual:between", "group:hidden", "group:costed"],
+    nodes: {
+      "group:collapsed": group("Site preparation", ["manual:clear", "manual:strip"], { collapsed: true, rowStyle: "bold" }),
+      "manual:clear": manual({ sourceCode: "manual-clear", labelOverride: "Clear site", quantity: 1, unit: "lot", sellRate: 400, buyRate: 250 }),
+      "manual:strip": manual({ sourceCode: "manual-strip", labelOverride: "Strip topsoil", quantity: 30, unit: "m2", sellRate: 6.5, buyRate: 4, notes: "Check depth on site" }),
+      "manual:between": manual({ sourceCode: "manual-between", labelOverride: "Delivery", quantity: 2, unit: "load", sellRate: 95, buyRate: 70, amountVisible: false }),
+      "group:hidden": group("Paving", ["manual:kit", "group:edge"], { amountVisible: false, notes: "Client to pick colour" }),
+      "manual:kit": manual({
+        sourceCode: "manual-catalog-paver-kit-n2",
+        labelOverride: "Paver kit",
+        quantity: 10,
+        unit: "m2",
+        sellRate: 0,
+        buyRate: 0,
+        rateMode: "catalog-linked",
+        catalogItemUid: "itm_PAVERKIT",
+        children: ["manual:pavers", "manual:sand", "manual:sealer"],
+      }),
+      "manual:pavers": manual({ sourceCode: "manual-pavers", labelOverride: "Pavers", quantity: 1, unit: "m2", sellRate: 45, buyRate: 30, catalogItemUid: "itm_PAVER", catalogComponentOf: "itm_PAVERKIT" }),
+      "manual:sand": manual({ sourceCode: "manual-sand", labelOverride: "Bedding sand", quantity: 0.05, unit: "m3", sellRate: 80, buyRate: 50, rowStyle: "normal" }),
+      "manual:sealer": manual({ sourceCode: "manual-sealer", labelOverride: "Sealer", quantity: 1, unit: "m2", sellRate: 5, buyRate: 3, excludedFromPrice: true }),
+      "group:edge": group("Edging", ["manual:edge"], { amountBlank: true, amountVisible: false }),
+      "manual:edge": manual({ sourceCode: "manual-edge", labelOverride: "Concrete edge", quantity: 12, unit: "m", sellRate: 22, buyRate: 15 }),
+      "group:costed": group("Cleanup", ["manual:sweep"], { costOverride: 50 }),
+      "manual:sweep": manual({ sourceCode: "manual-sweep", labelOverride: "Sweep and remove", quantity: 1, unit: "lot", sellRate: 120, buyRate: 80, rowStyle: "branded" }),
+    },
+  });
+}
+
 export const FIXTURE_META = Object.freeze({
   id: "job-rows",
   title: "Smith — 1 Example Road",

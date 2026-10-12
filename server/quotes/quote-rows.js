@@ -94,6 +94,11 @@ function sectionFromRow(row) {
     sortOrder: row.sortOrder,
     showSubtotal: row.showSubtotal,
     sourceNodeId: row.sourceNodeId,
+    isExcluded: row.isExcluded,
+    amountBlank: row.amountBlank,
+    isCollapsed: row.isCollapsed,
+    rowStyle: row.rowStyle,
+    notes: row.notes,
   };
 }
 
@@ -124,6 +129,15 @@ function lineFromRow(row) {
     isOptional: row.isOptional,
     isSelected: row.isSelected,
     sourceNodeId: row.sourceNodeId,
+    isExcluded: row.isExcluded,
+    showAmount: row.showAmount,
+    amountBlank: row.amountBlank,
+    isCollapsed: row.isCollapsed,
+    rowStyle: row.rowStyle,
+    notes: row.notes,
+    rowKind: row.rowKind,
+    displayUnitSell: row.displayUnitSell,
+    lineCost: row.lineCost,
   };
 }
 
@@ -132,21 +146,40 @@ const CONTENT_FIELDS = [
   "unitCost", "unitSell", "isPriceOverride", "overrideReason", "taxCode", "taxRate", "lineTotal", "lineTotalSource",
   "lineTotalReason", "isOptional", "isSelected", "sourceNodeId",
 ];
+// What documents print besides money (#245, migration 0011).
+const DISPLAY_LINE_FIELDS = [
+  "isExcluded", "showAmount", "amountBlank", "isCollapsed", "rowStyle", "notes", "rowKind", "displayUnitSell", "lineCost",
+];
+const DISPLAY_SECTION_FIELDS = ["isExcluded", "amountBlank", "isCollapsed", "rowStyle", "notes"];
+const BOOLEAN_DEFAULTS = { isExcluded: false, showAmount: true, amountBlank: false, isCollapsed: false, rowKind: "row" };
+
+function displayValue(entry, field) {
+  return entry[field] ?? BOOLEAN_DEFAULTS[field] ?? null;
+}
 
 /**
  * What a version's sections and lines say, without their ids: the same for
  * a mapping (local keys) and for stored rows (uids), so a sent version can be
- * compared with what its files map to now.
+ * compared with what its files map to now. With `display: false`, only the
+ * money and identity of the lines (what part one stored), so a version sent
+ * before the display columns existed is not a conflict for lacking them.
  */
-export function contentFingerprint({ sections, lines }) {
-  const sectionIndex = new Map(sections.map((section, index) => [section.key ?? section.uid, index]));
-  const lineIndex = new Map(lines.map((line, index) => [line.key ?? line.uid, index]));
+export function contentFingerprint({ sections, lines }, { display = true } = {}) {
+  const ordered = (list) => [...list].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  const sectionList = ordered(sections);
+  const lineList = ordered(lines);
+  const sectionIndex = new Map(sectionList.map((section, index) => [section.key ?? section.uid, index]));
+  const lineIndex = new Map(lineList.map((line, index) => [line.key ?? line.uid, index]));
   return JSON.stringify({
-    sections: sections.map((section) => [section.title, section.showSubtotal !== false, section.sourceNodeId ?? null]),
-    lines: lines.map((line) => [
+    sections: sectionList.map((section) => [
+      section.title, section.showSubtotal !== false, section.sourceNodeId ?? null,
+      ...(display ? DISPLAY_SECTION_FIELDS.map((field) => displayValue(section, field)) : []),
+    ]),
+    lines: lineList.map((line) => [
       sectionIndex.get(line.sectionKey ?? line.sectionUid) ?? null,
       lineIndex.get(line.parentKey ?? line.parentLineUid) ?? null,
       ...CONTENT_FIELDS.map((field) => line[field] ?? null),
+      ...(display ? DISPLAY_LINE_FIELDS.map((field) => displayValue(line, field)) : []),
     ]),
   });
 }
@@ -218,6 +251,11 @@ export function createQuoteRowService({ db, orgUid = undefined, now = () => new 
         sortOrder: section.sortOrder ?? index,
         showSubtotal: section.showSubtotal !== false,
         sourceNodeId: section.sourceNodeId || null,
+        isExcluded: section.isExcluded === true,
+        amountBlank: section.amountBlank === true,
+        isCollapsed: section.isCollapsed === true,
+        rowStyle: section.rowStyle || null,
+        notes: section.notes || null,
         createdAt: at,
         createdBy: actor,
       };
@@ -257,6 +295,15 @@ export function createQuoteRowService({ db, orgUid = undefined, now = () => new 
         isOptional: Boolean(line.isOptional),
         isSelected: line.isSelected !== false,
         sourceNodeId: line.sourceNodeId || null,
+        isExcluded: line.isExcluded === true,
+        showAmount: line.showAmount !== false,
+        amountBlank: line.amountBlank === true,
+        isCollapsed: line.isCollapsed === true,
+        rowStyle: line.rowStyle || null,
+        notes: line.notes || null,
+        rowKind: line.rowKind || "row",
+        displayUnitSell: line.displayUnitSell ?? null,
+        lineCost: line.lineCost ?? null,
         createdAt: at,
         createdBy: actor,
       };
@@ -370,8 +417,14 @@ export function createQuoteRowService({ db, orgUid = undefined, now = () => new 
           // time into quote.json): fine as long as they still map to the rows
           // that were frozen. Its rows are never rewritten either way.
           const stored = await readContent(tx, existing.uid);
-          if (contentFingerprint(stored) !== contentFingerprint(mapped)) {
+          if (contentFingerprint(stored, { display: false }) !== contentFingerprint(mapped, { display: false })) {
             return { action: "frozen-kept", differs: true, quote: quoteFromRow(row) };
+          }
+          if (contentFingerprint(stored) !== contentFingerprint(mapped)) {
+            // Same money, but stored before the display columns existed (or
+            // with other display): the rows stay as sent, and the digest is
+            // left alone so nothing prints from them (read-model.js).
+            return { action: statusChanged ? "status-updated" : "unchanged", displayStale: true, quote: quoteFromRow(row) };
           }
           if (sourceDigest != null) {
             [row] = await tx.update(quotes).set({ sourceDigest, updatedAt: at, updatedBy: actor, versionLock: row.versionLock + 1 })

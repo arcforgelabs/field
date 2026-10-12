@@ -13,6 +13,11 @@ import { createIssuedDocumentRecorder, createUnavailableIssuedDocumentRecorder, 
 import { registerIssuedDocumentRoutes } from "./documents/routes.js";
 import { createQuoteRowService } from "./quotes/quote-rows.js";
 import { createQuoteRowRecorder, createUnavailableQuoteRowRecorder, installQuoteRowRecorder } from "./quotes/recorder.js";
+import { loadQuoteRows, quoteReadsStatus, quoteRowsFromArtifact } from "./quotes/read-model.js";
+import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
+
+// A job detail's quote read from its rows (#245), kept beside the detail object.
+const jobDetailQuoteRows = new WeakMap();
 import { startDurableStorage } from "./storage/durable-store.js";
 import { heldDataMigrations, runDataMigrations } from "./data-migrations/index.js";
 import { registerSqliteImage } from "./storage/durable-hooks.js";
@@ -927,6 +932,7 @@ app.get("/api/storage/status", requireAuth, requireAdmin, (_req, res) => {
     ...(durableStorage ? durableStorage.status() : { enabled: false }),
     issuedDocuments: issuedDocumentRecorder.status(),
     quoteRows: quoteRowRecorder.status(),
+    quoteReads: quoteReadsStatus(),
   });
 });
 
@@ -1297,6 +1303,10 @@ app.get("/api/jobs/:id", requireAuth, async (req, res) => {
   try {
     const selectedVersion = parseRequestedQuoteVersion(req.query?.version);
     const detail = await loadJobDetail(job, { version: selectedVersion });
+    // The quote rows' version, for the editor to send back as If-Match (#245).
+    // Only for the latest version: that is the one a save writes.
+    const rowsTag = jobDetailQuoteRows.get(detail)?.versionTag;
+    if (rowsTag && (!detail.versionView || detail.versionView.isLatest)) res.setHeader("X-Field-Quote-Rows-Version", rowsTag);
     res.json(buildClientJobDetail(detail));
   } catch (err) {
     res.status(err.statusCode || 400).json({ error: err.message });
@@ -3839,6 +3849,13 @@ app.post("/api/jobs/:id/quote-update", requireAuth, async (req, res) => {
 
   try {
     const persisted = await runExclusiveJobMutation(job.meta.id, "quote update", async () => {
+      // Optimistic concurrency on the quote's rows (#245): a save made
+      // against rows that moved on since the editor read them is refused.
+      await assertQuoteRowsIfMatch({
+        jobId: job.meta.id,
+        version: (await readQuoteArtifacts(job.dir))?.version,
+        ifMatch: req.get("If-Match"),
+      });
       return await updateJobQuote({
         jobDir: job.dir,
         meta: normalizeJobMeta(job.meta),
@@ -3859,6 +3876,13 @@ app.post("/api/jobs/:id/quote-update", requireAuth, async (req, res) => {
       });
     });
 
+    // The save is written to the quote's rows through the quote service
+    // (the commit's dual-write); the files are still written alongside until
+    // part three removes them. The new rows' version goes back to the editor.
+    await quoteRowRecorder.syncJob(job.dir, { reason: "quote saved" });
+    const rowsTag = await currentQuoteRowsTag({ jobId: job.meta.id, version: persisted.quote?.version }).catch(() => null);
+    if (rowsTag) res.setHeader("X-Field-Quote-Rows-Version", rowsTag);
+    res.setHeader("X-Field-Quote-Rows", rowsTag ? "written" : quoteRowRecorder.enabled ? "not-written" : "no-database");
     const visible = buildClientQuoteMutationView(persisted);
     res.json({
       ok: true,
@@ -3869,7 +3893,7 @@ app.post("/api/jobs/:id/quote-update", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[quote-update] ${job.meta.id} failed: ${err.message}`);
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
   }
 });
 
@@ -3950,6 +3974,10 @@ app.post("/api/jobs/:id/quote/catalog-changes/apply", requireAuth, async (req, r
       })
     ));
     const { persisted, ...rest } = result;
+    if (persisted) {
+      const rowsTag = await currentQuoteRowsTag({ jobId: job.meta.id, version: persisted.quote?.version }).catch(() => null);
+      if (rowsTag) res.setHeader("X-Field-Quote-Rows-Version", rowsTag);
+    }
     res.json({
       ok: true,
       ...rest,
@@ -4558,6 +4586,10 @@ async function loadJobDetail(job, { version = null } = {}) {
   });
   result.deletion = await assessJobDeletion({ dir: job.dir, meta: result.meta }, jobDeletionDeps())
     .catch(() => ({ deletable: false, reasons: ["Field could not check this job's history."] }));
+  // The quote's customer pricing (shown by the client, read by the MCP quote
+  // tool) comes from its rows (#245). Kept beside the detail, not in it, so
+  // the detail's JSON is unchanged.
+  if (result.quote) jobDetailQuoteRows.set(result, await loadQuoteRows({ quote: result.quote, meta: result.meta }));
   return result;
 }
 
@@ -4569,7 +4601,7 @@ function buildClientJobDetail(detail) {
   const pipelineStage = visibleDetail?.meta?.pipelineStage || null;
   return {
     ...visibleDetail,
-    quote: buildClientQuoteView(visibleDetail.quote, pipelineStage, { historical, issuedVersion }),
+    quote: buildClientQuoteView(visibleDetail.quote, pipelineStage, { historical, issuedVersion, rowsFinancials: jobDetailQuoteRows.get(detail)?.financials || null }),
   };
 }
 
@@ -4587,7 +4619,7 @@ function buildClientQuoteMutationView({ meta = null, quote = null, quoteMarkdown
   };
 }
 
-function buildClientQuoteView(storedQuote, pipelineStage = null, { historical = false, issuedVersion = false } = {}) {
+function buildClientQuoteView(storedQuote, pipelineStage = null, { historical = false, issuedVersion = false, rowsFinancials = null } = {}) {
   if (!storedQuote || typeof storedQuote !== "object") return storedQuote;
   const quote = withCurrentPricingVerdict(storedQuote);
   const pricingDisplayable = isQuotePricingDisplayable(quote, {
@@ -4601,7 +4633,9 @@ function buildClientQuoteView(storedQuote, pipelineStage = null, { historical = 
     issuedVersion,
     current: !historical,
   });
-  const customerPricing = pricingDisplayable ? getCustomerPresentationFinancials(quote) : null;
+  // From the quote's rows (#245): the database's when the caller loaded them,
+  // else the rows the files map to.
+  const customerPricing = pricingDisplayable ? (rowsFinancials || quoteRowsFromArtifact({ quote }).financials) : null;
 
   const commercialLinesCount = pricingDisplayable && Array.isArray(quote.commercialLines) ? quote.commercialLines.length : 0;
   const budgetLinesCount = pricingDisplayable && Array.isArray(quote.budgetLines) ? quote.budgetLines.length : 0;

@@ -30,6 +30,7 @@ import { resolveActiveJobGeneration, resolveWritableJobGeneration, runAtomicJobG
 import { isIssuedQuoteVersion } from "./quote-pricing-attestation.js";
 import { findAnyIssuedDocument, readQuoteIssuanceLedger } from "./quote-issuance.js";
 import { applyBusinessProfileOverride, configuredTradingName } from "./business-profile.js";
+import { loadQuoteRows } from "./quotes/read-model.js";
 
 const QUOTE_VERSIONS_DIR = "quote-versions";
 
@@ -912,6 +913,10 @@ export async function generateQuotePdfBuffer({
       ? buildReceiptDocumentNumber({ meta, quote, milestoneInvoice })
       : (quote.quoteNumber || meta.id);
   const pdfBusiness = resolveBusiness(quote);
+  // A quote prints its schedule and totals from its rows (#245); invoices and
+  // receipts still print the quote's schedule from the files until they are
+  // rows themselves.
+  const scheduleView = resolvedDocumentType === "quote" ? await loadQuoteRows({ quote, meta }) : null;
   return await new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: "A4",
@@ -936,6 +941,7 @@ export async function generateQuotePdfBuffer({
       sitePlanPng,
       documentType: resolvedDocumentType,
       invoicePaidAmount,
+      scheduleView,
     });
     doc.end();
   });
@@ -968,6 +974,7 @@ function renderQuotePdf(doc, {
   sitePlanPng,
   documentType = "quote",
   invoicePaidAmount = null,
+  scheduleView = null,
 }) {
   const delivery = quote.delivery || { status: "draft" };
   const quoteCatalog = quote.quoteCatalog || quote.profile || {};
@@ -975,7 +982,7 @@ function renderQuotePdf(doc, {
   const biz = resolveBusiness(quote);
   const bank = biz.paymentMethods?.bankTransfer || {};
   const currency = quote.totals?.currency || "AUD";
-  const allCustomerScheduleItems = getCustomerScheduleItems(quote);
+  const allCustomerScheduleItems = scheduleView?.items || getCustomerScheduleItems(quote);
   // Filter out items excluded from price for the customer-facing PDF
   const customerScheduleItems = allCustomerScheduleItems.filter((item) => !item.excludedFromPrice);
   const milestoneInvoice = meta?.milestoneInvoice || null;
@@ -1010,7 +1017,7 @@ function renderQuotePdf(doc, {
     : quote.generatedAt;
 
   // Recalculate customer-facing totals from visible schedule items (respects exclusions + manual items)
-  const pdfQuote = buildExclusionAdjustedQuote(quote);
+  const pdfQuote = buildExclusionAdjustedQuote(quote, scheduleView?.financials);
   const invoicePaymentSummary = isPaymentDocument
     ? buildInvoicePaymentSummary({ meta, quote: pdfQuote, invoicePaidAmount })
     : null;
@@ -1970,8 +1977,8 @@ function formatInvoiceStatusLabel({ milestoneInvoice = null, invoicePaymentSumma
   return "Paid";
 }
 
-function buildExclusionAdjustedQuote(quote) {
-  const totals = getCustomerPresentationFinancials(quote);
+function buildExclusionAdjustedQuote(quote, financials = null) {
+  const totals = financials || getCustomerPresentationFinancials(quote);
   return {
     ...quote,
     totals: {

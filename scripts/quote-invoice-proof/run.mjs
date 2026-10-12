@@ -64,6 +64,9 @@ const HAS_ISSUED_DOCUMENTS = existsSync(join(repoRoot, "server/documents/routes.
 // Checkouts with quote rows (#241, server/quotes/).
 const HAS_QUOTE_ROWS = existsSync(join(repoRoot, "server/quotes/backfill.js"));
 let quoteRowStatus = null;
+// Checkouts whose quote documents and totals are read from the rows (#245).
+const HAS_QUOTE_READS = existsSync(join(repoRoot, "server/quotes/read-model.js"));
+let quoteReadStatus = null;
 const port = Number(portArg || 19731);
 const here = import.meta.dirname;
 const root = mkdtempSync(join(tmpdir(), "field-quote-invoice-proof-"));
@@ -205,7 +208,11 @@ try {
   }
   if (STORAGE_MODE) restartChecks = await readOnlyChecks(aid, bid);
   if (STORAGE_MODE && HAS_ISSUED_DOCUMENTS) await issuedDocumentsProof(aid);
-  if (STORAGE_MODE && HAS_QUOTE_ROWS) quoteRowStatus = (await syncJson("GET", "/api/storage/status")).quoteRows;
+  if (STORAGE_MODE && HAS_QUOTE_ROWS) {
+    const status = await syncJson("GET", "/api/storage/status");
+    quoteRowStatus = status.quoteRows;
+    quoteReadStatus = status.quoteReads || null;
+  }
 } catch (error) {
   writeFileSync(join(outDir, "ERROR.txt"), `${error.stack}\n`);
   console.error(error.message);
@@ -419,13 +426,17 @@ async function quoteRowsProof({ aid, bid }) {
       return { code: error.status, report: JSON.parse(error.stdout?.toString() || "null"), stderr: error.stderr?.toString() || "" };
     }
   };
-  const report = { checks: [], ok: true, live: quoteRowStatus };
+  const report = { checks: [], ok: true, live: quoteRowStatus, reads: quoteReadStatus };
   const check = (name, ok, detail = null) => {
     report.checks.push({ name, ok: Boolean(ok), ...(detail == null ? {} : { detail }) });
     if (!ok) report.ok = false;
   };
   check("the live dual-write recorded without failures or mismatches", quoteRowStatus?.enabled && quoteRowStatus.failures === 0
     && quoteRowStatus.mismatches === 0 && quoteRowStatus.conflicts === 0 && quoteRowStatus.created > 0, quoteRowStatus);
+  if (HAS_QUOTE_READS) {
+    check("quote documents and totals were read from the rows (the database's and the mapped files'), never falling back to the files",
+      quoteReadStatus?.mode === "rows" && quoteReadStatus.database > 0 && quoteReadStatus.mapped > 0 && quoteReadStatus.files === 0, quoteReadStatus);
+  }
   const dry = run(["--dry-run"]);
   const real = run([]);
   report.dryRun = dry.report;

@@ -49,6 +49,7 @@ import { recordIssuedQuoteDocuments } from "./quote-issuance.js";
 import { buildQuoteSnapshotRecord } from "./quote-snapshots.js";
 import { recordDeliveredDocument, recordFailedDelivery } from "./documents/delivery.js";
 import { quoteRowRecorder } from "./quotes/recorder.js";
+import { quoteRowsFromArtifact } from "./quotes/read-model.js";
 import { issuedDocumentRecorder } from "./documents/recorder.js";
 import { applyQuoteCatalogChanges, computeQuoteCatalogChanges, upgradeOrganizerCatalogLinks } from "./quote-catalog-sync.js";
 import {
@@ -497,8 +498,9 @@ async function updateQuotePresentationOnlyInPlace({
     quoteReviewStatus: nextQuote.review?.status || nextQuote.status,
     quoteStatus: "complete",
     quoteLineItemCount: nextQuote.lineItems?.length || 0,
-    quoteSubtotal: getCustomerPresentationFinancials(nextQuote).subtotal || 0,
-    quoteTotal: getCustomerPresentationFinancials(nextQuote).total || nextQuote.totals?.total || 0,
+    // The job's cached totals (the job list) come from the quote's rows (#245).
+    quoteSubtotal: quoteRowsFromArtifact({ quote: nextQuote, meta }).financials.subtotal || 0,
+    quoteTotal: quoteRowsFromArtifact({ quote: nextQuote, meta }).financials.total || nextQuote.totals?.total || 0,
     quoteVersion: nextQuote.version || meta.quoteVersion || currentArtifacts.version || 1,
     deliveryStatus: currentPipelineStage,
     quoteIdentity: identityApplied.meta.quoteIdentity,
@@ -590,8 +592,8 @@ async function persistCurrentQuoteLockArtifacts({
     quoteReviewStatus: identityApplied.quote.review?.status || identityApplied.quote.status || meta?.quoteReviewStatus || null,
     quoteStatus: "complete",
     quoteLineItemCount: identityApplied.quote.lineItems?.length || 0,
-    quoteSubtotal: getCustomerPresentationFinancials(identityApplied.quote).subtotal || 0,
-    quoteTotal: getCustomerPresentationFinancials(identityApplied.quote).total || identityApplied.quote.totals?.total || 0,
+    quoteSubtotal: quoteRowsFromArtifact({ quote: identityApplied.quote, meta }).financials.subtotal || 0,
+    quoteTotal: quoteRowsFromArtifact({ quote: identityApplied.quote, meta }).financials.total || identityApplied.quote.totals?.total || 0,
     quoteVersion: identityApplied.quote.version || meta?.quoteVersion || currentArtifacts?.version || 1,
     quoteIdentity: identityApplied.meta.quoteIdentity,
   };
