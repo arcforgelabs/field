@@ -711,7 +711,10 @@ today, and what moves next, is under Phases.
 ### Business settings
 
 `business_settings` (one row) holds the business name, ABN, bank details,
-default terms, quote validity days and numbering prefixes. All of these come
+default terms, quote validity days and numbering prefixes. **Built so far
+(migration `0016_business_settings`, #28):** one row per organisation with
+`credit_note_on_reissue` (see "How step 4b credits an invoice"); the rest is
+still config. All of these come
 out of `quote-catalogs/embark-default.json5`, whose `gstRate` is replaced by
 item tax codes.
 
@@ -953,7 +956,7 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 3, part two | Quote reads from rows (#10): display columns (migration 0011); the quote PDF, the quote email's totals, the job's cached totals and the job detail's customer pricing (client and MCP) come from the rows; editor saves carry `If-Match` | Built |
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
 | 4a | Invoices, payments and receipts as rows (#27): `payment_milestones`, `invoices`, `invoice_lines`, `payments`, `receipts`, and the shape of `credit_notes` (migration 0013); dual-write after every committed milestone change; a backfill verified against what was issued | Built |
-| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Parts one and two built (issue service, migration 0014; credit notes, migration 0015); claim lines next |
+| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Parts one and two built (issue service, migration 0014; credit notes, migrations 0015 and 0016); claim lines next |
 | 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Later |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
@@ -1202,7 +1205,30 @@ How step 4b credits an invoice (#28, part two; migration
   written nothing, and the migration is not recorded, so it runs again at
   the next boot. `npm run data:migrate -- --dry-run` shows what it would
   record. The dual-write records the same for any job on its next change.
-- **Not changed:** returning an invoice to draft (unsend, mark unpaid) and
-  issuing different content later issues a new invoice without a credit
-  note, as an invoice returned to draft was not a delivered document. That
-  is a later decision.
+- **An invoice returned to draft and reissued** (decided 2026-10-13). When
+  an invoice is marked not sent or unpaid and then issued again with
+  different content, it gets a new number, and the account setting
+  `creditNoteOnReissue` (`business_settings`, migration
+  `0016_business_settings`; Settings, "Quotes and invoices") decides
+  whether the issue service credits the old one first, in the same
+  transaction:
+  - `when-emailed` (the default, best practice): only when Field has
+    evidence the customer was sent it through Field: an `emailed` event on
+    its issued document, or a delivered send record (a `sent` quote
+    snapshot of it). With no such evidence it was never delivered, so it is
+    left void and reissued under a new number with no credit note;
+  - `always`: a credit note every time;
+  - `never`: never a credit note; the old invoice stays void.
+
+  The issue service reads the setting and the evidence inside its
+  transaction. **"Credit and reissue" always makes a credit note, whatever
+  the setting says**: that action is the operator saying the customer has
+  the invoice. Issuing the same content again still restores the invoice
+  it was, under its number, with no credit note.
+- **Sending the replacement.** A credit note is not emailed on its own. Its
+  stored PDF is an issued document of the job (`GET /api/jobs/:id/documents`,
+  `GET /api/documents/:uid/pdf`). When the replacement invoice is emailed,
+  the email editor offers "Also attach the adjustment note": ticked, the
+  credit note's stored bytes go with the invoice (`attachCreditNote` on
+  `POST /api/jobs/:id/email-quote`). Attaching other Field documents is
+  part of the email editor's redesign.

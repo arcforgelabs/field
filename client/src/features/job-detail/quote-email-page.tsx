@@ -302,6 +302,9 @@ export function QuoteEmailPage() {
   const [selectedTemplateId, setSelectedTemplateId] = useState("standard");
   const [storedTemplates, setStoredTemplates] = useState<Record<string, QuoteEmailTemplate[]> | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  // An invoice issued in place of a credited one can carry its adjustment
+  // note too; the operator ticks it (#28).
+  const [attachCreditNote, setAttachCreditNote] = useState(false);
   const [automaticAttachmentBaseName, setAutomaticAttachmentBaseName] = useState("");
   const [phase, setPhase] = useState<SendPhase>("compose");
   const [sendMode, setSendMode] = useState<SendMode>("now");
@@ -379,6 +382,7 @@ export function QuoteEmailPage() {
     }
     return selectDefaultMilestoneInvoice(invoices);
   }, [detail?.meta.milestoneInvoices, params, activeDraftMilestoneIndex]);
+  const creditNoteNumber = documentType === "invoice" ? milestoneInvoice?.issuedRevision?.creditNoteNumber ?? null : null;
 
   const templates = useMemo(
     () => {
@@ -472,6 +476,7 @@ export function QuoteEmailPage() {
           attachments,
           scheduledAt,
           draftId: activeDraftId,
+          attachCreditNote: Boolean(creditNoteNumber && attachCreditNote),
         })
         : await api.emailJob(id, recipients, subject.trim(), bodyHtml, {
           cc: ccRecipients,
@@ -732,6 +737,13 @@ export function QuoteEmailPage() {
             onAttachmentsChange={setAttachments}
             signatureName={detail?.ui?.businessName || ""}
           />
+
+          {creditNoteNumber ? (
+            <label className="fx-check" style={{ padding: "0 2px" }}>
+              <input type="checkbox" checked={attachCreditNote} onChange={(event) => setAttachCreditNote(event.target.checked)} />
+              Also attach the adjustment note ({creditNoteNumber})
+            </label>
+          ) : null}
 
           <div className="quote-email-send-footer" style={{ display: "flex", alignItems: "flex-end", justifyContent: "flex-start", minHeight: 42, padding: "0 2px" }}>
             <SendControl

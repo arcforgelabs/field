@@ -40,6 +40,9 @@ import { assertQuotePricingDisplayable, attachQuotePricingAttestation, buildQuot
 import { buildQuoteEditPolicy } from "./quote-edit-policy.js";
 import { readQuoteLifecycle, recordQuoteLanded } from "./quote-lifecycle.js";
 import { installTestInvoiceIssuer } from "./invoices/test-issuer.js";
+import { createBusinessSettingsService } from "./invoices/business-settings.js";
+import { creditNoteAttachment } from "./invoices/credit-note-attachment.js";
+import { createIssuedDocumentRecorder, installIssuedDocumentRecorder } from "./documents/recorder.js";
 
 const TEST_PRICE_CATALOG = await createTestPriceCatalog({ track: false });
 const TEST_PRICE_CATALOG_DB = TEST_PRICE_CATALOG.store;
@@ -4268,6 +4271,64 @@ async function applyApprovedVariation(jobDir, baseQuote) {
   return variation;
 }
 
+// Step 4b: an invoice returned to draft and issued again with different
+// content is credited first only when the customer was sent it (the
+// default `when-emailed` setting); one that never left Field is reissued
+// under a new number with no credit note. `never` skips the credit even for
+// an emailed invoice.
+test("reissued after a return to draft: credited when it was emailed, not when it never left Field, never when the setting says never", async () => {
+  const recorder = createIssuedDocumentRecorder({ service: TEST_INVOICE_ISSUER.documents, logger: { error: () => {}, warn: () => {} } });
+  installIssuedDocumentRecorder(recorder);
+  const settings = createBusinessSettingsService({ db: TEST_INVOICE_ISSUER.db, orgUid: TEST_INVOICE_ISSUER.orgUid });
+  const root = await mkdtemp(join(tmpdir(), "field-job-reissue-policy-"));
+  async function reissue(id, { email }) {
+    const jobDir = join(root, id);
+    await mkdir(jobDir, { recursive: true });
+    const seeded = await seedLandedJobWithSentInvoice(jobDir, { id });
+    const issued = (await readJobMeta(jobDir)).milestoneInvoices[0];
+    if (email) {
+      await sendJobQuote({
+        jobDir,
+        meta: await readJobMeta(jobDir),
+        dataDir: jobDir,
+        config: {},
+        to: "customer@example.invalid",
+        documentType: "invoice",
+        milestoneIndex: 0,
+        sendEmail: async () => ({ id: `msg-${id}`, threadId: `thread-${id}`, subject: "Invoice", to: "customer@example.invalid" }),
+      });
+    }
+    // As the routes run them: each a committed job generation.
+    const act = (action, input) => runAtomicJobGeneration(jobDir, async (staged) => action({ jobDir: staged, meta: await readJobMeta(staged), config: {}, ...input }));
+    await act(markJobMilestoneUnsent, { milestoneIndex: 0 });
+    await runAtomicJobGeneration(jobDir, (staged) => applyApprovedVariation(staged, seeded.quote));
+    await act(updateJobMilestone, { milestoneIndex: 0, patch: { status: "authorised" }, actor: { kind: "user", label: "Alex" } });
+    const current = (await readJobMeta(jobDir)).milestoneInvoices[0];
+    return { issued, current, previous: current.revisionHistory.find((entry) => entry.invoiceNumber === issued.invoiceNumber) };
+  }
+  try {
+    const emailed = await reissue("job-reissue-emailed", { email: true });
+    assert.notEqual(emailed.current.invoiceNumber, emailed.issued.invoiceNumber);
+    assert.match(emailed.previous.creditNote?.number || "", /^CN-\d{4}-\d{2}-[1-9]\d*$/, "the emailed invoice is credited");
+    assert.equal(emailed.previous.creditNote.reason, "Reissued after the invoice was returned to draft");
+    assert.equal(emailed.previous.supersededByRevisionNumber, emailed.current.revisionNumber);
+    assert.equal(emailed.current.issuedRevision.creditNoteNumber, emailed.previous.creditNote.number);
+
+    const unsent = await reissue("job-reissue-unsent", { email: false });
+    assert.notEqual(unsent.current.invoiceNumber, unsent.issued.invoiceNumber, "reissued under a new number");
+    assert.equal(unsent.previous.creditNote, undefined, "never sent to the customer: no credit note");
+    assert.equal(unsent.previous.supersededByRevisionNumber, null);
+
+    await settings.update({ creditNoteOnReissue: "never" });
+    const never = await reissue("job-reissue-never", { email: true });
+    assert.equal(never.previous.creditNote, undefined, "the setting says never");
+  } finally {
+    await settings.update({ creditNoteOnReissue: "when-emailed" });
+    installIssuedDocumentRecorder(null);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("a sent invoice and its PDF survive an approved quote change untouched", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-freeze-"));
 
@@ -4405,6 +4466,13 @@ test("creditAndReissueJobMilestoneInvoice credits the issued invoice with a cred
     assert.deepEqual([credited.by, credited.data.creditNoteNumber, credited.data.replacementInvoiceNumber, credited.data.reason], ["Alex", note.number, revisedNumber, "Approved rock clause variation on the north bench"]);
     const text = notePdf.toString("latin1");
     assert.ok(text.includes("Adjustment note"), "the PDF says it is an adjustment note");
+
+    // The replacement can be sent with the adjustment note attached: its
+    // stored bytes, never rendered again. The other milestone has none.
+    const attachment = await creditNoteAttachment({ jobDir, milestoneIndex: 0, issuedDocuments: TEST_INVOICE_ISSUER.documents });
+    assert.deepEqual([attachment.filename, attachment.contentType], [`${note.number}.pdf`, "application/pdf"]);
+    assert.deepEqual(attachment.buffer, notePdf);
+    await assert.rejects(creditNoteAttachment({ jobDir, milestoneIndex: 1 }), (error) => error.statusCode === 409);
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }

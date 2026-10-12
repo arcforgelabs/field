@@ -20,6 +20,11 @@ import { createInvoiceRowService } from "./invoice-rows.js";
 import { createInvoiceRowRecorder, createUnavailableInvoiceRowRecorder, installInvoiceRowRecorder, invoiceRowRecorder } from "./recorder.js";
 import { createInvoiceIssueService, installInvoiceIssuer } from "./issue.js";
 import { actions, applyVariation, createLandedJob } from "./test-fixtures.js";
+import { readQuoteArtifacts } from "../quote-artifacts.js";
+
+async function readJobQuote(jobDir) {
+  return (await readQuoteArtifacts(jobDir)).quote;
+}
 
 const quiet = { error: () => {}, warn: () => {} };
 
@@ -206,6 +211,21 @@ describe("invoice-row dual-write", () => {
       state = await summary("job-issue");
       assert.deepEqual(state.invoices.find(([number]) => number === completion.invoiceNumber).slice(0, 2), [completion.invoiceNumber, "issued"]);
       assert.equal(state.read.invoices.filter((invoice) => /^INV-/.test(invoice.number)).length, 2);
+
+      // Credit and reissue the paid deposit after an approved variation: the
+      // issue writes the credit note, the replacement and the allocation, and
+      // the dual-write that follows finds them all as issued.
+      await applyVariation(jobDir, { ...(await readJobQuote(jobDir)) }, ["Drainage", 200]);
+      await actions.revise(jobDir, 0);
+      const replacement = (await readJobMeta(jobDir)).milestoneInvoices[0];
+      state = await summary("job-issue");
+      const byNumber = Object.fromEntries(state.read.invoices.map((invoice) => [invoice.number, invoice]));
+      assert.deepEqual([byNumber[deposit.invoiceNumber].status, byNumber[deposit.invoiceNumber].amountPaid], ["credited", "0.00"]);
+      assert.deepEqual([byNumber[replacement.invoiceNumber].status, byNumber[replacement.invoiceNumber].amountPaid], ["issued", "550.00"]);
+      assert.deepEqual(state.read.creditNotes.map((note) => [note.number, note.origin, note.invoiceUid, note.replacementInvoiceUid]), [
+        [replacement.issuedRevision.creditNoteNumber, "issued", byNumber[deposit.invoiceNumber].uid, byNumber[replacement.invoiceNumber].uid],
+      ]);
+      assert.equal(state.read.allocations.length, 1);
 
       const status = recorder.status();
       assert.equal(status.failures, before.failures, warnings.join("\n"));

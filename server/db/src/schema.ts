@@ -1751,6 +1751,39 @@ export const paymentAllocations = pgTable(
 );
 
 export type PaymentAllocation = typeof paymentAllocations.$inferSelect;
+
+/**
+ * When an invoice returned to draft is issued again with different content,
+ * whether the issue service credits the earlier one with a credit note first
+ * (step 4b, #28): `when-emailed` (the default) only when Field has evidence it
+ * was sent to the customer, `always`, or `never`. "Credit and reissue" always
+ * credits, whatever this says.
+ */
+export const CREDIT_NOTE_ON_REISSUE = ["when-emailed", "always", "never"] as const;
+export type CreditNoteOnReissue = (typeof CREDIT_NOTE_ON_REISSUE)[number];
+
+/**
+ * The organisation's business settings: one row per organisation (none means
+ * every default). Only what Field reads from the database lives here so far;
+ * the business profile is still config (docs/PRICING_ENGINE.md "Business
+ * settings").
+ */
+export const businessSettings = pgTable(
+  "business_settings",
+  {
+    orgUid: orgUid().primaryKey(),
+    creditNoteOnReissue: text("credit_note_on_reissue").$type<CreditNoteOnReissue>().notNull().default("when-emailed"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => [
+    check("business_settings_credit_note_on_reissue_check", sql`${t.creditNoteOnReissue} in ('when-emailed','always','never')`),
+    tenantIsolation("business_settings"),
+  ],
+);
+
+export type BusinessSettings = typeof businessSettings.$inferSelect;
 export type PaymentMilestone = typeof paymentMilestones.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceLine = typeof invoiceLines.$inferSelect;

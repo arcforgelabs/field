@@ -969,17 +969,24 @@ function withIssuedNumber(entry, { number, reference, issuedAt, creditNoteNumber
   };
 }
 
-// The issued revision a newly issued revision replaces, when it replaces one
-// that is still issued (an approved change, step 4b): that revision is
-// credited in full by a credit note, and the new one issued in its place. A
-// revision issued after the invoice was returned to draft (unsent) replaces
-// nothing that is still issued, and is issued on its own.
+// The issued revision a newly issued revision replaces, and when to credit it
+// (step 4b):
+//   - an approved change ("Credit and reissue") replaces a revision that is
+//     still issued: it is always credited in full by a credit note;
+//   - a revision issued after the invoice was returned to draft (unsent, or
+//     marked unpaid) with different content replaces one that was issued
+//     before: the issue service credits it as the organisation's
+//     `creditNoteOnReissue` setting says (by default only when Field has
+//     evidence the customer was sent it), else issues the new one on its own.
+// Returns { previous, whenToCredit } or null.
 function revisionToCredit(entry) {
   const revision = entry?.issuedRevision;
   if (!revision?.supersedesRevisionNumber) return null;
   const previous = (entry.revisionHistory || []).find((historical) => historical.revisionNumber === revision.supersedesRevisionNumber);
-  if (!previous || previous.creditNote || previous.supersededByRevisionNumber !== revision.revisionNumber) return null;
-  return deriveArtifactState(previous) === ARTIFACT_STATE.UNWRITTEN ? null : previous;
+  if (!previous || previous.creditNote || deriveArtifactState(previous) === ARTIFACT_STATE.UNWRITTEN) return null;
+  if (previous.supersededByRevisionNumber === revision.revisionNumber) return { previous, whenToCredit: "always" };
+  if (previous.supersededByRevisionNumber == null) return { previous, whenToCredit: "by-setting" };
+  return null;
 }
 
 function moneyOf(revision) {
@@ -1031,7 +1038,8 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
     const invoice = mapInvoiceForIssue(mapped);
     const issuedAt = revision.issuedAt || entry.issuedAt || new Date().toISOString();
     const details = { ...invoiceRevisionDetails(entry, revision), ...partiesDetails({ meta, quote }) };
-    const credited = revisionToCredit(entry);
+    const toCredit = revisionToCredit(entry);
+    const credited = toCredit?.previous || null;
 
     if (!credited) {
       const result = await invoiceIssuer().issueInvoice({
@@ -1050,9 +1058,17 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
       continue;
     }
 
-    // Credit the revision still issued, in full, and issue this one in its place.
-    const creditedInvoice = mapInvoiceForIssue({ ...mapped, number: credited.invoiceNumber });
-    const creditNote = mapCreditNoteForIssue({ ...mapped, creditedNumber: credited.invoiceNumber });
+    // Credit the revision it replaces, in full, and issue this one in its
+    // place. Mapped as the files will map it once credited: the replaced
+    // revision superseded by this one.
+    const asCredited = toCredit.whenToCredit === "always" ? mapped : {
+      ...mapped,
+      milestoneInvoices: normalizeStoredMilestoneInvoices(current.map((other) => (other.milestoneIndex === entry.milestoneIndex
+        ? { ...other, revisionHistory: other.revisionHistory.map((historical) => (historical.revisionNumber === credited.revisionNumber ? { ...historical, supersededByRevisionNumber: revision.revisionNumber } : historical)) }
+        : other))),
+    };
+    const creditedInvoice = mapInvoiceForIssue({ ...asCredited, number: credited.invoiceNumber });
+    const creditNote = mapCreditNoteForIssue({ ...asCredited, creditedNumber: credited.invoiceNumber });
     const reason = revision.revisionReason || "Credited and reissued";
     const result = await invoiceIssuer().creditAndReissue({
       jobId,
@@ -1088,6 +1104,7 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
       invoice,
       details,
       render: (number, { creditNoteNumber }) => renderInvoice(entry, withIssuedNumber(entry, { number, reference, issuedAt: revision.issuedAt, creditNoteNumber })),
+      whenToCredit: toCredit.whenToCredit,
     });
     const note = result.creditNote;
     const issued = withIssuedNumber(entry, { ...result.invoice, creditNoteNumber: note?.number || null });
@@ -1101,6 +1118,9 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
         revisionHistory: (next.revisionHistory || []).map((historical) => (historical.revisionNumber === credited.revisionNumber
           ? {
               ...historical,
+              // Credited and replaced by this revision (already so for an
+              // approved change; now also for one returned to draft).
+              supersededByRevisionNumber: revision.revisionNumber,
               creditNote: {
                 number: note.number,
                 reason,

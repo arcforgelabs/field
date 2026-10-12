@@ -35,10 +35,11 @@ import { newDocumentEventUid, newDocumentUid } from "../documents/uid.js";
 import { mapMilestoneState } from "./from-milestones.js";
 import { allocateCreditedPayments, insertCreditNoteRow, insertIssuedInvoiceRow, isIssuedInvoice, refreshAmountsPaid } from "./invoice-rows.js";
 import { formatCreditNoteNumber, formatInvoiceNumber, invoicePeriod } from "./numbers.js";
+import { readCreditNoteOnReissue } from "./business-settings.js";
 
 export { CREDIT_NOTE_NUMBER_PATTERN, INVOICE_NUMBER_PATTERN, formatCreditNoteNumber, formatInvoiceNumber, invoicePeriod, isSequenceInvoiceNumber } from "./numbers.js";
 
-const { invoices, creditNotes, issuedDocuments, documentEvents, documentNumberCounters, paymentMilestones, quotes } = schema;
+const { invoices, creditNotes, issuedDocuments, documentEvents, documentNumberCounters, paymentMilestones, quotes, quoteSnapshots } = schema;
 
 export class InvoiceIssueError extends Error {
   constructor(message, { code = "INVOICE_ISSUE_INVALID", statusCode = 400 } = {}) {
@@ -267,6 +268,22 @@ export function createInvoiceIssueService({
     if (typeof render !== "function") throw new InvoiceIssueError("an invoice issue needs its renderer");
   }
 
+  // Whether Field has evidence the customer was sent an invoice: an
+  // `emailed` event on its issued document, or a delivered send record (a
+  // `sent` quote snapshot of it).
+  async function deliveryEvidence(tx, { jobId, number }) {
+    const [document] = await tx.select({ uid: issuedDocuments.uid }).from(issuedDocuments)
+      .where(and(eq(issuedDocuments.documentType, "invoice"), eq(issuedDocuments.number, number)));
+    if (document) {
+      const [emailed] = await tx.select({ uid: documentEvents.uid }).from(documentEvents)
+        .where(and(eq(documentEvents.issuedDocumentUid, document.uid), eq(documentEvents.event, "emailed"))).limit(1);
+      if (emailed) return { emailed: true, sendRecord: false };
+    }
+    const [sent] = await tx.select({ id: quoteSnapshots.id }).from(quoteSnapshots)
+      .where(and(eq(quoteSnapshots.jobId, jobId), eq(quoteSnapshots.documentType, "invoice"), eq(quoteSnapshots.documentNumber, number), eq(quoteSnapshots.status, "sent"))).limit(1);
+    return { emailed: false, sendRecord: Boolean(sent) };
+  }
+
   return {
     enabled: true,
     orgUid: scope.orgUid,
@@ -311,11 +328,20 @@ export function createInvoiceIssueService({
      *   invoice, render  the replacement, as for issueInvoice; render gets
      *                    (number, { creditNoteNumber })
      *
+     * `whenToCredit`: `always` ("Credit and reissue": the operator says the
+     * customer has the invoice), or `by-setting` for an invoice that was
+     * returned to draft and is issued again with different content: then the
+     * organisation's `creditNoteOnReissue` (business-settings.js) decides,
+     * against the evidence that the customer was sent it, and without a
+     * credit the invoice is issued on its own (`creditNote` null).
+     *
      * A retry with the same key returns the same note and invoice. Returns
      * { replayed, creditNote: { number, creditNoteUid, issuedDocumentUid,
-     * pdfSha256, pdfBytes, issuedAt }, invoice: (as issueInvoice) }.
+     * pdfSha256, pdfBytes, issuedAt } or null, invoice: (as issueInvoice),
+     * decision: { whenToCredit, setting, evidence, credited } }.
      */
-    async creditAndReissue({ jobId, idempotencyKey, reference, issuedAt, issuedBy = null, reason, credited, creditNote, renderCreditNote, invoice, details = {}, creditNoteDetails = {}, render }) {
+    async creditAndReissue({ jobId, idempotencyKey, reference, issuedAt, issuedBy = null, reason, credited, creditNote, renderCreditNote, invoice, details = {}, creditNoteDetails = {}, render, whenToCredit = "always" }) {
+      if (!["always", "by-setting"].includes(whenToCredit)) throw new InvoiceIssueError(`whenToCredit must be always or by-setting, not ${JSON.stringify(whenToCredit)}`);
       const input = validated({ jobId, idempotencyKey, reference, issuedAt, issuedBy });
       checkInvoice(invoice, render);
       const why = text(reason);
@@ -333,8 +359,12 @@ export function createInvoiceIssueService({
             replayed: true,
             creditNote: { number: existingNote.number, creditNoteUid: existingNote.uid, ...(await documentBytes(tx, existingNote.issuedDocumentUid, `credit note ${existingNote.number}`)), issuedAt: iso(existingNote.issuedAt) },
             invoice: await replayInvoice(tx, replacement),
+            decision: null,
           };
         }
+        // Issued before without a credit note (the setting said not to).
+        const [issuedAlone] = await tx.select().from(invoices).where(eq(invoices.issueKey, invoiceIssueKeyFor(input.key)));
+        if (issuedAlone) return { replayed: true, creditNote: null, invoice: await replayInvoice(tx, issuedAlone), decision: null };
         const at = now();
 
         // The invoice being credited: issued, on this job, not credited before.
@@ -347,6 +377,26 @@ export function createInvoiceIssueService({
         if (!isIssuedInvoice(creditedRow)) throw new InvoiceIssueError(`invoice ${credited.number} was never issued; there is nothing to credit`, { code: "CREDIT_NOTE_NOT_ISSUED", statusCode: 409 });
         const [already] = await tx.select().from(creditNotes).where(and(eq(creditNotes.invoiceUid, creditedRow.uid), eq(creditNotes.status, "issued")));
         if (already) throw new InvoiceIssueError(`invoice ${credited.number} was already credited by ${already.number}`, { code: "CREDIT_NOTE_EXISTS", statusCode: 409 });
+
+        // An invoice returned to draft: the organisation's setting decides.
+        const decision = { whenToCredit, setting: null, evidence: null, credited: true };
+        if (whenToCredit === "by-setting") {
+          decision.setting = await readCreditNoteOnReissue(tx);
+          decision.evidence = await deliveryEvidence(tx, { jobId: input.jobId, number: credited.number });
+          decision.credited = decision.setting === "always"
+            || (decision.setting === "when-emailed" && (decision.evidence.emailed || decision.evidence.sendRecord));
+        }
+        if (!decision.credited) {
+          const issued = await issueInvoiceNow(tx, {
+            ...input,
+            key: invoiceIssueKeyFor(input.key),
+            invoice,
+            details,
+            render: (number) => render(number, { creditNoteNumber: null }),
+            supersedesInvoiceUid: creditedRow.uid,
+          });
+          return { replayed: false, creditNote: null, invoice: issued, decision };
+        }
 
         const period = invoicePeriod(input.issuedDate);
         const noteNumber = formatCreditNoteNumber(period, await allocate(tx, "credit_note", period, at));
@@ -428,10 +478,11 @@ export function createInvoiceIssueService({
           replayed: false,
           creditNote: { number: noteNumber, creditNoteUid, issuedDocumentUid: noteStored.issuedDocumentUid, pdfSha256: noteStored.pdfSha256, pdfBytes: noteStored.pdfBytes, issuedAt: input.issuedDate.toISOString() },
           invoice: { number: invoiceNumber, reference: input.reference, invoiceUid, issuedDocumentUid: invoiceStored.issuedDocumentUid, pdfSha256: invoiceStored.pdfSha256, pdfBytes: invoiceStored.pdfBytes, issuedAt: input.issuedDate.toISOString() },
+          decision,
         };
       });
-      if (!result.replayed) afterCommit([result.creditNote.pdfSha256, result.invoice.pdfSha256]);
-      for (const document of [result.creditNote, result.invoice]) {
+      if (!result.replayed) afterCommit([result.creditNote?.pdfSha256, result.invoice.pdfSha256].filter(Boolean));
+      for (const document of [result.creditNote, result.invoice].filter(Boolean)) {
         if (sha256Hex(document.pdfBytes) !== document.pdfSha256) throw new DocumentBytesError(`the bytes of ${document.number} do not match their hash`);
       }
       return result;

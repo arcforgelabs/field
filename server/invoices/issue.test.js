@@ -11,6 +11,7 @@ import { DEFAULT_ORG_UID, withOrg } from "../db-runtime/tenancy.js";
 import { createIssuedDocumentService } from "../documents/issued-documents.js";
 import { claimLineName, claimMoney } from "./from-milestones.js";
 import { createInvoiceRowService } from "./invoice-rows.js";
+import { createBusinessSettingsService } from "./business-settings.js";
 import {
   createInvoiceIssueService,
   createUnavailableInvoiceIssuer,
@@ -257,6 +258,67 @@ describe("invoice issue service", () => {
     assert.equal(await counterOf("credit_note", period), notesBefore);
     assert.equal(await counter(ORG_A, period), invoicesBefore + 1, "only the invoice issued before moved the invoice counter");
     await rejects(credit({ idempotencyKey: "no-reason", reason: " " }), /needs its reason/);
+  });
+
+  test("reissued after a return to draft: the business setting decides whether the old invoice is credited", async () => {
+    const settings = createBusinessSettingsService({ db: t.db, orgUid: ORG_A });
+    const documents = createIssuedDocumentService({ db: t.db, orgUid: ORG_A });
+    assert.equal((await settings.get()).creditNoteOnReissue, "when-emailed", "the default");
+    let jobs = 0;
+    // An invoice issued, maybe emailed or sent, then returned to draft and
+    // reissued with different content.
+    async function reissue({ emailed = false, sendRecord = false } = {}) {
+      jobs += 1;
+      const jobId = `job-reissue-${jobs}`;
+      const original = await issue(a, { key: `reissue-original-${jobs}`, jobId });
+      if (emailed) {
+        await documents.recordEvent({ issuedDocumentUid: original.issuedDocumentUid, jobId, documentType: "invoice", event: "emailed", at: "2026-10-12T03:00:00.000Z", data: { messageId: `msg-${jobs}` }, idempotencyKey: `emailed:msg-${jobs}` });
+      }
+      if (sendRecord) {
+        await withOrg(t.db, ORG_A, (tx) => tx.execute(sql`insert into quote_snapshots (attempt_id, job_id, document_type, status, document_number, prepared_at, sent_at, lines, recipients, pricing)
+          values (${`attempt-${jobs}`}, ${jobId}, 'invoice', 'sent', ${original.number}, now(), now(), '[]'::jsonb, '{}'::jsonb, '{}'::jsonb)`));
+      }
+      return a.creditAndReissue({
+        jobId,
+        idempotencyKey: `reissue-${jobs}`,
+        reference: "2610-03",
+        issuedAt: "2026-10-13T02:00:00.000Z",
+        issuedBy: "user-1",
+        reason: "Reissued after the invoice was returned to draft",
+        credited: { number: original.number, invoice: { ...claimInvoice(), key: original.number, number: original.number, issuedAt: original.issuedAt } },
+        creditNote: claimInvoice(),
+        renderCreditNote: async (number) => Buffer.from(`%PDF-1.4\n${number}\n%%EOF\n`),
+        invoice: { ...claimInvoice({ subtotal: "500.00", gst: "50.00", total: "550.00" }), revision: 2 },
+        render: async (number) => Buffer.from(`%PDF-1.4\n${number}\n%%EOF\n`),
+        whenToCredit: "by-setting",
+      });
+    }
+    const credited = (result) => [Boolean(result.creditNote), result.decision.setting, result.decision.evidence.emailed, result.decision.evidence.sendRecord];
+
+    // when-emailed: only with evidence the customer was sent it.
+    assert.deepEqual(credited(await reissue()), [false, "when-emailed", false, false]);
+    assert.deepEqual(credited(await reissue({ emailed: true })), [true, "when-emailed", true, false]);
+    assert.deepEqual(credited(await reissue({ sendRecord: true })), [true, "when-emailed", false, true]);
+    // always: even when it never left Field.
+    await settings.update({ creditNoteOnReissue: "always" }, { actor: "owner-1" });
+    assert.deepEqual(credited(await reissue()), [true, "always", false, false]);
+    // never: not even when it was emailed.
+    await settings.update({ creditNoteOnReissue: "never" }, { actor: "owner-1" });
+    const never = await reissue({ emailed: true });
+    assert.deepEqual(credited(never), [false, "never", true, false]);
+    assert.match(never.invoice.number, /^INV-/);
+    // Without a credit the reissue is the new invoice alone, and a retry returns it.
+    const replay = await a.creditAndReissue({ jobId: `job-reissue-${jobs}`, idempotencyKey: `reissue-${jobs}`, reference: "2610-03", issuedAt: "2026-10-13T02:00:00.000Z", reason: "x", credited: { number: "unused", invoice: claimInvoice() }, creditNote: claimInvoice(), renderCreditNote: async () => { throw new Error("not rendered"); }, invoice: claimInvoice(), render: async () => { throw new Error("not rendered"); }, whenToCredit: "by-setting" });
+    assert.deepEqual([replay.replayed, replay.creditNote, replay.invoice.number], [true, null, never.invoice.number]);
+    // "Credit and reissue" credits whatever the setting says.
+    jobs += 1;
+    const original = await issue(a, { key: `reissue-original-${jobs}`, jobId: `job-reissue-${jobs}` });
+    const forced = await a.creditAndReissue({ jobId: `job-reissue-${jobs}`, idempotencyKey: `reissue-${jobs}`, reference: "2610-03", issuedAt: "2026-10-13T02:00:00.000Z", reason: "Approved variation", credited: { number: original.number, invoice: { ...claimInvoice(), key: original.number, number: original.number, issuedAt: original.issuedAt } }, creditNote: claimInvoice(), renderCreditNote: async (number) => Buffer.from(`%PDF-1.4\n${number}\n%%EOF\n`), invoice: claimInvoice(), render: async (number) => Buffer.from(`%PDF-1.4\n${number}\n%%EOF\n`) });
+    assert.ok(forced.creditNote);
+    assert.equal(forced.decision.whenToCredit, "always");
+    await assert.rejects(settings.update({ creditNoteOnReissue: "sometimes" }), /must be one of when-emailed, always, never/);
+    await settings.update({ creditNoteOnReissue: "when-emailed" }, { actor: "owner-1" });
+    assert.deepEqual(await settings.get(), { creditNoteOnReissue: "when-emailed", updatedAt: (await settings.get()).updatedAt, updatedBy: "owner-1" });
   });
 
   test("the issue key names the job, milestone, revision and money", () => {

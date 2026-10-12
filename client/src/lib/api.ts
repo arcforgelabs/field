@@ -461,6 +461,8 @@ export const api = {
       attachments?: File[];
       scheduledAt?: string | null;
       draftId?: string | null;
+      /** Also attach the adjustment note the invoice was issued with (#28). */
+      attachCreditNote?: boolean;
     }
   ) {
     if (options?.attachments?.length) {
@@ -478,6 +480,7 @@ export const api = {
         ...(options?.attachmentFilename ? { attachmentFilename: options.attachmentFilename } : {}),
         ...(options?.scheduledAt ? { scheduledAt: options.scheduledAt } : {}),
         ...(options?.draftId ? { draftId: options.draftId } : {}),
+        ...(options?.attachCreditNote ? { attachCreditNote: true } : {}),
       };
       const formData = new FormData();
       formData.append("payload", JSON.stringify(payload));
@@ -505,6 +508,7 @@ export const api = {
         ...(options?.attachmentFilename ? { attachmentFilename: options.attachmentFilename } : {}),
         ...(options?.scheduledAt ? { scheduledAt: options.scheduledAt } : {}),
         ...(options?.draftId ? { draftId: options.draftId } : {}),
+        ...(options?.attachCreditNote ? { attachCreditNote: true } : {}),
       }),
     });
   },
@@ -840,6 +844,15 @@ export const api = {
   },
   getTerms() {
     return request<{ ok: boolean; terms: Array<{ id: string; title: string; body: string }> }>("/api/terms");
+  },
+  invoicingSettings() {
+    return request<import("./types.ts").InvoicingSettings>("/api/settings/invoicing");
+  },
+  updateInvoicingSettings(settings: { creditNoteOnReissue: import("./types.ts").CreditNoteOnReissue }) {
+    return request<import("./types.ts").InvoicingSettings>("/api/settings/invoicing", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    });
   },
   updateTerms(terms: Array<{ id: string; title: string; body: string }>) {
     return request<{ ok: boolean }>("/api/terms", {

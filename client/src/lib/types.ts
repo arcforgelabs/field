@@ -146,6 +146,17 @@ export interface InvoiceRevision {
   current?: boolean;
 }
 
+/** Whether an invoice returned to draft and reissued with different content is credited first (#28). */
+export type CreditNoteOnReissue = "when-emailed" | "always" | "never";
+
+export interface InvoicingSettings {
+  ok: boolean;
+  creditNoteOnReissue: CreditNoteOnReissue;
+  updatedAt: string | null;
+  updatedBy: string | null;
+  choices: Array<{ value: CreditNoteOnReissue; label: string; description: string }>;
+}
+
 /** A credit (adjustment) note against an issued invoice, as the job records it. */
 export interface CreditNote {
   number: string;
