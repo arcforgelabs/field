@@ -754,7 +754,8 @@ quotes are rows. The figures are approximate lines of code on master `d7fbb80`.
 | Retaining-wall engine | bay model, rate card, steel picker, wall zones and render. Walls are already priced as kits per bay in the price book (37 "Walls" items). 2 historical jobs used zones, and their sent PDFs are kept | ~4.9k |
 | Moasure import | used on 6 historical jobs. Measurement entry becomes plain quantities | ~0.6k |
 | Quote files | `quote.json`, `quote.md`, `quote-overrides.json`, `quote-breakdown-source.json`, `quote-versions/`, the organizer tree, `quote_snapshots` | – |
-| Dead code | `server/db/job-backfill.js`, `generate-landscaping-quote.js` | ~1.6k |
+| Dead code | `generate-landscaping-quote.js` | ~0.35k |
+| Legacy job-folder backfill | `scripts/backfill-db.js` and `server/db/job-backfill.js`, which map job folders to the older `server/db/migrations/0001_initial.sql` tables (`server/db/README.md`). It runs, but nothing reads those tables. It goes when nothing reads the data directory | ~1.4k |
 | Client | evidence player, gap, assumption, execution and soil sheets, breakdown view, review sheet, measurement panel, models overlay, health bar. The second catalogue editor (`QuoteCatalogPanel` and `CatalogItemAdminForm`, inside the 14k-line `quote-presentation-sheet.tsx`) | ~7.5k + most of 14k |
 | MCP | `field_quote_recalculate`, `field_quote_catalog_list`, raw `field_quote_draft_update`. Replaced by typed quote-line tools | – |
 
