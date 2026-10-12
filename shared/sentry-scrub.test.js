@@ -89,7 +89,8 @@ test("events drop request payloads, the user and local variables, and scrub mess
     extra: { email: "x@y.z", status: "quoted" },
     tags: { customer: "Jane", area: "scheduled-email" },
     transaction: "GET /api/jobs?token=abc",
-    spans: [{ description: "GET https://example.com/a?token=abc", data: { "url.full": "https://example.com/a?token=abc" } }],
+    contexts: { trace: { data: { "http.query": "token=abc", "url.query": "token=abc", "http.target": "/api/jobs?token=abc" } } },
+    spans: [{ description: "GET https://example.com/a?token=abc", data: { "url.full": "https://example.com/a?token=abc", "http.query": "token=abc" } }],
   });
   assert.equal(event.message, "Quote for [email]");
   assert.deepEqual(event.request, {
@@ -109,6 +110,8 @@ test("events drop request payloads, the user and local variables, and scrub mess
   assert.equal(event.transaction, "GET /api/jobs?[query]");
   assert.equal(event.spans[0].description, "GET https://example.com/a?[query]");
   assert.equal(event.spans[0].data["url.full"], "https://example.com/a?[query]");
+  assert.equal(event.spans[0].data["http.query"], "[redacted]");
+  assert.deepEqual(event.contexts.trace.data, { "http.query": "[redacted]", "url.query": "[redacted]", "http.target": "/api/jobs?[query]" });
 });
 
 test("console breadcrumbs never leave", () => {
