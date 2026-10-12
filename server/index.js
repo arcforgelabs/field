@@ -18,6 +18,10 @@ import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrenc
 
 // A job detail's quote read from its rows (#245), kept beside the detail object.
 const jobDetailQuoteRows = new WeakMap();
+import { createReplicaFallbackBlobStore } from "./documents/blob-store.js";
+import { resolveDocumentReplicaConfig } from "./documents/r2-config.js";
+import { createR2ObjectStore } from "./documents/r2-client.js";
+import { createDisabledReplicator, createDocumentReplicator } from "./documents/replicator.js";
 import { startDurableStorage } from "./storage/durable-store.js";
 import { heldDataMigrations, runDataMigrations } from "./data-migrations/index.js";
 import { registerSqliteImage } from "./storage/durable-hooks.js";
@@ -262,6 +266,20 @@ try {
   console.error(`[auth] ${err.message}`);
   process.exit(1);
 }
+// Issued documents in R2 (#240): FIELD_DOCUMENT_REPLICA=r2 copies issued
+// document bytes to a locked R2 bucket after they are stored in PostgreSQL.
+// Decided once at boot; with replication on, a missing or malformed FIELD_R2_*
+// variable stops Field here. The message names the variable, never its value.
+// In a Replit workspace without FIELD_R2_ALLOW_WORKSPACE=1 the setting is
+// ignored with one warning and nothing is written to R2.
+let DOCUMENT_REPLICA_CONFIG;
+try {
+  DOCUMENT_REPLICA_CONFIG = resolveDocumentReplicaConfig(process.env);
+} catch (err) {
+  console.error(`[documents-replica] ${err.message}`);
+  process.exit(1);
+}
+if (DOCUMENT_REPLICA_CONFIG.warning) console.warn(`[documents-replica] ${DOCUMENT_REPLICA_CONFIG.warning}`);
 const UI_CONFIG = {
   deploymentTheme: process.env.FIELD_DEPLOY_THEME || config.deploymentTheme || "gohub",
   workerDisplayName: process.env.FIELD_WORKER_DISPLAY_NAME || config.workerDisplayName || "Agent",
@@ -440,6 +458,31 @@ try {
   config.quoteSnapshots = createUnavailableQuoteSnapshotStore(err.code === "FIELD_NO_DATABASE" ? "no database configured" : err.message);
 }
 
+// The R2 replica of issued document bytes (#240). PostgreSQL stays the store
+// of record; with FIELD_DOCUMENT_REPLICA=r2 each blob is copied to R2 after
+// its issue transaction commits, and a scheduler tick retries (and backfills)
+// whatever is pending. R2 being down marks the replica degraded in /health and
+// /api/storage/status; it never stops Field serving or issuing.
+let documentReplica = createDisabledReplicator();
+let issuedDocumentBlobs;
+if (DOCUMENT_REPLICA_CONFIG.enabled) {
+  if (!deploymentOrg) {
+    console.warn("[documents-replica] FIELD_DOCUMENT_REPLICA=r2 needs the database, which this server does not have: nothing is replicated");
+    documentReplica = createDisabledReplicator({ state: "degraded", code: "NO_DATABASE" });
+  } else {
+    const { connection } = DOCUMENT_REPLICA_CONFIG;
+    const store = createR2ObjectStore(connection);
+    documentReplica = createDocumentReplicator({ db: getDb(), orgUid: deploymentOrg.uid, store });
+    issuedDocumentBlobs = createReplicaFallbackBlobStore({ replica: store });
+    console.log(`[documents-replica] r2: bucket ${connection.bucket} at ${new URL(connection.endpoint).host}; issued document bytes are copied after each issue, pending ones retried every minute`);
+    void documentReplica.refreshStatus();
+    void documentReplica.checkBucket().then((check) => {
+      if (check.ok) console.log(`[documents-replica] r2: bucket ${connection.bucket} reachable, credentials accepted`);
+      else console.warn(`[documents-replica] r2: bucket ${connection.bucket} not usable (${check.code}); the replica is degraded, Field keeps serving and issuing from PostgreSQL`);
+    });
+  }
+}
+
 // Issued documents (#223): every quote, invoice and receipt that is issued or
 // emailed is also recorded in PostgreSQL by uid, with its exact bytes. The job
 // files stay the source of truth for now: a failure here is logged and shown
@@ -447,7 +490,12 @@ try {
 let issuedDocumentRecorder;
 try {
   issuedDocumentRecorder = createIssuedDocumentRecorder({
-    service: createIssuedDocumentService({ db: getDb(), orgUid: deploymentOrg?.uid }),
+    service: createIssuedDocumentService({
+      db: getDb(),
+      orgUid: deploymentOrg?.uid,
+      ...(issuedDocumentBlobs ? { blobs: issuedDocumentBlobs } : {}),
+      onBlobsStored: (sha256s) => documentReplica.notifyStored(sha256s),
+    }),
   });
 } catch (err) {
   const reason = err.code === "FIELD_NO_DATABASE" ? "no database configured" : err.message;
@@ -520,8 +568,12 @@ app.get("/health", (_req, res) => {
     ok: true,
     sentry: { enabled: isSentryEnabled() },
     // Public: storage state only. Counts, timestamps and the last error are
-    // admin-only (GET /api/storage/status).
-    ...(durableStorage ? { storage: durableStorage.publicStatus() } : {}),
+    // admin-only (GET /api/storage/status). The R2 replica (#240) reports its
+    // state, pending count, oldest pending age and last error code.
+    storage: {
+      ...(durableStorage ? durableStorage.publicStatus() : {}),
+      documentReplica: documentReplica.publicStatus(),
+    },
   });
 });
 if (!priceCatalogRuntimeStatus.available) {
@@ -933,6 +985,7 @@ app.get("/api/storage/status", requireAuth, requireAdmin, (_req, res) => {
     issuedDocuments: issuedDocumentRecorder.status(),
     quoteRows: quoteRowRecorder.status(),
     quoteReads: quoteReadsStatus(),
+    documentReplica: documentReplica.status(),
   });
 });
 
@@ -3995,7 +4048,7 @@ app.post("/api/jobs/:id/quote/catalog-changes/apply", requireAuth, async (req, r
 
 // Issued documents by uid (#223): GET /api/documents/:uid/pdf and
 // GET /api/jobs/:id/documents (server/documents/routes.js).
-registerIssuedDocumentRoutes(app, { requireAuth, getDb, requestOrgUid, findJob });
+registerIssuedDocumentRoutes(app, { requireAuth, getDb, requestOrgUid, findJob, blobs: issuedDocumentBlobs });
 
 // What each customer was sent (#151), newest last.
 app.get("/api/jobs/:id/quote-snapshots", requireAuth, async (req, res) => {
@@ -5490,6 +5543,9 @@ scheduledEmailScheduler = await startScheduledEmailScheduler({
   dataDir: DATA_DIR,
   processEmail: processScheduledEmail,
 });
+// The R2 replica's scheduler: its first pass copies every blob stored before
+// replication was turned on.
+documentReplica.start();
 
 await setupSentryExpress(app);
 if (durableStorage) {
@@ -5522,6 +5578,7 @@ const handleShutdown = (signal) => {
       process.exit(1);
     }
     if (scheduledEmailScheduler) await scheduledEmailScheduler.stop();
+    await documentReplica.stop().catch(() => {});
     if (durableStorage) {
       // Final flush (files and the field.db image, while it is open), then
       // release the storage lock.

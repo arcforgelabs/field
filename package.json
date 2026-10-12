@@ -33,13 +33,15 @@
     "catalog:import-legacy": "node scripts/catalog-import-legacy-cli.js",
     "catalog:export": "node scripts/catalog-export-cli.js",
     "catalog:price-gate": "node scripts/catalog-price-gate-cli.js",
-    "data:migrate": "node scripts/data-migrations-cli.js"
+    "data:migrate": "node scripts/data-migrations-cli.js",
+    "documents:verify-r2": "node scripts/documents-verify-r2.js"
   },
   "dependencies": {
     "@clerk/backend": "3.20.1",
     "@clerk/express": "2.1.72",
     "@electric-sql/pglite": "0.5.8",
     "@sentry/node": "^10.75.0",
+    "aws4fetch": "1.0.20",
     "better-sqlite3": "12.8.0",
     "drizzle-orm": "0.45.2",
     "express": "^5.1.0",

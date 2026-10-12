@@ -281,6 +281,22 @@ or blank, collapsed, row style and notes, and on lines `row_kind`,
 nullable, and 0010's triggers cover them. `rollback/0011_quote_row_display.down.sql`
 drops them (the rows and their money stay); run it before 0010's.
 
+### The R2 replica record
+
+`0012_document_replicas` (#240; `docs/REPLIT.md` "Issued documents in R2")
+adds `document_blob_replicas`, one row per `document_blobs` blob the R2
+replicator has tried: `r2_replicated_at`, `attempts`, `last_attempt_at`,
+`next_attempt_at` (backoff) and `last_error`, a short code (a `CHECK` allows
+only `A-Z`, digits and `_`, so no message or credential can be stored). A
+trigger refuses `DELETE`, `TRUNCATE` and any `UPDATE` of a row already
+replicated. `field_app` may select, insert and update. Only
+`server/documents/replicator.js` writes it.
+
+It does not depend on the quote-row migrations (0010, 0011); it follows them
+because Drizzle applies only migrations whose journal timestamp is later than
+the last one applied. `rollback/0012_document_replicas.down.sql` drops the
+table; the bytes stay in `document_blobs` and in R2. Run it before 0011's.
+
 ### Adding tables
 
 A tenant table gets `orgUid: orgUid()` and `tenantIsolation("<table>")` in

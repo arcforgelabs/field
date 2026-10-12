@@ -222,6 +222,129 @@ npm run catalog:import-legacy -- <dir>/price-catalog/catalog.db --dry-run --repl
 npm run catalog:import-legacy -- <dir>/price-catalog/catalog.db --replace
 ```
 
+## Issued documents in R2
+
+Every issued quote, invoice and receipt PDF is stored in PostgreSQL
+(`document_blobs`, #223). With `FIELD_DOCUMENT_REPLICA=r2` the published app
+also copies each one to a Cloudflare R2 bucket in your Cloudflare account.
+Give that bucket a bucket lock (#240) so the copies are write-once.
+
+- PostgreSQL stays the store of record. A document is issued in one
+  PostgreSQL transaction, as before, so issuing never waits on Cloudflare.
+- After that transaction commits, the bytes are copied to R2 at
+  `<org_uid>/<sha256>`, with their content type and SHA-256. A scheduler tick
+  every minute retries anything not yet copied, with backoff per document
+  (1, 2, 4 ... minutes, at most an hour).
+- A copy never overwrites. Field asks R2 first: an object with the same size
+  and hash counts as done; an object with different bytes is an integrity
+  alarm (log line `[documents-replica] INTEGRITY ALARM`, error code
+  `R2_OBJECT_MISMATCH`), and it is left alone. Field never deletes anything
+  in R2.
+- Reads come from PostgreSQL. R2 is used only if PostgreSQL cannot give a
+  document's bytes, and only bytes that match the document's recorded hash
+  are served.
+- If R2 is down or refuses the credentials, the replica shows as degraded.
+  Field keeps serving and issuing; pending copies catch up when R2 is back.
+- Progress is in the `document_blob_replicas` table, so a restart carries on
+  where it stopped.
+
+### What the bucket lock means
+
+Create the bucket with a lock rule that covers the whole bucket for your
+retention period, for example 7 years (2,557 days); Australian businesses
+must keep records for at least 5. Until an object's retention ends, nobody
+can overwrite or delete it: not Field, not the token, not an account admin.
+That is the point, and it is why nothing but the published app may write
+there. Tests use a local MinIO server with a locked bucket
+(`FIELD_R2_TEST_DOCKER=1`), never a real bucket.
+
+### Settings
+
+Set these as your deployment's secrets on the **published app only**:
+Publishing > Adjust settings.
+
+| Name | Kind | Value |
+| --- | --- | --- |
+| `FIELD_DOCUMENT_REPLICA` | Configuration | `r2`. Unset: no replica, Field behaves as before |
+| `FIELD_R2_ENDPOINT` | Configuration | `https://<account-id>.r2.cloudflarestorage.com` (the account ID is in the R2 overview) |
+| `FIELD_R2_BUCKET` | Configuration | Your bucket's name, for example `<your-bucket>` |
+| `FIELD_R2_ACCESS_KEY_ID` | Secret | The token's S3 Access Key ID |
+| `FIELD_R2_SECRET_ACCESS_KEY` | Secret | The token's S3 Secret Access Key |
+
+Create an account API token with Object Read & Write on this bucket only.
+Field never prints either credential.
+
+The workspace must not get them. Do not put them in the workspace's Secrets
+or in `.replit` (`[userenv.shared]` reaches the workspace too). If
+`FIELD_DOCUMENT_REPLICA=r2` does reach the workspace, Field still starts
+there: it logs one warning (`[documents-replica] FIELD_DOCUMENT_REPLICA=r2 is
+ignored in the Replit workspace ...`), keeps the replica off and never
+writes to R2. Field tells the two apart by `REPLIT_DEPLOYMENT`, which Replit
+sets only in the published app. `FIELD_R2_ALLOW_WORKSPACE=1` overrides this;
+do not set it.
+
+On the published app, with `FIELD_DOCUMENT_REPLICA=r2` and any of the other
+four missing or malformed, Field refuses to start and the log names the
+variable, never its value, for example `[documents-replica]
+FIELD_R2_BUCKET is not set`. Fix the setting and republish.
+
+### The first publish with the replica on
+
+- At boot Field checks, read-only, that it can list the bucket (at most one
+  key) with the credentials. The log says `bucket <your-bucket> reachable,
+  credentials accepted`, or names an error code. A failure marks the replica
+  degraded; it does not stop Field.
+- 30 seconds after boot the scheduler starts copying the documents issued
+  before the replica was on: 5 per minute, one second apart, oldest first.
+  It resumes after a restart. New documents are copied straight away.
+
+### Checking it after publishing
+
+1. `GET /health` (public): `storage.documentReplica` has `state` (`ok`,
+   `degraded` or `off`), `pending` (documents not yet in R2),
+   `oldestPendingAgeSeconds` and `lastErrorCode`. During the first backfill
+   `pending` falls by about 5 a minute; it should reach 0 with `state: ok`.
+2. `GET /api/storage/status` (admin sign-in): `documentReplica` adds the boot
+   check (`bootCheck.ok`), the last success and last error (time and code),
+   mismatches, and counts.
+3. In a shell that has the deployment's secrets, once `pending` is 0:
+
+   ```bash
+   npm run documents:verify-r2
+   ```
+
+   It reads every stored document back from R2 and checks its hash. It
+   writes nothing. Exit 0 means every one is there with the right bytes; 2
+   lists what is missing, different or unreadable; 1 means it could not run.
+   It needs the database and the four `FIELD_R2_*` settings.
+
+What an error code means:
+
+| Code | Meaning | What to do |
+| --- | --- | --- |
+| `R2_UNREACHABLE`, `R2_TIMEOUT`, `R2_HTTP_5xx` | R2 did not answer | Nothing; copies retry. Check Cloudflare's status if it lasts |
+| `R2_ACCESS_DENIED`, `R2_SIGNATURE_DOES_NOT_MATCH`, `R2_INVALID_ACCESS_KEY_ID` | The token is wrong, revoked or lacks the bucket | Check the two secrets and the token's permissions, then republish |
+| `R2_NO_SUCH_BUCKET` | `FIELD_R2_BUCKET` or `FIELD_R2_ENDPOINT` points at the wrong place | Fix the setting and republish |
+| `R2_OBJECT_MISMATCH` | An object in the bucket has the right name but the wrong bytes | Stop and investigate. PostgreSQL still holds the right bytes. Nothing can remove the object until its retention ends |
+
+### Rotating the token
+
+1. In Cloudflare, create a new account API token like the old one (Object
+   Read & Write, this bucket only).
+2. Put its Access Key ID and Secret Access Key in the published app's
+   `FIELD_R2_ACCESS_KEY_ID` and `FIELD_R2_SECRET_ACCESS_KEY`.
+3. Republish.
+4. Verify: `/api/storage/status` shows `bootCheck.ok: true`, `/health` shows
+   `state: ok`, and `npm run documents:verify-r2` exits 0.
+5. Only then delete the old token in Cloudflare.
+
+### Turning it off
+
+Remove `FIELD_DOCUMENT_REPLICA` and republish. Nothing is lost: the
+documents are in PostgreSQL, and the objects stay in R2 under the lock. Turned
+on again, Field finds the objects already there and records them without
+writing.
+
 ## Sign-in (Clerk)
 
 Field signs people in with Clerk through Replit's managed integration once
@@ -286,7 +409,8 @@ To deploy a change merged on GitHub:
    get "Internal Server Error". `GET /health` answers once it is up.
 
 Production secrets (Publishing > Adjust settings) are separate from the
-workspace's: `FIELD_STORAGE=postgres`, `FIELD_CONFIG_JSON`, the Clerk keys.
+workspace's: `FIELD_STORAGE=postgres`, `FIELD_CONFIG_JSON`, the Clerk keys,
+and the R2 replica's settings ("Issued documents in R2").
 Replit's managed Clerk also sets `CLERK_PROXY_URL` (`/api/__clerk`); Field
 serves Clerk's Frontend API on that path (`server/auth/clerk-proxy.js`), so
 sign-in loads from the app's own origin.

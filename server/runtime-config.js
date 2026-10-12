@@ -45,3 +45,16 @@ export function resolveFieldPort({ env = process.env, config = {} } = {}) {
 export function isReplitRuntime(env = process.env) {
   return String(env.FIELD_RUNTIME || "").trim().toLowerCase() === "replit";
 }
+
+/**
+ * Where on Replit this process runs: "published" in a published deployment
+ * (Replit sets REPLIT_DEPLOYMENT=1 there and only there), "workspace" in the
+ * workspace (FIELD_RUNTIME=replit from .replit, or Replit's REPL_ID, without
+ * REPLIT_DEPLOYMENT), and null off Replit.
+ */
+export function replitPlacement(env = process.env) {
+  const deployment = String(env.REPLIT_DEPLOYMENT || "").trim();
+  if (deployment && deployment !== "0") return "published";
+  if (isReplitRuntime(env) || String(env.REPL_ID || "").trim()) return "workspace";
+  return null;
+}

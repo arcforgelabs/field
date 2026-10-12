@@ -40,6 +40,16 @@
 // quote rows (#241) it also checks those tables against what was sent
 // (storage-documents.json, storage-backfill.json, storage-quote-rows.json).
 //
+// PROOF_R2_REPLICA=minio (with PROOF_STORAGE=postgres) also turns on the R2
+// replica of issued documents (#240, FIELD_DOCUMENT_REPLICA=r2) against a
+// throwaway local MinIO container with a LOCKED bucket
+// (server/documents/test-minio.js; needs Docker; never R2 itself). After the
+// proof every issued document must be in the bucket with its recorded hash,
+// /health must report the replica ok, and `npm run documents:verify-r2` must
+// pass. The result is written to storage-replica.json (compare.mjs ignores
+// it); the compared artefacts must not change. Checkouts without the replica
+// (before #240) ignore it.
+//
 // Use a trust-auth PostgreSQL (the Docker container and CI are). With password
 // (SCRAM) auth, postgres.js draws its client nonce from the seeded random
 // source the proof installs, which shifts every later UUID and token, so the
@@ -57,6 +67,9 @@ import { pathToFileURL } from "node:url";
 const [repoArg, outArg, portArg] = process.argv.slice(2);
 const STORAGE_MODE = process.env.PROOF_STORAGE === "postgres";
 if (process.env.PROOF_STORAGE && !STORAGE_MODE) throw new Error(`PROOF_STORAGE must be "postgres" or unset`);
+const REPLICA_REQUESTED = process.env.PROOF_R2_REPLICA === "minio";
+if (process.env.PROOF_R2_REPLICA && !REPLICA_REQUESTED) throw new Error(`PROOF_R2_REPLICA must be "minio" or unset`);
+if (REPLICA_REQUESTED && !STORAGE_MODE) throw new Error("PROOF_R2_REPLICA=minio needs PROOF_STORAGE=postgres");
 const repoRoot = resolve(repoArg);
 const outDir = resolve(outArg);
 // Checkouts with issued documents by uid (#223, server/documents/).
@@ -67,6 +80,11 @@ let quoteRowStatus = null;
 // Checkouts whose quote documents and totals are read from the rows (#245).
 const HAS_QUOTE_READS = existsSync(join(repoRoot, "server/quotes/read-model.js"));
 let quoteReadStatus = null;
+// Checkouts with the R2 replica (#240).
+const REPLICA_MODE = REPLICA_REQUESTED && existsSync(join(repoRoot, "server/documents/replicator.js"));
+if (REPLICA_REQUESTED && !REPLICA_MODE) console.log("PROOF_R2_REPLICA: this checkout has no R2 replica; ignored");
+// Filled by replicaProof and verifyR2Proof (below), written to storage-replica.json.
+const replicaReport = { checks: [], documents: [], ok: true };
 const port = Number(portArg || 19731);
 const here = import.meta.dirname;
 const root = mkdtempSync(join(tmpdir(), "field-quote-invoice-proof-"));
@@ -115,6 +133,20 @@ if (STORAGE_MODE) {
 }
 const storageEnv = storageDb ? { FIELD_STORAGE: "postgres", FIELD_DB_URL: storageDb.url } : {};
 
+// R2 replica mode: a local MinIO with a locked bucket, just for this run.
+let minio = null;
+if (REPLICA_MODE) {
+  const { startTestMinio } = await import(pathToFileURL(join(repoRoot, "server/documents/test-minio.js")).href);
+  minio = await startTestMinio({ FIELD_R2_TEST_DOCKER: "1" });
+}
+const replicaEnv = minio ? {
+  FIELD_DOCUMENT_REPLICA: "r2",
+  FIELD_R2_ENDPOINT: minio.endpoint,
+  FIELD_R2_BUCKET: minio.bucket,
+  FIELD_R2_ACCESS_KEY_ID: minio.accessKeyId,
+  FIELD_R2_SECRET_ACCESS_KEY: minio.secretAccessKey,
+} : {};
+
 // The PostgreSQL catalogue is seeded into the database the server will use:
 // that run's PostgreSQL in durable storage mode, else the PGlite directory.
 execFileSync(process.execPath, ["--require", preload, join(here, "seed.mjs"), repoRoot, dataDir], {
@@ -125,7 +157,7 @@ const serverLog = [];
 function startServer(serverDataDir) {
   const child = spawn(process.execPath, ["--require", preload, "--import", pathToFileURL(join(here, "hooks.mjs")).href, "server/index.js"], {
     cwd: repoRoot,
-    env: { ...baseEnv, ...storageEnv, FIELD_CONFIG: configPath, FIELD_DATA: serverDataDir, FIELD_PORT: String(port) },
+    env: { ...baseEnv, ...storageEnv, ...replicaEnv, FIELD_CONFIG: configPath, FIELD_DATA: serverDataDir, FIELD_PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.on("data", (b) => serverLog.push(b.toString()));
@@ -213,6 +245,7 @@ try {
     quoteRowStatus = status.quoteRows;
     quoteReadStatus = status.quoteReads || null;
   }
+  if (REPLICA_MODE) await replicaProof([aid, bid]);
 } catch (error) {
   writeFileSync(join(outDir, "ERROR.txt"), `${error.stack}\n`);
   console.error(error.message);
@@ -228,6 +261,7 @@ try {
       if (!process.exitCode) await proveRestartFromEmptyDisk();
       if (!process.exitCode && HAS_ISSUED_DOCUMENTS) await backfillProof();
       if (!process.exitCode && HAS_QUOTE_ROWS) await quoteRowsProof(restartChecks.ids);
+      if (!process.exitCode && REPLICA_MODE) await verifyR2Proof();
     } catch (error) {
       writeFileSync(join(outDir, "storage-ERROR.txt"), `${error.stack}\n`);
       console.error(`storage restart proof failed: ${error.message}`);
@@ -235,6 +269,7 @@ try {
     } finally {
       await stopServer(server);
       await storageDb.stop();
+      await minio?.stop();
     }
   }
   writeFileSync(join(outDir, "server.log"), serverLog.join(""));
@@ -384,6 +419,70 @@ async function issuedDocumentsProof(aid) {
   writeFileSync(join(outDir, "storage-documents.json"), `${JSON.stringify(report, null, 2)}\n`);
   console.log(`issued documents proof: ${report.ok ? "OK" : "FAILED"} (${report.checks.filter((entry) => entry.ok).length}/${report.checks.length} checks)`);
   if (!report.ok) throw new Error(`issued documents proof failed: ${JSON.stringify(report.checks.filter((entry) => !entry.ok))}`);
+}
+
+// The R2 replica (#240): every issued document of both jobs is in the locked
+// MinIO bucket at <org_uid>/<sha256>, byte for byte, and the replica reports
+// ok with nothing pending. Written to storage-replica.json.
+function replicaCheck(name, ok, detail = null) {
+  replicaReport.checks.push({ name, ok: Boolean(ok), ...(detail == null ? {} : { detail }) });
+  if (!ok) replicaReport.ok = false;
+}
+function writeReplicaReport() {
+  writeFileSync(join(outDir, "storage-replica.json"), `${JSON.stringify(replicaReport, null, 2)}\n`);
+}
+async function replicaProof(jobIds) {
+  const load = (rel) => import(pathToFileURL(join(repoRoot, rel)).href);
+  const { createR2ObjectStore, objectKeyFor } = await load("server/documents/r2-client.js");
+  const { DEFAULT_ORG_UID } = await load("server/db-runtime/tenancy.js");
+  const store = createR2ObjectStore(minio);
+  // Copies are made right after each issue commits; wait for them to land.
+  let status = null;
+  for (let i = 0; i < 150; i += 1) {
+    status = (await syncJson("GET", "/api/storage/status")).documentReplica;
+    if (status?.pending === 0) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  replicaCheck("the replica is on, ok, with nothing pending", status?.enabled === true && status.state === "ok" && status.pending === 0, { status });
+  const health = await (await fetch(`${base}/health`)).json();
+  replicaCheck("/health reports storage.documentReplica ok", health?.storage?.documentReplica?.state === "ok" && health.storage.documentReplica.pending === 0, { documentReplica: health?.storage?.documentReplica ?? null });
+  const sha = (buf) => createHash("sha256").update(buf).digest("hex");
+  for (const jobId of jobIds) {
+    for (const document of (await syncJson("GET", `/api/jobs/${jobId}/documents`)).documents) {
+      const key = objectKeyFor(DEFAULT_ORG_UID, document.pdfSha256);
+      const bytes = await store.get(key);
+      const head = await store.head(key);
+      replicaReport.documents.push({ number: document.number, documentType: document.documentType, key, inBucket: Boolean(bytes), objectSha256: bytes ? sha(bytes) : null, metaSha256: head?.sha256 ?? null });
+      replicaCheck(`${document.number}: in the bucket with its recorded hash`, bytes && sha(bytes) === document.pdfSha256 && head.sha256 === document.pdfSha256 && head.contentType === "application/pdf");
+    }
+  }
+  replicaCheck("every issued document was checked (quote, invoice, receipt of job A; quote of job B)", replicaReport.documents.length >= 4, { documents: replicaReport.documents.length });
+  writeReplicaReport();
+  console.log(`R2 replica proof: ${replicaReport.ok ? "OK" : "FAILED"} (${replicaReport.checks.filter((entry) => entry.ok).length}/${replicaReport.checks.length} checks)`);
+  if (!replicaReport.ok) throw new Error(`R2 replica proof failed: ${JSON.stringify(replicaReport.checks.filter((entry) => !entry.ok))}`);
+}
+
+// After the servers stop: the operator command finds every stored blob in the
+// bucket with the right hash (read-only).
+async function verifyR2Proof() {
+  let output;
+  let code = 0;
+  try {
+    output = execFileSync(process.execPath, [join(repoRoot, "scripts/documents-verify-r2.js"), "--json"], {
+      cwd: repoRoot,
+      env: { PATH: baseEnv.PATH, HOME: root, FIELD_DB_URL: storageDb.url, ...replicaEnv },
+    }).toString();
+  } catch (error) {
+    code = error.status;
+    output = error.stdout?.toString() || "";
+  }
+  let report = null;
+  try { report = JSON.parse(output); } catch {}
+  replicaCheck("npm run documents:verify-r2 exits 0: every blob present with the right hash", code === 0 && report?.ok === true && report.blobs > 0 && report.present === report.blobs,
+    { exitCode: code, blobs: report?.blobs ?? null, present: report?.present ?? null, missing: report?.missing?.length ?? null, mismatched: report?.mismatched?.length ?? null });
+  writeReplicaReport();
+  console.log(`R2 verify: ${replicaReport.ok ? "OK" : "FAILED"} (${report?.present ?? "?"}/${report?.blobs ?? "?"} blobs)`);
+  if (!replicaReport.ok) throw new Error(`documents:verify-r2 failed: ${JSON.stringify(replicaReport.checks.filter((entry) => !entry.ok))}`);
 }
 
 // The backfill over the proof's data directory after the run: everything the

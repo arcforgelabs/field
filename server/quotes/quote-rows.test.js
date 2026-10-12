@@ -273,12 +273,14 @@ describe("migrations 0011 and 0010 roll back", () => {
   test("0011's rollback returns the 0010 shape with the rows; 0010's the 0009 shape; both apply again", async () => {
     const dir0009 = migrationsUpTo(9);
     const dir0010 = migrationsUpTo(10);
+    // Up to 0011: later migrations (0012 onwards) roll back before it.
+    const dir0011 = migrationsUpTo(11);
     const client = new PGlite({ parsers: { [types.NUMERIC]: (v) => v, [types.INT8]: (v) => v } });
     const reference9 = new PGlite();
     const reference10 = new PGlite();
     try {
       const db = drizzle(client, { schema });
-      await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+      await migrate(db, { migrationsFolder: dir0011 });
       const service = createQuoteRowService({ db, orgUid: ORG_A });
       await service.writeVersion({ jobId: "job-r", version: 1, mapped: mapQuoteArtifact({ quote: engineQuote(), meta: FIXTURE_META }), status: "sent", sentAt: "2026-10-01T00:00:00.000Z" });
       // 0011 first: the display columns go, the rows and their money stay.
@@ -300,6 +302,7 @@ describe("migrations 0011 and 0010 roll back", () => {
       await reference10.close();
       rmSync(dir0009, { recursive: true, force: true });
       rmSync(dir0010, { recursive: true, force: true });
+      rmSync(dir0011, { recursive: true, force: true });
     }
   });
 });

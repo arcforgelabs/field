@@ -663,7 +663,7 @@ test("server (PostgreSQL): stores its data directory and rebuilds it on an empty
     await waitForLog(one, /listening on/);
     assert.match(one.output(), /\[storage\] postgres: seeded/);
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
-    assert.deepEqual(health.storage, { enabled: true, state: "ok", lockHeld: true, pending: 0 });
+    assert.deepEqual(health.storage, { enabled: true, state: "ok", lockHeld: true, pending: 0, documentReplica: { state: "off" } });
     // Counts, timestamps and errors are for admins only.
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/storage/status`)).status, 401);
     one.child.kill("SIGTERM");

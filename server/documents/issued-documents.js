@@ -115,9 +115,25 @@ function normalizeEvent(input, defaults = {}) {
  * The issue service for one organisation. `db` is an orgScope, or a database
  * with `orgUid`. `blobs` is the byte store (blob-store.js).
  */
-export function createIssuedDocumentService({ db, orgUid = undefined, blobs = createPostgresBlobStore(), now = () => new Date() }) {
+export function createIssuedDocumentService({
+  db,
+  orgUid = undefined,
+  blobs = createPostgresBlobStore(),
+  now = () => new Date(),
+  // Called with the SHA-256s a write stored, after its transaction commits
+  // (the R2 replicator, #240). Best effort: it is not awaited, and an error
+  // in it never reaches the caller.
+  onBlobsStored = null,
+}) {
   if (!db) throw new Error("createIssuedDocumentService needs a database");
   const scope = db.isOrgScope ? db : orgScope(db, orgUid);
+
+  function afterCommit(sha256s) {
+    if (!onBlobsStored) return;
+    try {
+      Promise.resolve(onBlobsStored(sha256s)).catch(() => {});
+    } catch {}
+  }
 
   async function insertEvent(tx, event) {
     const createdAt = now();
@@ -189,7 +205,7 @@ export function createIssuedDocumentService({ db, orgUid = undefined, blobs = cr
         details: details && typeof details === "object" ? details : {},
         createdBy: textOrNull(createdBy),
       };
-      return scope.transaction(async (tx) => {
+      const result = await scope.transaction(async (tx) => {
         const sha256 = await blobs.put(pdfBytes, { tx, contentType });
         let existing = await findByNumber(tx, documentType, cleanNumber);
         let created = false;
@@ -225,6 +241,8 @@ export function createIssuedDocumentService({ db, orgUid = undefined, blobs = cr
         }
         return { document, created, events: recorded };
       });
+      afterCommit([result.document.pdfSha256]);
+      return result;
     },
 
     /** One event; a repeated idempotency key returns the first. */
@@ -246,7 +264,7 @@ export function createIssuedDocumentService({ db, orgUid = undefined, blobs = cr
      * that records the delivery. Returns { sha256, event }.
      */
     async recordRedelivery({ issuedDocumentUid, pdfBytes, contentType = "application/pdf", event }) {
-      return scope.transaction(async (tx) => {
+      const result = await scope.transaction(async (tx) => {
         const [owner] = await tx.select().from(issuedDocuments).where(eq(issuedDocuments.uid, issuedDocumentUid));
         if (!owner) throw invalid(`no issued document ${issuedDocumentUid}`);
         const sha256 = await blobs.put(pdfBytes, { tx, contentType });
@@ -256,6 +274,8 @@ export function createIssuedDocumentService({ db, orgUid = undefined, blobs = cr
         }, { issuedDocumentUid: owner.uid, jobId: owner.jobId, documentType: owner.documentType }));
         return { sha256, ...recorded };
       });
+      afterCommit([result.sha256]);
+      return result;
     },
 
     async getIssuedDocument(uid) {
@@ -279,7 +299,7 @@ export function createIssuedDocumentService({ db, orgUid = undefined, blobs = cr
       return scope.transaction(async (tx) => {
         const [row] = await tx.select().from(issuedDocuments).where(eq(issuedDocuments.uid, uid));
         if (!row) return null;
-        const bytes = await blobs.get(row.pdfSha256, { tx });
+        const bytes = await blobs.get(row.pdfSha256, { tx, orgUid: scope.orgUid });
         if (!bytes) throw new DocumentBytesError(`the bytes of ${row.uid} (${row.pdfSha256}) are not stored`, { code: "DOCUMENT_BYTES_MISSING" });
         if (sha256Hex(bytes) !== row.pdfSha256) throw new DocumentBytesError(`the bytes of ${row.uid} do not match its hash`);
         return { document: documentFromRow(row), bytes };
