@@ -1,4 +1,4 @@
-// Code retirement step 3 (#178): quote rows keyed by uid.
+// Code retirement step 3: quote rows keyed by uid.
 //
 // Organizer rows name their catalogue item two ways: catalogue-linked rows by
 // `catalogItemUid` with `catalogItemCode` beside it (rows linked before uids

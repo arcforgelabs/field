@@ -53,7 +53,7 @@ export function itemRow(state, item, { effective = null } = {}) {
     notes: item.notes,
     catalog_type: catalogTypeOf(item),
     visibility: item.visibility,
-    // docs/PRICING_ENGINE.md names (#178 phase 1): what the item is, whether
+    // docs/PRICING_ENGINE.md names (pricing engine phase 1): what the item is, whether
     // the quote picker offers it, and how its sell is set. catalog_type,
     // visibility and the *_mode fields stay for older clients.
     type: item.type,

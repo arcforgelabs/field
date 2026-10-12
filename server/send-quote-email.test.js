@@ -156,7 +156,7 @@ test("gmail service account delegation accepts an inline key", () => {
   assert.equal(hasServiceAccountGmail(config), true);
 });
 
-test("delegated sends ask Google only for the scopes sending needs (#139)", () => {
+test("delegated sends ask Google only for the scopes sending needs", () => {
   // The business's Workspace delegates gmail.send to this service account. Asking for
   // gmail.readonly or userinfo.email as well made Google refuse every send
   // (unauthorized_client).
@@ -360,7 +360,7 @@ test("resetGmailClient clears cached client so a new token takes effect", () => 
   assert.notEqual(client1, client3, "new client should be a different instance");
 });
 
-// DEL-30 P3-1 (round 6): sendQuoteEmail/sendJobEmail run inside the same
+// sendQuoteEmail/sendJobEmail run inside the same
 // runExclusiveJobMutation lock as every other milestone mutation, which is
 // stealable after its 120s stale-lock timeout. GMAIL_SEND_REQUEST_OPTIONS
 // bounds individual gaxios HTTP calls, but two calls inside that locked

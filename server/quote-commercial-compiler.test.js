@@ -1075,7 +1075,7 @@ test("soil removal compiles into mini loader and unclean fill disposal recipe li
     ),
     "disposal trace should name the per_tonne basis and its density factor",
   );
-  // DEL-46 anti-regression — see the per_load test for why this matters.
+  // Anti-regression — see the per_load test for why this matters.
   assert.equal(
     breakdown.commercialLines[1].quantity,
     resolveDisposalBilledQuantity({ pricingBasis: "per_tonne", pricingBasisFactor: 1.6, volumeM3: 10 }),
@@ -1173,7 +1173,7 @@ test("disposal billable quantity bills per_m3 directly from measured volume when
     breakdown.commercialLines[1].trace.quantityDerivation.some((entry) => /per_m3/.test(entry.expression)),
     "disposal trace should name the per_m3 basis",
   );
-  // DEL-46 anti-regression — see the per_load test for why this matters.
+  // Anti-regression — see the per_load test for why this matters.
   assert.equal(
     breakdown.commercialLines[1].quantity,
     resolveDisposalBilledQuantity({ pricingBasis: "per_m3", pricingBasisFactor: null, volumeM3: 10 }),
@@ -1276,7 +1276,7 @@ test("disposal billable quantity bills whole loads, rounded up, when the item's 
     "disposal trace should name the per_load basis and note the rounding",
   );
 
-  // DEL-46 anti-regression: the live quote engine (server/quote-quantity-rules.js)
+  // Anti-regression: the live quote engine (server/quote-quantity-rules.js)
   // must delegate the conversion arithmetic to shared/disposal-basis.js rather
   // than re-deriving it. Pin the quote engine's output against the shared
   // module's own independently-invoked result for the identical inputs

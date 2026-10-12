@@ -1,4 +1,4 @@
-/* Field's shared components (issue #161). Every value comes from the active
+/* Field's shared components. Every value comes from the active
    design system's --t-* tokens (shared/themes.js): corner radius, stroke width
    and colour, label case and display weight as well as colour. Field Crew is
    square with 2px ink strokes and spaced uppercase labels; other families are

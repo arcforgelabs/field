@@ -1,5 +1,5 @@
 // Test helper: a throwaway local S3 server with a LOCKED bucket, standing in
-// for the R2 bucket of issued documents (#240), whose bucket lock refuses
+// for the R2 bucket of issued documents (#12), whose bucket lock refuses
 // overwrite and delete. Off by default; opt in with
 //
 //   FIELD_R2_TEST_DOCKER=1     start a minio/minio container (pinned digest)

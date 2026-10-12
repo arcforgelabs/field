@@ -1,4 +1,4 @@
-// Supplier price-list import (#148 section 5.4): upload a CSV, map its
+// Supplier price-list import: upload a CSV, map its
 // columns (saved per supplier), stage it as price_import_rows classified
 // against the catalogue (changed / unchanged / new / missing / ambiguous /
 // invalid, with old → new cost and delta %), then apply the chosen rows in

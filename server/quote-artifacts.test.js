@@ -36,7 +36,7 @@ const ROOT_OPERATIONAL_CONTEXT_FILES = VERSIONED_CONTEXT_LOGICAL_FILES.filter((n
   "quote-breakdown-source.json",
 ].includes(name));
 
-test("custom quote payment terms are generated from the saved milestone schedule (DEL-29)", () => {
+test("custom quote payment terms are generated from the saved milestone schedule", () => {
   const paymentTerms = resolveQuotePaymentTerms({
     deliveryDefaults: {
       paymentTerms: "10% deposit due on acceptance. 30% progress payment due on commencement.",
@@ -239,7 +239,7 @@ function createIssuedMilestoneInvoiceFixture(invoiceNumber, pdfPath) {
   };
 }
 
-test("writeMilestoneInvoiceArtifact reconstructs a missing PDF for an already-issued revision from its pinned quote version, never the current one (DEL-30 P2-B)", async () => {
+test("writeMilestoneInvoiceArtifact reconstructs a missing PDF for an already-issued revision from its pinned quote version, never the current one", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-invoice-artifact-reconstruct-"));
   try {
     const pinnedQuote = createInvoiceQuoteFixture({ version: 1, summary: "Pinned quote content" });
@@ -281,9 +281,9 @@ test("writeMilestoneInvoiceArtifact reconstructs a missing PDF for an already-is
 // (forkCurrentQuoteVersion). A job that was quoted, landed and invoiced but
 // never revised has no archive directory at all — before this fix, that
 // meant the pinned version could never be found even though it IS the
-// current, locked root quote, and the headline P2-B reconstruction feature
-// could not fire for the common case (DEL-30 P2-1).
-test("writeMilestoneInvoiceArtifact reconstructs from root quote artifacts when the pinned version is the current, never-forked version (DEL-30 P2-1)", async () => {
+// current, locked root quote, and reconstruction from the pinned version
+// could not fire for the common case.
+test("writeMilestoneInvoiceArtifact reconstructs from root quote artifacts when the pinned version is the current, never-forked version", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-invoice-artifact-root-fallback-"));
   try {
     // No quote-versions/ directory at all — this job has never been forked.
@@ -313,7 +313,7 @@ test("writeMilestoneInvoiceArtifact reconstructs from root quote artifacts when 
   }
 });
 
-test("writeMilestoneInvoiceArtifact fails loudly instead of rendering from the current quote when an issued revision's pinned quote version is unavailable (DEL-30 P2-B)", async () => {
+test("writeMilestoneInvoiceArtifact fails loudly instead of rendering from the current quote when an issued revision's pinned quote version is unavailable", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-invoice-artifact-reconstruct-gone-"));
   try {
     const meta = { id: "job-reconstruct-gone-1", title: "Reconstruction gone test" };
@@ -344,11 +344,11 @@ test("writeMilestoneInvoiceArtifact fails loudly instead of rendering from the c
 // `legacyOrigin` is transient and does not survive `normalizeInvoiceRevision`
 // (called by `normalizeStoredMilestoneInvoices`, which runs on every touch of
 // a milestone invoice) — so a revision that failed reconstruction once and
-// was caught (DEL-30 P1-C) loses that marker on its very next touch.
+// was caught loses that marker on its very next touch.
 // `pdfUnrecoverable` is persisted and must independently gate the same
 // "reconstruct or fail loudly, never silently render" behaviour, or a retry
-// would fall straight through to the fabrication P2-B closed.
-test("writeMilestoneInvoiceArtifact still fails loudly (never silently renders) for a pdfUnrecoverable revision with no legacyOrigin marker (DEL-30 P1-C)", async () => {
+// would fall straight through to rendering a fabricated document.
+test("writeMilestoneInvoiceArtifact still fails loudly (never silently renders) for a pdfUnrecoverable revision with no legacyOrigin marker", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-invoice-artifact-unrecoverable-retry-"));
   try {
     const meta = { id: "job-unrecoverable-retry-1", title: "Unrecoverable retry test" };
@@ -380,7 +380,7 @@ test("writeMilestoneInvoiceArtifact still fails loudly (never silently renders) 
   }
 });
 
-test("writeMilestoneInvoiceArtifact recovers a pdfUnrecoverable revision once its pinned quote version becomes available again (DEL-30 P1-C)", async () => {
+test("writeMilestoneInvoiceArtifact recovers a pdfUnrecoverable revision once its pinned quote version becomes available again", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-invoice-artifact-unrecoverable-recover-"));
   try {
     const pinnedQuote = createInvoiceQuoteFixture({ version: 1, summary: "Pinned quote content" });
@@ -409,7 +409,7 @@ test("writeMilestoneInvoiceArtifact recovers a pdfUnrecoverable revision once it
   }
 });
 
-// DEL-30 P2-1 (round 5): a legacy revision retired into history must carry
+// A legacy revision retired into history must carry
 // ARTIFACT_STATE.ADOPT_PENDING (set at synthesis, not stamped post-hoc) so
 // `historicalMatch` — which requires any state other than UNWRITTEN — still
 // recognises it as a money document. Before the fix, retired legacy copies
@@ -485,8 +485,8 @@ test("writeMilestoneInvoiceArtifact treats an ADOPT_PENDING historical revision 
   }
 });
 
-// DEL-30 P3-2: version snapshots are the reconstruction basis for money
-// documents (DEL-30 P2-B) — deleting one an issued revision is pinned to
+// Version snapshots are the reconstruction basis for money
+// documents — deleting one an issued revision is pinned to
 // would silently convert every future lost PDF pinned to it into a
 // permanent 410 with no way back.
 test("deleteQuoteVersion refuses with 409 when an issued revision is pinned to that version", async () => {

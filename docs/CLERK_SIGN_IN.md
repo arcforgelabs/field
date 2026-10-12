@@ -1,7 +1,7 @@
 # Clerk sign-in: runbook and cutover
 
 People sign in to Field with Clerk, through Replit's managed Clerk
-integration (GitHub issue #149, part of the Replit move #139). It is off until
+integration. It is off until
 `FIELD_AUTH=clerk` is set. With `FIELD_AUTH` unset, Field signs people in with
 email and password exactly as before, so local development, tests and the
 quote/invoice proof harness need nothing from Clerk.

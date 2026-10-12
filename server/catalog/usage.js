@@ -1,4 +1,4 @@
-// "Used on N quotes" for the price book (#178): which jobs' quotes have a row
+// "Used on N quotes" for the price book: which jobs' quotes have a row
 // priced from each catalogue item, by uid (rows name their item by uid since
 // the step 3 re-key; older rows by a legacy code, resolved through the
 // aliases). Counts direct rows only: an item used inside a kit is the kit's.

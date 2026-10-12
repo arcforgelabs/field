@@ -1,4 +1,4 @@
-// The safe quantity-expression language for assemblies (#148 section 4).
+// The safe quantity-expression language for assemblies.
 //
 // An expression is arithmetic over numbers and named values (an assembly's
 // params and vars): + - * /, unary minus, parentheses, and the functions

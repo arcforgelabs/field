@@ -59,7 +59,7 @@ function normalizeCatalogType(value, fallback = null) {
 function normalizeNativeFields(body, out) {
   const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
   if (has("description")) out.description = normalizeOptionalText(body.description);
-  // Internal notes (never printed) and what the item is (#178 phase 1); the
+  // Internal notes (never printed) and what the item is (pricing engine phase 1); the
   // store validates type.
   if (has("notes")) out.notes = normalizeOptionalText(body.notes);
   if (has("type")) out.type = normalizeOptionalText(body.type);
@@ -183,7 +183,7 @@ export function respondWithCatalogError(res, err, fallbackStatus = () => 400) {
 export function createPriceCatalogRouter({ store, dataDir, catalogId = DEFAULT_QUOTE_CATALOG_ID, revision = null }) {
   if (!store) throw new TypeError("createPriceCatalogRouter requires the catalogue store");
   const router = Router();
-  // Item codes are legacy aliases (#178 step 6): Prefer: field-item-codes=omit
+  // Item codes are legacy aliases (code retirement step 6): Prefer: field-item-codes=omit
   // drops them from every JSON answer; otherwise they are marked deprecated.
   router.use(itemCodePreference);
   const upload = multer({ dest: join(dataDir, "price-catalog", "_uploads") });
@@ -263,7 +263,7 @@ export function createPriceCatalogRouter({ store, dataDir, catalogId = DEFAULT_Q
     await sendItem(res, item, etag);
   }));
 
-  // Which quotes use an item (#178): a short-cached scan of every job's
+  // Which quotes use an item: a short-cached scan of every job's
   // current quote and saved versions, rows matched by uid (or legacy code).
   const usage = createQuoteUsage({ dataDir, getState: () => store.getState() });
   router.get("/usage", route(async (_req, res) => {

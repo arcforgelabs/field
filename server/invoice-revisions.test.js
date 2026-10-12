@@ -168,7 +168,7 @@ test("un-issuing retires the revision and reissuing identical content restores i
   assert.equal(changed.revisionHistory[0].invoiceNumber, "EI-0041-M1");
 });
 
-test("restoring a retired revision preserves its original issuedAt and records a separate reissuedAt (DEL-30 P3-4)", () => {
+test("restoring a retired revision preserves its original issuedAt and records a separate reissuedAt", () => {
   const issued = resolveMilestoneRevisionState({
     baseInvoiceNumber: "EI-0041-M1",
     isIssued: true,
@@ -204,7 +204,7 @@ test("restoring a retired revision preserves its original issuedAt and records a
   assert.equal(restored.issuedRevision.reissuedAt, "2026-05-10T00:00:00.000Z");
 });
 
-test("a restore-below-max attributes the next authorized revision to the actual predecessor, not the highest history entry (DEL-30 P3-1)", () => {
+test("a restore-below-max attributes the next authorized revision to the actual predecessor, not the highest history entry", () => {
   // R1 issued, then authorized straight to R2.
   const r1 = resolveMilestoneRevisionState({
     baseInvoiceNumber: "EI-0041-M1",

@@ -2,7 +2,7 @@
 // the quantity rules that reference them, the quote catalog's assemblies
 // (recipes), the retaining-wall rate card and the wall engine. Each reference
 // is { uid, code, source }: the uid where the configuration declares one
-// (#178 code retirement step 4), the legacy code beside it as the fallback.
+// (code retirement step 4), the legacy code beside it as the fallback.
 // The health report checks each one resolves to an active item, by uid.
 import { getQuoteCatalogsForAuthoritySnapshot } from "../quote-catalogs.js";
 import { resolveQuoteCatalogId } from "../quote-catalog-ids.js";

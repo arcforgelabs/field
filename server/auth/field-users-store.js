@@ -1,9 +1,9 @@
-// Field users in PostgreSQL (#149): who a signed-in person is in Field, their
+// Field users in PostgreSQL: who a signed-in person is in Field, their
 // role (owner | staff) and whether they may use Field (active | pending |
 // disabled). Used only when FIELD_AUTH=clerk.
 //
 // A person is a `users` row; their role and access are their membership of an
-// organisation (`org_memberships`, #178). Every function takes an organisation
+// organisation (`org_memberships`). Every function takes an organisation
 // scope (server/db-runtime/tenancy.js orgScope) and sees only the people with
 // a membership in that organisation; a plain Drizzle instance means the
 // default organisation. The rows returned combine both: { id, clerkUserId, email, name,

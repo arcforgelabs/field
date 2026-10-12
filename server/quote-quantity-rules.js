@@ -196,7 +196,7 @@ const PRICING_BASIS_UNIT_LABELS = {
  * price-catalogue item behind a disposal rule (pricing_basis /
  * pricing_basis_factor) — not by the quote-catalog quantity rule. This is
  * the single place quote-quantity-rules.js reads that factor from; do not
- * reintroduce a hardcoded fallback density elsewhere (DEL-46).
+ * reintroduce a hardcoded fallback density elsewhere.
  */
 function resolveDisposalPricingBasis(disposalRule) {
   const basis = disposalRule?.priceCatalog?.pricingBasis
@@ -213,7 +213,7 @@ function resolveDisposalPricingBasis(disposalRule) {
  * Resolve the density (t/m3) used for physical truck-capacity logistics
  * (loads, loading hours) for the same disposal item a bulk-disposal recipe
  * bills against. The disposal item's own pricing_basis_factor is the only
- * source: a json5 quantity-rule fallback was removed here (DEL-46 round 2)
+ * source: a json5 quantity-rule fallback was removed here
  * because it was a second, independently-editable owner of the same number
  * the catalogue's price build-up (catalog-recipes.js /
  * resolveRecipeChildQuantity) already treats as sole-owned — keeping it
@@ -236,7 +236,7 @@ function resolveDisposalDensityTonnesPerM3({ quoteCatalog, disposalRuleCode }) {
  * whole loads) lives solely in shared/disposal-basis.js — resolved here from
  * the rule and packaged with the quote-engine-specific unit label. Returns
  * null when the basis/factor can't be resolved so the caller fails closed
- * (not-quoteable) instead of guessing (DEL-46).
+ * (not-quoteable) instead of guessing.
  */
 function resolveDisposalBillableQuantity({ disposalRule, volumeM3 }) {
   const { basis, factor } = resolveDisposalPricingBasis(disposalRule);
@@ -439,7 +439,7 @@ function applySoilDumpPlanRule({
     Math.max(0, grossCutVolumeM3 - fillVolumeM3),
   ]) || 0);
   // Null (not 0) when the disposal item isn't billed per_tonne — see the
-  // matching comment on resolveDisposalDensityTonnesPerM3 (DEL-46).
+  // matching comment on resolveDisposalDensityTonnesPerM3.
   const disposalTonnes = densityTonnesPerM3 > 0 ? roundQuantity(disposalVolumeM3 * densityTonnesPerM3) : null;
 
   const soilRule = resolveQuoteCatalogRule(quoteCatalog, soilRuleCode);
@@ -500,7 +500,7 @@ function applySoilDumpPlanRule({
             ...(noteFillImportRequired ? { noteFillImportRequired: true } : {}),
           },
           _measurementDerived: measurementDerived,
-          // DEL-46 (P0, round 4): propagate an unresolvable disposal basis
+          // Propagate an unresolvable disposal basis
           // into the existing not-quoteable mechanism (see the haulage
           // section below and server/generate-evidence-quote.js:1103-1110)
           // instead of letting the line quietly price from the loader
@@ -556,7 +556,7 @@ function applySoilDumpPlanRule({
               fillVolumeAllocated: group.groupFillVolumeAllocated,
             }),
             section: group.section,
-            // DEL-46 (P0, round 4): when the disposal basis is unresolvable,
+            // When the disposal basis is unresolvable,
             // pricing.pricingIssueReason is set and pricing.unitPrice/unitCost
             // are already null — do not let the pre-existing candidate-price
             // fallback (used for other, unrelated computation failures) mask
@@ -780,7 +780,7 @@ function applyConcreteRemovalPlanRule({
       totalPrice: removalPricing?.totalPrice ?? null,
       unitCost: removalPricing?.unitCost ?? null,
       totalCost: removalPricing?.totalCost ?? null,
-      // DEL-46 (P0, round 4): see applySoilDumpPlanRule for why this must
+      // See applySoilDumpPlanRule for why this must
       // propagate into the existing not-quoteable mechanism.
       _requiresDerivedPricing: Boolean(removalPricing?.pricingIssueReason),
       _pricingIssueCode: removalPricing?.pricingIssueReason ? (removalPricing.pricingIssueCode || disposalRuleCode) : null,
@@ -1224,7 +1224,7 @@ function resolveBulkLoadingDisposalDemand({
         volumeM3: bulkRemovalPlan.disposalVolumeM3,
       })
     : null;
-  // DEL-46 (P0, round 4): an unresolvable disposal basis must not leave the
+  // An unresolvable disposal basis must not leave the
   // internal cost breakdown looking complete with only the loader line —
   // that misreports internal cost the same way the customer-facing path
   // would misreport price. Report no recipe at all; the caller
@@ -1232,7 +1232,7 @@ function resolveBulkLoadingDisposalDemand({
   // pricer, which independently detects the missing rate and records a
   // pricing issue through the existing mechanism (buildDirectPricingIssue).
   if (bulkRemovalPlan.disposalVolumeM3 > 0 && !disposalLine) {
-    // DEL-46 (round 6): see the matching comment in buildBulkRemovalPricing
+    // See the matching comment in buildBulkRemovalPricing
     // — distinguish "basis/factor unresolved" from "basis is fine but there
     // is no positive sell price" so the operator-facing message points at
     // the actual gap.
@@ -1745,7 +1745,7 @@ function buildBulkLoadingLine({
   // and per_m3 items never resolve a tonnage (resolveBulkRemovalMetrics
   // returns tonnes: null for them). Omit the mass clause entirely rather
   // than printing formatQty(null) as a literal "0 t", which would state a
-  // false physical fact on a customer-facing document (DEL-46).
+  // false physical fact on a customer-facing document.
   const hasTonnes = tonnes != null;
   return exactLine({
     itemCode: resolveAuthorityItemCode(componentRule, componentRuleCode),
@@ -1788,7 +1788,7 @@ function buildBulkLoadingLine({
  * `billable` is null when the disposal item's basis/factor can't be resolved
  * (missing item, missing authority data, or an inconsistent catalogue entry);
  * this returns null in that case rather than guessing a quantity or unit, so
- * the line falls back to the existing not-quoteable pricing status (DEL-46).
+ * the line falls back to the existing not-quoteable pricing status.
  */
 function buildBulkDisposalLine({
   componentRule,
@@ -1804,7 +1804,7 @@ function buildBulkDisposalLine({
   // sell price set — mirror isRuleQuoteable's > 0 threshold, not just a
   // null check, so a resolved-but-zero rate is also treated as unresolved.
   // A bare `== null` check alone would still let a real $0 disposal line
-  // through undetected (DEL-46, round 6).
+  // through undetected.
   if (rates.unitPrice == null || !(rates.unitPrice > 0) || rates.unitCost == null) return null;
   const { basis, factor, quantity, unit } = billable;
   const unitLabel = unit === "tonne" ? "t" : unit;
@@ -2382,7 +2382,7 @@ function buildBulkRemovalPricing({
   // for a per_load/per_m3 disposal item, so disposalTonnes must be null
   // rather than a computed 0 — a real tonnage of zero and "this item isn't
   // billed by weight" are different facts, and printing formatQty(0) as
-  // "(0 t)" in a customer-facing description states the wrong one (DEL-46).
+  // "(0 t)" in a customer-facing description states the wrong one.
   const disposalTonnes = loadingMetrics.densityTonnesPerM3 > 0
     ? roundQuantity(normalizedDisposalVolumeM3 * loadingMetrics.densityTonnesPerM3)
     : null;
@@ -2400,14 +2400,14 @@ function buildBulkRemovalPricing({
         volumeM3: normalizedDisposalVolumeM3,
       })
     : null;
-  // DEL-46 (P0, round 4): a disposal item with an unresolvable basis must not
+  // A disposal item with an unresolvable basis must not
   // let the quote silently price from the loader line alone — that produces
   // a cheaper-than-real customer quote with no pricing issue recorded.
   // Fail closed the same way buildHaulagePricing() already does for a
   // missing haulage component: return an unpriced result with a reason
   // string, never a partial price.
   if (normalizedDisposalVolumeM3 > 0 && !disposalLine) {
-    // DEL-46 (round 6): distinguish "basis/factor unresolved" (billable is
+    // Distinguish "basis/factor unresolved" (billable is
     // null) from "basis is fine but there's no positive sell rate" (billable
     // resolved, but resolveRuleRates/buildBulkDisposalLine's rate check
     // failed) — these are different operator-facing problems with different
@@ -2549,7 +2549,7 @@ function resolveBulkRemovalMetrics({
   // disposal item, which is not an error. It is only load-bearing here when
   // the truck's volume capacity has to be derived from its mass capacity;
   // when truckVolumeCapacityM3 is given directly, loading hours and trip
-  // counts don't need a density at all (DEL-46).
+  // counts don't need a density at all.
   const effectiveVolumeCapacityM3 = truckVolumeCapacityM3 > 0
     ? truckVolumeCapacityM3
     : (truckMassCapacityTonnes > 0 && densityTonnesPerM3 > 0 ? truckMassCapacityTonnes / densityTonnesPerM3 : 0);
@@ -2601,7 +2601,7 @@ function buildBulkRemovalDescription({
   // Mass is only meaningful for a per_tonne disposal basis (disposalTonnes is
   // null for per_load/per_m3 items). Omit the "(x t)" parenthetical entirely
   // rather than print formatQty(null) as a literal "(0 t)", which would state
-  // a false physical fact on a customer-facing document (DEL-46).
+  // a false physical fact on a customer-facing document.
   const massClause = disposalTonnes != null ? ` (${formatQty(disposalTonnes)} t)` : "";
   if (!(fillVolumeM3 > 0) && !noteFillImportRequired) {
     return `${formatQty(grossCutVolumeM3)} m3${massClause} removal and ${wasteLabel}.${dumpText}`;
@@ -2637,7 +2637,7 @@ function buildBulkRemovalRationale({
   // Mass conversion (× density) only applies to a per_tonne disposal basis;
   // disposalTonnes/densityTonnesPerM3 are null/0 for per_load/per_m3 items,
   // and this line must not print a false "= 0 t" mass conversion in that
-  // case (DEL-46).
+  // case.
   const massConversionText = disposalTonnes != null
     ? ` × ${formatQty(densityTonnesPerM3)} t/m3 = ${formatQty(disposalTonnes)} t`
     : "";
@@ -2669,7 +2669,7 @@ function buildSoilHaulageRationale({
   returnTripDriveHours,
 }) {
   // Mass is only meaningful for a per_tonne disposal basis — see the matching
-  // comment in buildBulkRemovalDescription (DEL-46).
+  // comment in buildBulkRemovalDescription.
   if (!(fillVolumeM3 > 0)) {
     const massText = disposalTonnes != null ? ` and ${formatQty(disposalTonnes)} t of unclean fill` : " of unclean fill";
     return `${loads} return trips calculated from ${formatQty(disposalVolumeM3)} m3${massText}. Return trip distance ${formatQty(returnTripDistanceKm)} km and return drive ${formatQty(returnTripDriveHours)} hr per load.`;

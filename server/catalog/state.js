@@ -141,7 +141,7 @@ export function buildCatalogState(raw, { now }) {
   const taxCodes = new Map(raw.taxRows.map((row) => [row.code, Object.freeze({ code: row.code, label: row.label, rate: toNumber(row.rate) })]));
   const items = new Map();
   // Legacy code (lower case) -> item uid. Every code an item has had is an
-  // alias row (item_code_aliases, #178 step 2); an item's own code is always
+  // alias row (item_code_aliases, code retirement step 2); an item's own code is always
   // one of them. A code is a lookup key only: the item is its uid.
   const byCode = new Map();
   const codesByUid = new Map();

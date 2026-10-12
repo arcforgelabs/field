@@ -1,4 +1,4 @@
-// Backfill of quote rows from today's job files, with verification (#241;
+// Backfill of quote rows from today's job files, with verification (#6;
 // docs/PRICING_ENGINE.md "Moving today's data").
 //
 // For every job: its current quote and every archived quote-versions/vNNN

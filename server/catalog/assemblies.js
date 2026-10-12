@@ -1,4 +1,4 @@
-// Assemblies (#148 section 4): a recipe as data. An assembly names typed
+// Assemblies: a recipe as data. An assembly names typed
 // parameters (a lawn's area, a drain's length), variables computed from them
 // (labour hours per m2), and components: catalogue items by code, each with a
 // quantity expression in the safe expression language (./expression.js) and

@@ -112,7 +112,7 @@ test("reconcileBaselineScope respects explicit operator removal notes", () => {
   assert.equal(reconciled.reviewStatus, "ready");
 });
 
-test("DEL-30 (P0-2): a candidate whose label differs from the rule label is not duplicated as missing", () => {
+test("a candidate whose label differs from the rule label is not duplicated as missing", () => {
   // Reproduces the field-verification invoice fixture: the candidate carries
   // the operator/transcript label ("Concrete breakout") while the baseline
   // line item generated from the same catalogue rule carries rule.label
@@ -172,7 +172,7 @@ test("DEL-30 (P0-2): a candidate whose label differs from the rule label is not 
   assert.equal(reconciledAgain.lineItemCandidates.length, 1);
 });
 
-test("DEL-30 (P2-1): two option siblings sharing a catalogue rule and section both survive a rebuild", () => {
+test("two option siblings sharing a catalogue rule and section both survive a rebuild", () => {
   // Option candidates in a "select one" section deliberately get their own
   // `code` (not the rule code) so siblings that share one quote-catalog rule
   // stay as separate line items (server/generate-evidence-quote.js:1015-1024,
@@ -236,7 +236,7 @@ test("DEL-30 (P2-1): two option siblings sharing a catalogue rule and section bo
   assert.equal(reconciledAgain.lineItemCandidates.length, 2);
 });
 
-test("DEL-30 (P3-1, documents a known asymmetry — see buildCandidateKey comment, tracked under DEL-66): a re-mentioned option candidate without its own `code` duplicates rather than merges with its baseline sibling", () => {
+test("known asymmetry, see the buildCandidateKey comment: a re-mentioned option candidate without its own `code` duplicates rather than merges with its baseline sibling", () => {
   // Not reachable today: options only ever enter via the agent-driven PUT
   // /quote-inputs path, which always supplies `code`, and AI transcript
   // extraction never emits option codes at all. This test exists so that if
@@ -294,7 +294,7 @@ test("DEL-30 (P3-1, documents a known asymmetry — see buildCandidateKey commen
   );
 });
 
-test("DEL-30 (P3-1, documents a known asymmetry — see buildCandidateKey comment, tracked under DEL-66): a candidate carrying its own `code` distinct from quoteCatalogItemCode duplicates against an ordinary (non-option) baseline item", () => {
+test("known asymmetry, see the buildCandidateKey comment: a candidate carrying its own `code` distinct from quoteCatalogItemCode duplicates against an ordinary (non-option) baseline item", () => {
   // Not reachable today: no current producer emits a `code` on a candidate
   // for an ordinary (non-"select one") item. normalizeLineItemCandidates
   // (server/extract-quote-inputs.js) does not strip an incoming `code`

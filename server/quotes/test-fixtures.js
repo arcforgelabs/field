@@ -1,4 +1,4 @@
-// Quote artifacts for the quote-row tests (#241): organizer trees in the
+// Quote artifacts for the quote-row tests (#6): organizer trees in the
 // shapes Field writes today (quote.presentation.organizer), with the totals
 // the renderer shows worked out by hand in each comment.
 
@@ -203,7 +203,7 @@ export function halfCentGstQuote() {
   });
 }
 
-// What documents print besides money (#245): a collapsed section, a section
+// What documents print besides money (#10): a collapsed section, a section
 // whose subtotal is hidden, a blank amount, row styles, a nested group, notes,
 // an excluded row inside a kit, a cost override on a group and a top-level
 // row between sections.

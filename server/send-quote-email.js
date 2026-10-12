@@ -25,7 +25,8 @@ export const GMAIL_SEND_SCOPES = [
 ];
 
 // Service-account (domain-wide delegation) sends ask only for gmail.send, as
-// the service-account transport always did before #139. Google refuses the
+// the service-account transport always did before Field moved to Replit.
+// Google refuses the
 // whole token when any requested scope is not delegated in the Workspace admin
 // console, so asking for gmail.readonly or userinfo.email as well stopped every
 // send on a workspace that delegates send only. The sender is the delegated
@@ -42,14 +43,14 @@ export const GMAIL_DELEGATED_RECONCILE_SCOPES = [
 
 // `sendJobQuote` mints and persists issued invoice/receipt revisions before
 // this call, then runs it inside the same runExclusiveJobMutation lock as
-// every other milestone mutation (DEL-30 P2-4). That lock is stealable: a
+// every other milestone mutation. That lock is stealable: a
 // holder that has not finished after job-mutation-guard.js's stale-lock
 // timeout (120s) is evicted while its task keeps running. `gaxios` (which
 // the Gmail client is built on) has no request timeout by default, so a
 // hung send could hold the lock past 120s, lose it to a competing mutation,
 // and then still run its own post-send persist — last-writer-wins over
 // milestone-invoices/state.json, silently erasing whatever the winner just
-// committed (DEL-30 P2-2, round 5). Bounding the request here — comfortably
+// committed. Bounding the request here — comfortably
 // under 120s, with no gaxios-internal retry to extend it unpredictably —
 // keeps the steal unreachable while a send is actually in flight: it either
 // completes or fails within the bound, never straddles the eviction. On
@@ -57,8 +58,8 @@ export const GMAIL_DELEGATED_RECONCILE_SCOPES = [
 // already-persisted state touched again.
 //
 // GMAIL_SEND_REQUEST_OPTIONS only bounds the individual gaxios HTTP call it
-// is passed to. Two calls inside this locked region were not receiving it
-// (DEL-30 P3-1, round 6): getAuthenticatedSender's own `getProfile` request,
+// is passed to. Two calls inside this locked region were not receiving it:
+// getAuthenticatedSender's own `getProfile` request,
 // and — more importantly — the googleapis auth client's OWN token-refresh
 // HTTP request, which it issues from an interceptor ahead of whichever call
 // triggered it and which the per-call `timeout` option never reaches (it is
@@ -78,7 +79,7 @@ export function withGmailSendCeiling(work, label, ms = GMAIL_SEND_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(
-        `${label} exceeded the ${ms}ms send ceiling (DEL-30 P3-1): a Gmail API call `
+        `${label} exceeded the ${ms}ms send ceiling: a Gmail API call `
         + "— profile lookup, OAuth token refresh, or the send itself — did not complete in time",
       ));
     }, ms);
@@ -300,7 +301,7 @@ async function performSendQuoteEmail({
   const quoteCatalog = quote.quoteCatalog || quote.profile || {};
   const deliveryDefaults = quoteCatalog.deliveryDefaults || {};
   const biz = applyBusinessProfileOverride(quoteCatalog.businessProfile || {});
-  // A quote email's totals come from the quote's rows (#245).
+  // A quote email's totals come from the quote's rows (#10).
   const rowsView = resolvedDocumentType === "quote" ? await loadQuoteRows({ quote, meta }) : null;
   const htmlBody = buildEmailHtml({
     meta,

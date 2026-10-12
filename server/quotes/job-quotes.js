@@ -1,5 +1,5 @@
 // What a job's files say about its quote versions, in the shape the quote
-// service takes (#241). Read-only: nothing here writes to a job directory.
+// service takes (#6). Read-only: nothing here writes to a job directory.
 // Used by the dual-write (recorder.js) and the backfill (backfill.js).
 //
 // Versions: the current quote (quote.json at the job's root) and every
@@ -30,7 +30,7 @@ import { normalizePipelineStage } from "../pipeline.js";
 import { quoteDocumentNumber } from "../documents/job-sources.js";
 
 /** Bumped when the mapping changes, so draft rows mapped the old way are rewritten. */
-// 2: display columns (#245, migration 0011).
+// 2: display columns (#10, migration 0011).
 export const QUOTE_ROW_MAPPING_VERSION = 2;
 
 function text(value) {

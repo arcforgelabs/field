@@ -190,7 +190,7 @@ export async function reset() {
   // host directory with the wrong ownership and breaks the next invocation.
   await clearDirectoryChildren(dataDir);
 
-  // DEL-46: seed the sanitized field-verification price-catalog items via
+  // Seed the sanitized field-verification price-catalog items via
   // the same supported path any catalogue item uses (the catalogue store's
   // createItem(), which the POST /items route and the /pricing UI both
   // call). This is required, not optional: once the price catalog has any
@@ -227,7 +227,7 @@ export async function reset() {
       if (locked.quoteOverrides?.lockStatus !== REVIEWED_SEMANTIC_MANIFEST.customerFacingRevision.lockStatus) {
         throw new Error("verification invoice fixture did not retain the reviewed final quote lock");
       }
-      // DEL-30 (P1-3): assert the quote actually persisted to disk by the lock
+      // Assert the quote actually persisted to disk by the lock
       // step, not only the pre-lock in-memory `persisted` value captured below
       // from writeFixture(). Locking must not re-price — a regression that
       // reintroduces a rebuild-on-lock would leave this on-disk total wrong
@@ -241,7 +241,7 @@ export async function reset() {
         );
       }
       // Send, land, milestones and issuance are one staged generation: a
-      // committed generation is never written in place (#224), or it fails
+      // committed generation is never written in place, or it fails
       // validation and the fixture silently falls back to an older one.
       const sentAt = "2026-01-15T09:30:00.000Z";
       await runAtomicJobGeneration(jobDir, async (stagedJobDir) => {
@@ -292,7 +292,7 @@ export async function reset() {
           reportMarkdown: lockedArtifacts.quoteMarkdown,
         });
       });
-      // DEL-30 (P3-3): assert the on-disk total once more after the full
+      // Assert the on-disk total once more after the full
       // lock -> send -> land -> milestone sequence, not only right after the
       // lock step above. No rebuild path is reachable from markJobLanded or
       // generateJobMilestones today, so this is expected to be a no-op check

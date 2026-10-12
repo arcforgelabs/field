@@ -8,7 +8,7 @@ import {
 } from "./quoting-core.js";
 import { omitItemCodes } from "../catalog/item-codes.js";
 
-// An item is named by its uid (#178 code retirement step 6). `code`,
+// An item is named by its uid (code retirement step 6). `code`,
 // `parentCode` and `childCode` are the older names for the same inputs and
 // still accept a legacy code; catalogue tools never return codes.
 const ITEM = { type: "string", minLength: 1, description: "Item uid. A legacy item code also works." };

@@ -1,6 +1,6 @@
-// The one totals function for quote rows (#241; docs/PRICING_ENGINE.md
+// The one totals function for quote rows (#6; docs/PRICING_ENGINE.md
 // "Numbers, money and rounding" and "quote_lines"). Decided by the owner on
-// 2026-10-12 (#178):
+// 2026-10-12:
 //
 //   line total  the line's amount. A line whose total is `computed` is
 //               round(quantity x unit sell, 2); a line whose total is

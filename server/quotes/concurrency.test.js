@@ -1,4 +1,4 @@
-// Optimistic concurrency for quote saves (#245): If-Match against the quote
+// Optimistic concurrency for quote saves (#10): If-Match against the quote
 // rows' version.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";

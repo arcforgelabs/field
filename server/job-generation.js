@@ -581,7 +581,7 @@ export async function resolveActiveJobGeneration(jobDir) {
 /**
  * A committed generation is immutable: every read re-hashes it against its
  * commit marker, and one whose files changed is quarantined, so the job
- * silently falls back to the previous generation and the write is lost (#224).
+ * silently falls back to the previous generation and the write is lost.
  * Commercial writers resolve their target through this instead of
  * resolveActiveJobGeneration: a staged generation (from runAtomicJobGeneration)
  * or a job that has no generation yet resolves to itself and is writable; a
@@ -751,7 +751,7 @@ export async function publishStagedJobGeneration({ jobDir, stagedJobDir, flush =
   } catch (error) {
     console.warn(`[job-generation] committed ${generationId} but compatibility projection failed: ${error.message}`);
   }
-  // Commit point for durable storage (#139): the published generation is
+  // Commit point for durable storage: the published generation is
   // stored now, not only when the request ends. A failure is logged and
   // retried; a request still answers 503 if its writes cannot be stored.
   // `flush: false` is for a caller that stores many jobs' generations in one
@@ -791,7 +791,7 @@ export async function withJobGenerationLock(jobDir, operation, { timeoutMs = 30_
 // One listener told about every committed generation, after its post-commit
 // callbacks and still under the job's generation lock, so it reads exactly
 // what was committed. The server installs the quote-row dual-write here
-// (server/quotes/recorder.js, #241). A listener failure is logged and never
+// (server/quotes/recorder.js, #6). A listener failure is logged and never
 // turns a committed change into a failed one.
 let generationCommitListener = null;
 

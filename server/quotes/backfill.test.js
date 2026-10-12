@@ -1,4 +1,4 @@
-// The quote-row backfill and its verification (#241) on a fixture data
+// The quote-row backfill and its verification (#6) on a fixture data
 // directory: a job with three versions (one sent, with its PDF in the
 // issuance ledger), a job whose sent PDF disagrees with its quote, versions
 // with a four-decimal rate and an amount kept as printed, a quote sent before

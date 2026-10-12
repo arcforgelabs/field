@@ -186,7 +186,7 @@ export function resolveDefaultSelectedQuoteVersion({
   return resolvedLatestVersion;
 }
 
-// DEL-30 defect B: `resolveDefaultSelectedQuoteVersion` above answers "what
+// `resolveDefaultSelectedQuoteVersion` above answers "what
 // should the operator see by default" — the locked customer-seen revision,
 // deliberately, so an in-progress draft edit never gets mistaken for what
 // the customer actually has. Sending a document is the opposite question:

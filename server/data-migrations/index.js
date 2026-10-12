@@ -1,4 +1,4 @@
-// Data migrations (#178 code retirement): changes to existing records, run
+// Data migrations (code retirement): changes to existing records, run
 // once at boot after the schema migrations, each verified before anything is
 // written and recorded in `data_migrations` so it never runs again.
 //

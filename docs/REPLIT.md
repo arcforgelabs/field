@@ -86,7 +86,7 @@ See `server/db/README.md` for the runtime module and how to add tables.
 ## Data migrations
 
 Some releases change existing records, not just the schema: re-keying quote
-rows by uid, for example (#178). These are data migrations
+rows by uid, for example. These are data migrations
 (`server/data-migrations/`). Field runs each one once, at boot, after the
 schema migrations and before it serves anything:
 
@@ -155,7 +155,7 @@ older release reads re-keyed files unchanged.
 ## Durable storage
 
 With `FIELD_STORAGE=postgres` the data directory is a working copy of what
-PostgreSQL holds (`server/storage/durable-store.js`, issue #139):
+PostgreSQL holds (`server/storage/durable-store.js`):
 
 - On start, before serving, Field takes a PostgreSQL advisory lock (only one
   Field process may write a database) and rebuilds the data directory from
@@ -225,9 +225,9 @@ npm run catalog:import-legacy -- <dir>/price-catalog/catalog.db --replace
 ## Issued documents in R2
 
 Every issued quote, invoice and receipt PDF is stored in PostgreSQL
-(`document_blobs`, #223). With `FIELD_DOCUMENT_REPLICA=r2` the published app
+(`document_blobs`). With `FIELD_DOCUMENT_REPLICA=r2` the published app
 also copies each one to a Cloudflare R2 bucket in your Cloudflare account.
-Give that bucket a bucket lock (#240) so the copies are write-once.
+Give that bucket a bucket lock (#12) so the copies are write-once.
 
 - PostgreSQL stays the store of record. A document is issued in one
   PostgreSQL transaction, as before, so issuing never waits on Cloudflare.

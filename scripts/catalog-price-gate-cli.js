@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The price-equality gate (#178 phase 1, server/catalog/price.js): record
+// The price-equality gate (pricing engine phase 1, server/catalog/price.js): record
 // every catalogue item's price, then check after a change that nothing moved.
 // Read-only: it never writes to the database.
 //

@@ -1,5 +1,5 @@
 // Typed catalogue errors: { code, path, message }, plus the HTTP status the
-// API answers with. Codes follow #148: UNIT_MISMATCH, UNKNOWN_REF,
+// API answers with. Codes are stable names: UNIT_MISMATCH, UNKNOWN_REF,
 // VERSION_CONFLICT, ... so the API, CLI and MCP report the same thing.
 const STATUS_BY_CODE = Object.freeze({
   NOT_FOUND: 404,

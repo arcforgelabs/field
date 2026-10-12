@@ -32,7 +32,7 @@ test("deriveArtifactState returns UNWRITTEN for null, missing, or empty entries"
   assert.equal(deriveArtifactState({}), ARTIFACT_STATE.UNWRITTEN);
 });
 
-// DEL-30 round-4 architecture correction: existing jobs on disk have
+// Existing jobs on disk have
 // persisted revisions carrying the pre-refactor `pdfIssuedAt` /
 // `pdfUnrecoverable` / `legacyOrigin` flags and NO `artifactState` field at
 // all — this must be inferred correctly so no existing job breaks or
@@ -43,8 +43,8 @@ test("deriveArtifactState infers the correct state from every pre-refactor store
     deriveArtifactState({ pdfIssuedAt: "2026-01-01T00:00:00.000Z" }),
     ARTIFACT_STATE.STORED,
   );
-  // An opportunistic write that failed and was caught (DEL-30 P1-C, round
-  // 3): only `pdfUnrecoverable`.
+  // An opportunistic write that failed and was caught: only
+  // `pdfUnrecoverable`.
   assert.equal(
     deriveArtifactState({ pdfUnrecoverable: true }),
     ARTIFACT_STATE.MISSING,
@@ -54,7 +54,7 @@ test("deriveArtifactState infers the correct state from every pre-refactor store
     deriveArtifactState({ pdfUnrecoverable: true, pdfIssuedAt: null }),
     ARTIFACT_STATE.MISSING,
   );
-  // A legacy-synthesized revision mid-rebuild (DEL-30 F3, round 1): only
+  // A legacy-synthesized revision mid-rebuild: only
   // the transient `legacyOrigin` marker.
   assert.equal(
     deriveArtifactState({ legacyOrigin: true }),
@@ -87,7 +87,7 @@ test("the predicates agree with deriveArtifactState for every state, including l
   assert.equal(artifactIsUnwritten(unwritten), true);
   assert.equal(artifactIsUnwritten(stored), false);
 
-  // Genuinely issued = anything other than UNWRITTEN (DEL-30 P2-C read path).
+  // Genuinely issued = anything other than UNWRITTEN (the read path's rule).
   assert.equal(artifactIsGenuinelyIssued(stored), true);
   assert.equal(artifactIsGenuinelyIssued(missing), true);
   assert.equal(artifactIsGenuinelyIssued(adoptPending), true);

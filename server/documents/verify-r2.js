@@ -1,4 +1,4 @@
-// Read-only check of the R2 replica (#240): every issued document's bytes are
+// Read-only check of the R2 replica (#12): every issued document's bytes are
 // in the bucket at `<org_uid>/<sha256>` and hash to the document's
 // pdf_sha256. Other stored bytes (a resend rendered again) are checked too.
 // It GETs each object and hashes it; it never writes, in R2 or in PostgreSQL.

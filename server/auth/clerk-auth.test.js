@@ -1,4 +1,4 @@
-// Clerk sign-in (#149) with Clerk mocked: no network, no real keys. The users
+// Clerk sign-in with Clerk mocked: no network, no real keys. The users
 // table is a fresh in-process PostgreSQL (PGlite) per test; machine tokens use
 // the real users.js store in a temporary data directory.
 import test, { beforeEach } from "node:test";

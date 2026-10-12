@@ -588,11 +588,11 @@ async function buildAndPersistQuoteInPlace({
     quoteReviewStatus: quote.review?.status || quote.status,
     quoteStatus: "complete",
     quoteLineItemCount: quote.lineItems?.length || 0,
-    // The job's cached totals (the job list) come from the quote's rows (#245).
+    // The job's cached totals (the job list) come from the quote's rows (#10).
     quoteSubtotal: quoteRowsFromArtifact({ quote, meta: identifiedMetaWithQuoteIdentity }).financials.subtotal || 0,
     quoteTotal: quoteRowsFromArtifact({ quote, meta: identifiedMetaWithQuoteIdentity }).financials.total || quote.totals?.total || 0,
     quoteVersion: quote.version,
-    // DEL-67: see preserveQuoteDeliveryState in pipeline.js for why this is
+    // See preserveQuoteDeliveryState in pipeline.js for why this is
     // unconditional rather than gated on shouldForkSentQuote.
     ...preserveQuoteDeliveryState(meta),
     quoteCatalogId: quote.quoteCatalog?.id || quote.quoteCatalog?.id || resolveQuoteCatalogIdFromMeta(identifiedMetaWithQuoteIdentity),
@@ -882,7 +882,7 @@ async function ingestPendingEvidence({
     }
 
     // Photo classification and audio transcription were removed with field
-    // capture (#145). Photos and voice notes stay registered but are not
+    // capture. Photos and voice notes stay registered but are not
     // interpreted, exactly as when no model key was configured.
     if (file.mimeType?.startsWith("image/") || file.mimeType?.startsWith("audio/")) {
       continue;

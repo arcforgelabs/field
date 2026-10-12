@@ -1,4 +1,4 @@
-// One job's quote versions, from its files into quote rows (#241), with the
+// One job's quote versions, from its files into quote rows (#6), with the
 // checks that prove the rows equal what Field shows and sent:
 //
 //   shown        quoteTotals(rows) equals the totals Field shows for the
@@ -9,7 +9,7 @@
 //                listed as a warning (not a failure: decided 2026-10-12)
 //   issued       for a sent version, quoteTotals(rows) equals the totals
 //                printed on the PDF the customer was sent: the issued
-//                document (#230) when there is a database, the issuance
+//                document when there is a database, the issuance
 //                ledger's PDF (or, when the PDF cannot be read, the quote
 //                markdown stored with it), or for a quote sent before the
 //                ledger the copy legacy-sent-quote.js finds
@@ -90,7 +90,7 @@ function emptyJobResult(jobId) {
  * Plan, check and (unless `dryRun`) write one job's quote rows.
  *
  *   service           the quote service (quote-rows.js), or null to only check
- *   issuedDocuments   the issue service (#230), or null
+ *   issuedDocuments   the issue service, or null
  *   verifyIssued      check sent versions against the sent PDF
  *   atomic            write nothing for the job when any version fails
  *   skipUnchanged     do not map a version whose rows were written from the
@@ -145,7 +145,7 @@ export async function syncJobQuoteRows({
     for (const difference of shownDifferences) {
       failures.push({ kind: "totals", against: "shown", ...difference });
     }
-    // The rows must also print what the files print (#245): documents are
+    // The rows must also print what the files print (#10): documents are
     // rendered from them. A quote with no organizer (pre-organizer legacy)
     // keeps printing from its files; its rows hold the money only.
     if (!mapped.legacy && !mapped.printable) {

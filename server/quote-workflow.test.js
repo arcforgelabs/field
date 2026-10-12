@@ -705,7 +705,7 @@ test("resolveBaselineQuoteForRebuild prefers the last customer-seen snapshot ove
   }
 });
 
-// DEL-67: a landed job's quote is revised via a two-call sequence — a
+// A landed job's quote is revised via a two-call sequence — a
 // force-fork call (creating a new draft version off the sent version), then
 // a second buildAndPersistQuote call against the just-forked meta that no
 // longer needs to fork (it's already past the last-sent version). That

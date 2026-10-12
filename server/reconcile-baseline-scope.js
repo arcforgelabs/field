@@ -37,7 +37,7 @@ export function reconcileBaselineScope({
   const preservedCandidates = preserved.map((item) => ({
     label: item.label,
     description: item.scopeSummary || item.label || null,
-    // DEL-30 (P2-1): carry the baseline item's own `code` forward. For an
+    // Carry the baseline item's own `code` forward. For an
     // option sibling this is its distinct per-candidate identity (not the
     // shared rule code) — dropping it here would let the next rebuild's
     // grouping (server/generate-evidence-quote.js:1018-1024) merge siblings
@@ -95,7 +95,7 @@ function extractRuleCode(value) {
   return sectionIndex >= 0 ? normalized.slice(0, sectionIndex) : normalized;
 }
 
-// DEL-30 (P0-2): identity must be keyed on the stable catalogue identifier,
+// Identity must be keyed on the stable catalogue identifier,
 // not the human label. A baseline line item generated from a catalogue rule
 // carries rule.label (server/generate-evidence-quote.js), while the operator
 // or transcript candidate that produced it carries whatever label the
@@ -105,7 +105,7 @@ function extractRuleCode(value) {
 // so the "missing" baseline item was re-injected as a duplicate on every
 // rebuild.
 //
-// DEL-30 (P2-1): quoteCatalogItemCode alone is not always distinct, though.
+// quoteCatalogItemCode alone is not always distinct, though.
 // Option candidates in a "select one" section deliberately get their own
 // `code` (the candidate's own code, not the rule code) so that siblings
 // sharing one quote-catalog rule produce separate line items instead of
@@ -121,12 +121,12 @@ function extractRuleCode(value) {
 // to a single identity. Label is used only as a last resort, for items that
 // carry no catalogue code at all — the only stable identifier left for those.
 //
-// DEL-30 (P3-1, known asymmetry, tracked for a real fix under DEL-66):
-// identity here is inferred from which of `code` / `quoteCatalogItemCode` an
-// item happens to carry, and that inference only agrees when the baseline
-// item and the candidate that's meant to match it carry the SAME shape.
-// Two asymmetric cases exist, and both fail by duplicating rather than
-// merging (the safer of the two failure modes, but still wrong):
+// A known asymmetry, not yet fixed: identity here is inferred from which of
+// `code` / `quoteCatalogItemCode` an item happens to carry, and that inference
+// only agrees when the baseline item and the candidate that's meant to match it
+// carry the SAME shape. Two asymmetric cases exist, and both fail by
+// duplicating rather than merging (the safer of the two failure modes, but
+// still wrong):
 //   1. Baseline is an option sibling (distinct `code`, shared
 //      quoteCatalogItemCode), but a fresh candidate re-mentioning it this
 //      round supplies only quoteCatalogItemCode with no `code`. The

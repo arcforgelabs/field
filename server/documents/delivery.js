@@ -1,4 +1,4 @@
-// The send path's side of the issued-document dual-write (#223): what
+// The send path's side of the issued-document dual-write: what
 // job-actions.js calls once a quote, invoice or receipt delivery is committed
 // (or has failed). Builds the document's number and frozen details from the
 // exact prepared meta and quote the PDF was rendered from, and hands them to

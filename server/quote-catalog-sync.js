@@ -1,4 +1,4 @@
-// Catalogue-linked quote rows and the draft "catalogue changed" diff (#148).
+// Catalogue-linked quote rows and the draft "catalogue changed" diff.
 //
 // A quote row added from the price catalogue is a manual organizer source
 // node that keeps a link to the catalogue item and the values it froze:

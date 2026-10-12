@@ -1,5 +1,5 @@
-// Guard: the price catalogue is Field's only source of prices and sold units
-// (#139 item 5). Quote catalogs carry none (a rule declares only the unit its
+// Guard: the price catalogue is Field's only source of prices and sold units.
+// Quote catalogs carry none (a rule declares only the unit its
 // quantity is measured in), and the pricing code carries no
 // fallback rates, markups or item-code tables that could quietly become a
 // second authority.

@@ -117,7 +117,7 @@ test("copy codes and component unit mismatches are reported", async (t) => {
   assert.deepEqual(health.issues.filter((issue) => issue.key === "component_unit_mismatch").map((issue) => [issue.code, issue.childCode]), [["kit", "gravel"]]);
 });
 
-test("disposal costing-basis checks (DEL-46)", async (t) => {
+test("disposal costing-basis checks", async (t) => {
   const { store, db } = await freshStore(t);
   await store.createItem({ code: "clean-fill-disposal", name: "Clean fill disposal", unit: "tonne", buy_price: 1, sell_price: 2 });
   await asDefaultOrg(db).execute(sql`update items set pricing_basis = 'per_tonne' where code = 'clean-fill-disposal'`);

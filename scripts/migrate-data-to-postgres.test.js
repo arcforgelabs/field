@@ -1,5 +1,5 @@
 // scripts/migrate-data-to-postgres.js: importing a Field data directory into
-// PostgreSQL durable storage (#139), on an in-process PGlite.
+// PostgreSQL durable storage, on an in-process PGlite.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import * as nodeFs from "node:fs";

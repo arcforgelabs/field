@@ -100,7 +100,7 @@ export async function updateJobQuote({
   const nextPaymentSchedule = patch.paymentSchedule != null
     ? normalizePaymentSchedule(patch.paymentSchedule)
     : null;
-  // Authoring-time guard (DEL-30 P2-3): this is operator INPUT arriving
+  // Authoring-time guard: this is operator INPUT arriving
   // through a quote-update patch, not a rebuild — reject a schedule whose
   // fixed dollar amounts already exceed the (pre-patch) quote total outright
   // rather than letting the rebuild pro-rate it silently. Approximate when
@@ -189,7 +189,7 @@ export async function updateJobQuote({
 
   if (!nextOverrides.presentation) delete nextOverrides.presentation;
 
-  // DEL-30 (P0-1/P2-2): a patch whose only quote-relevant content is
+  // A patch whose only quote-relevant content is
   // lockStatus is a delivery-state change, not a re-price — route it through
   // persistCurrentQuoteLockArtifacts (below), which flips the lock flag and
   // rewrites artifacts WITHOUT re-running buildAndPersistQuote's pricing
@@ -307,7 +307,7 @@ export async function updateJobQuote({
 }
 
 // Rows linked to the catalogue by code only (saved before uids) get the
-// item's uid recorded the next time the organizer is saved (#148), so a later
+// item's uid recorded the next time the organizer is saved, so a later
 // code edit in the catalogue cannot break their link. Nothing else changes.
 async function upgradePatchCatalogLinks(patch, config) {
   const organizer = patch?.presentation?.organizer;
@@ -348,7 +348,7 @@ async function readJobQuoteCatalogContext({ jobDir, meta }) {
 }
 
 /**
- * What changed in the catalogue for a job's quote rows (#148): for the
+ * What changed in the catalogue for a job's quote rows: for the
  * organizer the caller is editing (`organizer`), else the saved one. A sent
  * (locked) quote is reported with `locked: true`; its rows are never changed.
  */
@@ -472,7 +472,7 @@ async function updateQuotePresentationOnlyInPlace({
 }) {
   const currentArtifacts = await readQuoteArtifacts(jobDir);
   if (!currentArtifacts?.quote) {
-    // DEL-30 (P3-2): use the shared 404 helper (readPersistedQuote below
+    // Use the shared 404 helper (readPersistedQuote below
     // already does) instead of a bare Error, which surfaces as a 500.
     throw createJobActionError("quote not generated", 404);
   }
@@ -498,7 +498,7 @@ async function updateQuotePresentationOnlyInPlace({
     quoteReviewStatus: nextQuote.review?.status || nextQuote.status,
     quoteStatus: "complete",
     quoteLineItemCount: nextQuote.lineItems?.length || 0,
-    // The job's cached totals (the job list) come from the quote's rows (#245).
+    // The job's cached totals (the job list) come from the quote's rows (#10).
     quoteSubtotal: quoteRowsFromArtifact({ quote: nextQuote, meta }).financials.subtotal || 0,
     quoteTotal: quoteRowsFromArtifact({ quote: nextQuote, meta }).financials.total || nextQuote.totals?.total || 0,
     quoteVersion: nextQuote.version || meta.quoteVersion || currentArtifacts.version || 1,
@@ -641,7 +641,7 @@ function presentationPatchTouchesMonetaryOutput(value, key = "") {
   ));
 }
 
-// DEL-30 (P0-1): true only when the patch's sole quote-relevant content is
+// True only when the patch's sole quote-relevant content is
 // lockStatus — no line items, commercial adjustments, assumptions,
 // presentation, option selections, execution overrides, or payment schedule.
 // A patch that mixes lockStatus with any real quote edit must still take the
@@ -678,7 +678,7 @@ async function updateQuoteLockStatusOnlyInPlace({
   actor = null,
   lockStatus,
 }) {
-  // DEL-30 (P3-1): fail cleanly before any write when there is nothing to
+  // Fail cleanly before any write when there is nothing to
   // lock, mirroring updateQuotePresentationOnly's own precondition above.
   // Without this, persistCurrentQuoteLockArtifacts's no-quote early return
   // (quote: null) let this function carry on writing a lock-lifecycle
@@ -687,7 +687,7 @@ async function updateQuoteLockStatusOnlyInPlace({
   // mutation followed by a 500, instead of a clean rejection.
   const currentArtifacts = await readQuoteArtifacts(jobDir);
   if (!currentArtifacts?.quote) {
-    // DEL-30 (P3-2): the shared 404 helper, not a bare Error (-> 500).
+    // The shared 404 helper, not a bare Error (-> 500).
     throw createJobActionError("quote not generated", 404);
   }
   const finalizedArtifacts = await persistCurrentQuoteLockArtifacts({
@@ -925,7 +925,7 @@ async function persistMilestoneInvoiceState({
   // draft's preview render — a sweep convenience, e.g. previewing every
   // milestone up front right after generating a schedule. It used to ALSO
   // broaden the *explicit* (fail-loud) target set to every milestone; that
-  // was the wrong signal (DEL-30 P2-2). The caller's actual intent is
+  // was the wrong signal. The caller's actual intent is
   // `artifactMilestoneIndex` — every `writeAllArtifacts` entry is implicit
   // regardless, same as the unconditional not-yet-stored sweep below.
   writeAllArtifacts = false,
@@ -946,20 +946,20 @@ async function persistMilestoneInvoiceState({
   let milestoneReceiptArtifact = null;
   // The caller's own request — the milestone it actually acted on. A
   // failure writing this one must fail loudly: this is the explicit
-  // artifact write DEL-30 P2-B's 410 is meant to protect. Everything else
+  // artifact write the 410 for an unrecoverable issued document protects.
+  // Everything else
   // that gets swept in below (including every milestone when
   // `writeAllArtifacts` is set) is opportunistic and must never be able to
-  // abort a mutation the caller did not target (DEL-30 P2-2).
+  // abort a mutation the caller did not target.
   const explicitTargetIndexes = new Set(milestoneInvoice ? [milestoneInvoice.milestoneIndex] : []);
   const artifactTargetsByIndex = new Map(
     milestoneInvoice ? [[milestoneInvoice.milestoneIndex, milestoneInvoice]] : [],
   );
-  // `writeAllArtifacts` requests every milestone's artifact captured this
-  // pass — including a draft's preview render, not only issued ones (e.g.
-  // schedule generation previewing every milestone up front). That is still
-  // a legitimate request; what DEL-30 P2-2 corrects is only that it must
-  // NOT make every milestone an EXPLICIT (fail-loud) target — these stay
-  // implicit regardless, same as the sweep below.
+  // `writeAllArtifacts` requests every milestone's artifact captured this pass
+  // — including a draft's preview render, not only issued ones (e.g. schedule
+  // generation previewing every milestone up front). That is still a legitimate
+  // request, but it must NOT make every milestone an EXPLICIT (fail-loud)
+  // target — these stay implicit regardless, same as the sweep below.
   if (writeAllArtifacts) {
     for (const entry of nextMeta.milestoneInvoices || []) {
       if (!artifactTargetsByIndex.has(entry.milestoneIndex)) {
@@ -979,9 +979,9 @@ async function persistMilestoneInvoiceState({
   }
   const artifactTargets = [...artifactTargetsByIndex.values()];
   // The single unified record of every artifact-state transition this call
-  // produces, applied in one pass below via `transitionArtifactState` — the
-  // one function that owns the actual mutation (DEL-30 round-4 architecture
-  // correction). Replaces three separately hand-rolled maps/patch blocks.
+  // produces, applied in one pass below via `transitionArtifactState` — the one
+  // function that owns the actual mutation. Replaces three separately
+  // hand-rolled maps/patch blocks.
   const artifactTransitionsByIndex = new Map();
   // `applyMilestoneInvoiceCompatFields` above re-normalizes every milestone
   // invoice through `normalizeInvoiceRevision`, which is also where
@@ -1010,14 +1010,14 @@ async function persistMilestoneInvoiceState({
       transition = invoiceArtifact.artifactTransition;
     } catch (err) {
       // Explicit target: the caller acted on this milestone directly — fail
-      // loudly. This is the exact 410 DEL-30 P2-B intends: an unrecoverable
-      // issued artifact must stop the action that targets it.
+      // loudly. An unrecoverable issued artifact answers 410 and must stop the
+      // action that targets it.
       if (isExplicitTarget) throw err;
       // Implicit target: this milestone was swept in opportunistically —
       // "capture any not-yet-stored issued revision while we're here" — not
       // because the caller acted on it. An opportunistic background repair
-      // must never be able to abort an unrelated explicit mutation
-      // (DEL-30 P1-C): leave this revision in its MISSING state, and
+      // must never be able to abort an unrelated explicit mutation:
+      // leave this revision in its MISSING state, and
       // continue persisting the rest of this call.
       transition = err.artifactTransition || {
         pdfPath: entry.pdfPath || null,
@@ -1045,7 +1045,7 @@ async function persistMilestoneInvoiceState({
     // whether the invoice artifact was captured, adopted, reconstructed, or
     // left unrecoverable is a distinct concern from whether a stale receipt
     // PDF needs cleaning up for a no-longer-paid milestone, or a paid one
-    // needs its receipt written (DEL-30 P3-3). The same explicit/implicit
+    // needs its receipt written. The same explicit/implicit
     // policy applies: an I/O failure on an explicit target's receipt still
     // fails loudly; on an implicit one it is swallowed rather than aborting
     // an unrelated mutation.
@@ -1127,17 +1127,16 @@ async function persistMilestoneInvoiceState({
           ts: new Date().toISOString(),
           actor: { kind: "system", label: "Field" },
           title: "Invoice PDF reconstructed",
-          body: `The stored PDF for ${info.invoiceNumber || `milestone ${milestoneIndex + 1}`}${info.revisionNumber ? ` (revision ${info.revisionNumber})` : ""} was missing and has been reconstructed from ${info.quoteVersionInferred ? "the best available quote version — inferred, not necessarily the version it was originally rendered from, because this is a pre-DEL-30 legacy invoice" : "the quote version it was originally issued against"}.`,
+          body: `The stored PDF for ${info.invoiceNumber || `milestone ${milestoneIndex + 1}`}${info.revisionNumber ? ` (revision ${info.revisionNumber})` : ""} was missing and has been reconstructed from ${info.quoteVersionInferred ? "the best available quote version — inferred, not necessarily the version it was originally rendered from, because this is a legacy invoice from before invoice revisions were tracked" : "the quote version it was originally issued against"}.`,
         },
       });
       continue;
     }
     // One event per affected invoice per DEGRADATION, not per sweep attempt
     // that finds it still degraded — a job stays mutable, but a degraded
-    // invoice must be visible rather than merely not-crashing (DEL-30
-    // P1-C). Bounded to the actual state transition (DEL-30 round-4 minor
-    // note): if it was already MISSING before this attempt, it is not a new
-    // fact worth re-announcing on every future mutation.
+    // invoice must be visible rather than merely not-crashing. Bounded to the
+    // actual state transition: if it was already MISSING before this attempt,
+    // it is not a new fact worth re-announcing on every future mutation.
     if (info.toState === ARTIFACT_STATE.MISSING && info.priorState !== ARTIFACT_STATE.MISSING) {
       await appendJobActivity({
         jobDir,
@@ -1167,7 +1166,7 @@ async function persistMilestoneInvoiceState({
   };
 }
 
-// Issued documents (#223): once the generation that issued an invoice
+// Issued documents: once the generation that issued an invoice
 // revision commits, record the revision's stored PDF in PostgreSQL. Queued
 // after the commit so a generation that is thrown away records nothing; run
 // at once when this is not a staged generation. The recorder never throws.
@@ -1383,7 +1382,7 @@ function buildMilestoneInvoiceActivityBody({
  * together; no invoice/receipt helper writes a committed generation before
  * dispatch begins.
  */
-// Quote snapshots (#151). `config.quoteSnapshots` is the snapshot store the
+// Quote snapshots. `config.quoteSnapshots` is the snapshot store the
 // server installs (server/quote-snapshots.js); a caller without one (unit
 // tests driving sendJobQuote directly) records nothing.
 async function readCatalogStateForSnapshot(config) {
@@ -1819,7 +1818,7 @@ export async function sendJobQuote({
     meta,
     documentType,
     requestedVersion: quoteVersion,
-    // DEL-30 defect B: sending is a delivery, not a view. Absent an explicit
+    // Sending is a delivery, not a view. Absent an explicit
     // version, give the customer the latest revision, not the last one they
     // already saw — otherwise a revised quote can never actually be sent.
     intent: "delivery",
@@ -2128,7 +2127,7 @@ async function finalizeAndProjectDelivery({ jobDir, finalization, config = null 
   ));
   await recordSentDeliverySnapshot({ config, finalization, issuance: finalized?.issuance || null });
   await recordDeliveredDocument({ finalization, issuance: finalized?.issuance || null });
-  // Quote rows (#241): the commit above already marked the version sent; now
+  // Quote rows (#6): the commit above already marked the version sent; now
   // that its issued document exists, link it. Never throws.
   if ((finalization.resolvedDocumentType || "quote") === "quote") {
     await quoteRowRecorder().syncJob(jobDir, { reason: "quote sent" });
@@ -2482,7 +2481,7 @@ export async function generateJobMilestones({
   });
   assertMilestoneScheduleMutationAllowed({ meta: resolvedMeta, paymentSchedule });
   const quote = selectedQuoteArtifacts?.quote || await readPersistedQuote(jobDir);
-  // Authoring-time guard (DEL-30 P2-3): this is operator INPUT, not a
+  // Authoring-time guard: this is operator INPUT, not a
   // rebuild — reject a schedule whose fixed dollar amounts already exceed
   // the quote total outright, rather than letting the rebuild pro-rate it
   // silently on the very next touch.
@@ -2542,7 +2541,7 @@ export async function migrateJobMilestoneInvoices({
     throw createJobActionError("target quote version not found", 404);
   }
   const resolvedMigrateTargetVersion = Number(targetArtifacts.quote.version || targetArtifacts.version || 0) || null;
-  // Identical guard to reviseJobMilestoneInvoice (DEL-30 P2-1, round 6):
+  // Identical guard to reviseJobMilestoneInvoice:
   // this writes targetArtifacts.quote straight over root via
   // persistCurrentQuoteLockArtifacts below, with no archive of the
   // displaced content (root artifacts are only ever archived on fork).
@@ -2779,7 +2778,7 @@ export async function migrateJobMilestoneInvoices({
 
 /**
  * Issue an audited revised invoice for a milestone after an approved job
- * change (DEL-30).
+ * change.
  *
  * The sent invoice and its PDF are never touched. The approved quote revision
  * becomes the customer-facing basis, the superseded revision is retained in
@@ -2843,7 +2842,7 @@ export async function reviseJobMilestoneInvoice({
   // If this pin (v2) is stale relative to what actually happened, telling
   // the operator to "pass --version v2" would have them request EXACTLY
   // that archive and overwrite root(v1) with it — irrecoverably, since v1's
-  // own archive no longer exists (round 6 finding). Direct them to promote
+  // own archive no longer exists. Direct them to promote
   // instead of naming a version explicitly.
   const supersededVersion = currentInvoice.issuedRevision?.quoteVersion || null;
   if (supersededVersion && targetVersion && targetVersion < supersededVersion) {
@@ -2861,8 +2860,8 @@ export async function reviseJobMilestoneInvoice({
   // collides with an existing quote-versions/vNNN dir, 409-bricking the
   // next fork. The "newer than current" direction is reachable via
   // promoteQuoteVersion, which can leave an archive dir numbered HIGHER
-  // than the (older) content it promoted back to root (DEL-30 P2-1, round
-  // 6 — the round 5 fix only closed the "older" direction). Reject
+  // than the (older) content it promoted back to root (an earlier fix closed
+  // only the "older" direction). Reject
   // outright; the operator must promote that version to current first if
   // that is genuinely what they want.
   if (targetVersion && currentVersion && targetVersion !== currentVersion) {
@@ -2898,28 +2897,27 @@ export async function reviseJobMilestoneInvoice({
     previous: currentInvoice.issuedRevision,
     next: nextInvoice.issuedRevision,
   });
-  // (Removed, DEL-30 P3-2, round 5: a
+  // (Removed: a
   // `nextInvoice.revisionNumber === currentInvoice.revisionNumber` guard
   // used to sit here. It can never fire — an authorization always retires
   // the current revision and mints max(history)+1 (invoice-revisions.js's
   // resolveMilestoneRevisionState), which is strictly greater than the
-  // revision number being retired, for both native and — since DEL-30 P2-1
-  // fixed legacy synthesis to always populate `active` for any issued
-  // index — legacy invoices too. This is the exact guard that produced the
-  // original P1-B's misleading "the approved values are unchanged" error
+  // revision number being retired, for both native and — since legacy
+  // synthesis was fixed to always populate `active` for any issued
+  // index — legacy invoices too. This is the exact guard that produced a
+  // misleading "the approved values are unchanged" error
   // when legacy synthesis was broken; keeping unreachable code with a
   // misleading message is worse than removing it. The fingerprint check
   // immediately below is the real, correct idempotency gate.)
   // A repeated request lands here: the previous revision already carries the
   // approved values, so no second identical invoice is minted. `currentInvoice.issuedRevision`
-  // is null for a never-synchronized pre-DEL-30 invoice (the legacy
+  // is null for a never-synchronized legacy invoice (the legacy
   // synthesis and this authorization happen in the same buildMilestoneInvoices
   // call above, so `currentInvoice` — read before that call — still reflects
   // the raw stored record with no issuedRevision at all). That does NOT mean
-  // there is nothing for such a request to already match, though (DEL-30
-  // P3-2, round 6 — corrects a round-5 comment that claimed otherwise):
+  // there is nothing for such a request to already match, though:
   // legacy synthesis inside buildMilestoneInvoices fabricates a snapshot of
-  // the invoice's pre-DEL-30 stored content and immediately retires it as
+  // the invoice's legacy stored content and immediately retires it as
   // part of this same authorized mint (resolveMilestoneRevisionState always
   // mints under an explicit authorization, never silently restores). That
   // retired snapshot is exactly the entry `nextInvoice.issuedRevision.supersedesRevisionNumber`
@@ -2999,7 +2997,7 @@ export async function reviseJobMilestoneInvoice({
           // A legacy-synthesized predecessor's quote version is pinned to
           // whatever was live at rebuild time, not a historically-accurate
           // record of what the customer's document actually reflected — say
-          // so rather than presenting it as known (DEL-30 P3-1).
+          // so rather than presenting it as known.
           ? `quote v${change.supersededQuoteVersion || "?"}${change.supersededQuoteVersionInferred ? " (inferred)" : ""} → v${change.quoteVersion || "?"}`
           : null,
         `Reason: ${revisionReason}`,

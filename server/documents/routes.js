@@ -1,4 +1,4 @@
-// Issued documents by uid (#223).
+// Issued documents by uid.
 //
 //   GET /api/documents/:uid/pdf   the exact bytes that were issued
 //   GET /api/jobs/:id/documents   a job's issued documents and their events

@@ -1,5 +1,5 @@
 // The totals printed on an issued quote, read back from what the customer was
-// sent (#241): the PDF itself, or the quote markdown stored with the
+// sent (#6): the PDF itself, or the quote markdown stored with the
 // delivery. Used by the backfill to check that quote rows equal the sent
 // document to the cent.
 //

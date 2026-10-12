@@ -1,4 +1,4 @@
-// Code retirement step 4 (#178): pricing configuration names items by uid,
+// Code retirement step 4: pricing configuration names items by uid,
 // with the legacy code as the fallback; health reports what resolved how.
 import assert from "node:assert/strict";
 import test from "node:test";

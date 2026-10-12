@@ -1,9 +1,9 @@
-// Dual-write of quote rows (#241), the way #230's issued-document recorder
-// works: the job files stay the source of truth, and everything here runs
-// after today's code has committed its own change and never changes it. A
-// failure is logged, counted and shown in GET /api/storage/status
-// (`quoteRows`), and never thrown back to the caller. Without a database the
-// recorder skips with one log line.
+// Dual-write of quote rows (#6), the way the issued-document recorder
+// (server/documents/recorder.js) works: the job files stay the source of truth,
+// and everything here runs after today's code has committed its own change and
+// never changes it. A failure is logged, counted and shown in GET
+// /api/storage/status (`quoteRows`), and never thrown back to the caller.
+// Without a database the recorder skips with one log line.
 //
 // When it runs: after every committed job generation (server/job-generation.js
 // calls the listener the server installs), which covers every way today's

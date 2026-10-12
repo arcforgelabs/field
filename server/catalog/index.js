@@ -1,4 +1,4 @@
-// Field's price catalogue on PostgreSQL (#148). See server/catalog/README.md.
+// Field's price catalogue on PostgreSQL. See server/catalog/README.md.
 import { getDb } from "../db-runtime/index.js";
 import { DEFAULT_ORG_UID } from "../db-runtime/tenancy.js";
 import { bumpCatalogVersion, deleteCatalogContents, ensureCatalogReferenceData, lockCatalogForWrite } from "./reference-data.js";

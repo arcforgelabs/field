@@ -66,7 +66,7 @@ export function convertQuantity(state, quantity, fromUnit, toUnit, { itemUid = n
   return value * factor;
 }
 
-// pricing_basis (DEL-46) is stored as an item conversion: per_tonne is
+// pricing_basis is stored as an item conversion: per_tonne is
 // 1 m3 = <density> tonne, per_load is 1 load = <capacity> m3, per_m3 needs none.
 export const PRICING_BASIS_CONVERSIONS = Object.freeze({
   per_tonne: Object.freeze({ fromUnit: "m3", toUnit: "tonne" }),

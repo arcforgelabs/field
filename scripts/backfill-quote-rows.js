@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copy every job's quote versions into quote rows (#241,
+// Copy every job's quote versions into quote rows (#6,
 // server/quotes/backfill.js), verifying each version first: its rows' totals
 // equal what Field shows, to the cent, and a sent version's equal the totals
 // on the PDF the customer was sent. A job with any mismatch is reported with

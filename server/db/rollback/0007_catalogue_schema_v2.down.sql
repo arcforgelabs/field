@@ -1,4 +1,4 @@
--- Reverses migration 0007_catalogue_schema_v2 (#178 phase 1) for an
+-- Reverses migration 0007_catalogue_schema_v2 (pricing engine phase 1) for an
 -- emergency rollback to a release from before it. Run as the database owner,
 -- in ONE transaction, after stopping the app:
 --

@@ -2,7 +2,7 @@
 
 Additive DB-first scaffold for `apps/field`. This lane does not change the live runtime contract, live API routes, or the current shipped Field UX baseline work.
 
-## DEL-75 Drizzle toolchain
+## Drizzle toolchain
 
 The typed Drizzle source lives in `src/` and targets PostgreSQL. The generated
 ESM output is written to `dist/` (ignored in source control and copied into
@@ -126,7 +126,7 @@ errors give the variable name and the driver's cause (for example
 ### Durable storage tables
 
 `0001_durable_storage` adds the tables behind `FIELD_STORAGE=postgres`
-(`server/storage/durable-store.js`, #139): `field_blobs(sha256, bytes)` holds
+(`server/storage/durable-store.js`): `field_blobs(sha256, bytes)` holds
 file contents once per distinct content, `field_files(path, sha256, size,
 mode, mtime)` one row per mirrored file of the data directory, and
 `field_sqlite_images(name, version, sha256, bytes, created_at)` whole-database
@@ -138,7 +138,7 @@ them; every storage transaction checks it still holds the lock.
 
 ### Tenancy and row-level security
 
-`0005_tenancy` (#178 phase 0b; design in `docs/PRICING_ENGINE.md` "Tenancy")
+`0005_tenancy` (pricing engine phase 0b; design in `docs/PRICING_ENGINE.md` "Tenancy")
 makes the database multi-organisation. `organizations` is the directory
 (the default organisation, slug `embark`, is `schema.DEFAULT_ORG_UID`, and every
 earlier row was backfilled into it). `users` is the person; their role and
@@ -199,7 +199,7 @@ re-applies afterwards.
 
 ### Item code aliases
 
-`0006_item_code_aliases` (#178 step 2) records every item code as an alias
+`0006_item_code_aliases` (code retirement step 2) records every item code as an alias
 of its item (`item_code_aliases`: org, code, item uid; unique per
 organisation on `lower(code)`), backfilled one organisation at a time.
 Two triggers on `items` keep it complete: `items_code_alias_insert` records a
@@ -212,7 +212,7 @@ result matches a database migrated only to 0005. Roll 0006 back before 0005.
 
 ### Catalogue schema v2 (part one)
 
-`0007_catalogue_schema_v2` (#178 phase 1) is hand-written, because
+`0007_catalogue_schema_v2` (pricing engine phase 1) is hand-written, because
 drizzle-kit would drop and re-create a renamed table: it renames
 `item_components` to `kit_components` (`kit_uid`, `component_uid`, with
 every index, constraint, sequence and policy renamed to match; rows, grants
@@ -239,7 +239,7 @@ before 0007).
 
 ### Issued documents
 
-`0009_issued_documents` (#223; design in `docs/PRICING_ENGINE.md`
+`0009_issued_documents` (design in `docs/PRICING_ENGINE.md`
 "`document_events` and `issued_documents`") adds four tenant tables:
 `document_blobs` (PDF bytes once per organisation by SHA-256, hash checked by
 a `CHECK`), `issued_documents` (one immutable row per issued document,
@@ -257,7 +257,7 @@ one applied.
 
 ### Quote rows
 
-`0010_quote_rows` (#241; design in `docs/PRICING_ENGINE.md` "Quotes and
+`0010_quote_rows` (#6; design in `docs/PRICING_ENGINE.md` "Quotes and
 invoices") adds three tenant tables: `quotes` (one row per quote version,
 `qte_…`, unique per job and version, linked to the issued document it was
 sent as), `quote_sections` (`qsc_…`) and `quote_lines` (`qln_…`). Totals
@@ -274,7 +274,7 @@ them; nothing in the app reads them yet.
 rows after 0010 is applied again, since the job files still hold every
 quote); run it before 0009's.
 
-`0011_quote_row_display` (#245) adds what the documents print besides money
+`0011_quote_row_display` (#10) adds what the documents print besides money
 to `quote_lines` and `quote_sections`: excluded from the price, amount hidden
 or blank, collapsed, row style and notes, and on lines `row_kind`,
 `display_unit_sell` and `line_cost`. Every column has a default or is
@@ -283,7 +283,7 @@ drops them (the rows and their money stay); run it before 0010's.
 
 ### The R2 replica record
 
-`0012_document_replicas` (#240; `docs/REPLIT.md` "Issued documents in R2")
+`0012_document_replicas` (#12; `docs/REPLIT.md` "Issued documents in R2")
 adds `document_blob_replicas`, one row per `document_blobs` blob the R2
 replicator has tried: `r2_replicated_at`, `attempts`, `last_attempt_at`,
 `next_attempt_at` (backoff) and `last_error`, a short code (a `CHECK` allows

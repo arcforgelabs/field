@@ -255,7 +255,7 @@ test("buildMilestoneInvoices supports fixed total milestones for carried-forward
   assert.equal(result.paymentSchedule.milestones[0].fixedTotal, 25);
 });
 
-test("a mixed percentage/fixed schedule rebalances the open milestones correctly around a frozen invoice (DEL-30 F1)", () => {
+test("a mixed percentage/fixed schedule rebalances the open milestones correctly around a frozen invoice", () => {
   // Schedule: [50%, fixed $5000, 50%]. Milestone 1 (index 0) is already
   // issued and frozen at $2,500 — an amount unrelated to its 50% share,
   // exactly as a real frozen invoice is. An approved variation brings the
@@ -379,7 +379,7 @@ test("buildMilestoneInvoices proportionally scales customer-facing line items", 
   assert.equal(result.milestoneInvoices[0].total, 55);
 });
 
-// DEL-30 P3-3 (round 5): a frozen invoice's own historical subtotal/GST
+// A frozen invoice's own historical subtotal/GST
 // split can drift from what the CURRENT quote's aggregate split implies —
 // even while its TOTAL still fits inside the quote total — e.g. a later
 // quote edit changed which lines carry GST. The remainingTotalCents<=0
@@ -389,7 +389,7 @@ test("buildMilestoneInvoices proportionally scales customer-facing line items", 
 // open milestone's subtotal to $0 and stamp its entire claim as GST — a
 // wrong tax split on a customer-facing invoice even though the money total
 // still reconciled.
-test("the rebalance derives a coherent subtotal/GST split for the open milestone instead of collapsing it to 100% GST when a frozen invoice's historical subtotal exceeds the quote subtotal (DEL-30 P3-3)", () => {
+test("the rebalance derives a coherent subtotal/GST split for the open milestone instead of collapsing it to 100% GST when a frozen invoice's historical subtotal exceeds the quote subtotal", () => {
   const quote = createQuoteFixture(); // subtotal 100, gst 10, total 110
   const existingMilestoneInvoices = [{
     milestoneIndex: 0,
@@ -523,7 +523,7 @@ test("milestone payment recording enforces status progression and caps overpayme
   assert.equal(finalPayment.milestoneInvoice.paidAt, "2026-04-22");
 });
 
-test("a recorded payment defaults to the invoice number and revision number it was paid against (DEL-30 F5)", () => {
+test("a recorded payment defaults to the invoice number and revision number it was paid against", () => {
   const quote = createQuoteFixture();
   const generated = buildMilestoneInvoices({
     meta: { id: "job-payment-source-1", pipelineStage: "landed" },
@@ -977,10 +977,10 @@ test("stored issued invoices normalize back to their frozen revision", () => {
   assert.deepEqual(drifted.lineItems.map((item) => item.description), ["Retaining wall", "Drainage"]);
 });
 
-test("an authorized revision on a pre-DEL-30 legacy invoice synthesizes a legacy revision to retire, instead of a dead-end (DEL-30 P1-B)", () => {
+test("an authorized revision on a legacy invoice synthesizes a legacy revision to retire, instead of a dead-end", () => {
   const meta = { id: "job-legacy-revise", pipelineStage: "landed", quoteNumber: "EQ-0041" };
-  // A pre-DEL-30 stored record: issued, but it never froze an `issuedRevision`
-  // snapshot because that mechanism did not exist yet.
+  // A stored record from before invoice revisions: issued, but it never froze
+  // an `issuedRevision` snapshot because that mechanism did not exist yet.
   const legacyExisting = [{
     milestoneIndex: 0,
     milestoneLabel: "Deposit",
@@ -1031,7 +1031,7 @@ test("an authorized revision on a pre-DEL-30 legacy invoice synthesizes a legacy
   assert.equal(superseded.pdfPath, "milestone-invoices/EI-LEG-01-M1.pdf");
 });
 
-// DEL-30 P2-1 (round 5): the ADOPT_PENDING state must land on the revision
+// The ADOPT_PENDING state must land on the revision
 // it actually describes. Under an authorization, the synthesized legacy
 // revision is RETIRED into history and a fresh revision is MINTED in its
 // place — a post-hoc stamp keyed only on "did this milestone index
@@ -1039,7 +1039,7 @@ test("an authorized revision on a pre-DEL-30 legacy invoice synthesizes a legacy
 // (wrong: it has no prior file and must render fresh, not be routed
 // through adopt-or-reconstruct) and leave the retired copy state-less
 // (wrong: it loses write-path immutability protection).
-test("an authorized revision on a never-synchronized legacy invoice mints UNWRITTEN and retires ADOPT_PENDING into history (DEL-30 P2-1)", () => {
+test("an authorized revision on a never-synchronized legacy invoice mints UNWRITTEN and retires ADOPT_PENDING into history", () => {
   const meta = { id: "job-legacy-revise-artifact-state", pipelineStage: "landed", quoteNumber: "EQ-0041" };
   const legacyExisting = [{
     milestoneIndex: 0,
@@ -1056,7 +1056,7 @@ test("an authorized revision on a never-synchronized legacy invoice mints UNWRIT
     pdfPath: "milestone-invoices/EI-LEG-AS-01-M1.pdf",
   }];
 
-  // This is the FIRST DEL-30-era touch of this invoice — the legacy
+  // This is the first revision-tracking touch of this invoice — the legacy
   // synthesis and the authorization both happen in this single
   // buildMilestoneInvoices call (reviseJobMilestoneInvoice does not
   // synchronize first).
@@ -1088,12 +1088,12 @@ test("an authorized revision on a never-synchronized legacy invoice mints UNWRIT
   // The retired legacy copy carries ADOPT_PENDING into history, so it stays
   // protected by the write path's path-scoped immutability guard
   // (`historicalMatch` requires a state other than UNWRITTEN) even though
-  // it was never touched by a DEL-30-era write before being superseded.
+  // it was never touched by a revision-tracking write before being superseded.
   assert.equal(superseded.artifactState, ARTIFACT_STATE.ADOPT_PENDING);
   assert.equal(superseded.pdfPath, "milestone-invoices/EI-LEG-AS-01-M1.pdf");
 });
 
-test("legacy synthesis threads the rebuild's quote version so an unsend immediately followed by a re-issue restores instead of minting (DEL-30 P3-2)", () => {
+test("legacy synthesis threads the rebuild's quote version so an unsend immediately followed by a re-issue restores instead of minting", () => {
   const meta = { id: "job-legacy-fingerprint", pipelineStage: "landed", quoteNumber: "EQ-0041", quoteVersion: 1 };
   const quote = createQuoteFixture();
   const legacyExisting = [{
@@ -1170,7 +1170,7 @@ function createReducedQuoteFixture(subtotal) {
   };
 }
 
-test("buildMilestoneInvoices splits a fixed-schedule shortfall proportionally instead of throwing on a rebuild path, with no frozen invoices (DEL-30 P2-A)", () => {
+test("buildMilestoneInvoices splits a fixed-schedule shortfall proportionally instead of throwing on a rebuild path, with no frozen invoices", () => {
   const quote = createReducedQuoteFixture(500);
   // Two fixed-claim milestones summing to $1,000 — more than the reduced
   // $550 quote total. A rebuild must never throw; it is not the place to
@@ -1196,7 +1196,7 @@ test("buildMilestoneInvoices splits a fixed-schedule shortfall proportionally in
   );
 });
 
-test("buildMilestoneInvoices zeroes open milestones instead of throwing when a frozen invoice alone exceeds the reduced quote total (DEL-30 P2-A)", () => {
+test("buildMilestoneInvoices zeroes open milestones instead of throwing when a frozen invoice alone exceeds the reduced quote total", () => {
   const quote = createReducedQuoteFixture(500);
   const existingMilestoneInvoices = [{
     milestoneIndex: 0,
@@ -1243,7 +1243,7 @@ test("buildMilestoneInvoices zeroes open milestones instead of throwing when a f
   assert.equal(result.milestoneInvoices[1].status, "draft");
 });
 
-test("buildMilestoneInvoices proportionally splits open fixed milestones around a frozen invoice when the remainder is still positive (DEL-30 P2-A)", () => {
+test("buildMilestoneInvoices proportionally splits open fixed milestones around a frozen invoice when the remainder is still positive", () => {
   const quote = createReducedQuoteFixture(500);
   const existingMilestoneInvoices = [{
     milestoneIndex: 0,
@@ -1294,7 +1294,7 @@ test("buildMilestoneInvoices proportionally splits open fixed milestones around 
   );
 });
 
-test("deriveMilestoneStatus (via normalizeStoredMilestoneInvoices) preserves a stored paid status at zero total without fabricating one (DEL-30 P3-3)", () => {
+test("deriveMilestoneStatus (via normalizeStoredMilestoneInvoices) preserves a stored paid status at zero total without fabricating one", () => {
   // A fully-carried migrated milestone: total dropped to zero, but it was
   // already stored as paid — that is real data, not something a rebuild is
   // inventing.
@@ -1311,7 +1311,7 @@ test("deriveMilestoneStatus (via normalizeStoredMilestoneInvoices) preserves a s
   assert.equal(storedPaidAtZero.status, "paid");
   assert.equal(storedPaidAtZero.total, 0);
 
-  // The round-1 F2 fabrication guard must still bind: an open milestone
+  // The guard against fabricating a money document must still bind: an open milestone
   // rebalanced to zero with no stored paid status of its own must stay
   // draft, never "paid".
   const rebalancedOpenAtZero = normalizeStoredMilestoneInvoices([{

@@ -1,6 +1,6 @@
 // Catalogue health: data problems the operator should fix, reported without
 // changing any data. The checks from the SQLite catalogue are kept (same keys
-// and shapes) and joined by the ones #148 asks for: items the quote rules or
+// and shapes) and joined by the price book's own: items the quote rules or
 // the wall engine reference that do not exist or are archived, archived items
 // still in use, active items sharing a name at different prices, `-copy`
 // codes, and unit problems.
@@ -99,7 +99,7 @@ export function buildCatalogHealthReport(state, { catalogId = DEFAULT_QUOTE_CATA
     .sort(byName);
 
   // References from pricing code to items: by uid where the configuration
-  // declares one, else by legacy code (#178 step 4). Grouped by the item they
+  // declares one, else by legacy code (code retirement step 4). Grouped by the item they
   // resolve to; an unresolved one by what it named.
   const referenceMap = new Map();
   const conflictRows = [];

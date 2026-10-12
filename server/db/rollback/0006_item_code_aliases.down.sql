@@ -1,4 +1,4 @@
--- Reverses migration 0006_item_code_aliases (#178 step 2) for an emergency
+-- Reverses migration 0006_item_code_aliases (code retirement step 2) for an emergency
 -- rollback to a release from before it. Run as the database owner, in ONE
 -- transaction, after stopping the app:
 --

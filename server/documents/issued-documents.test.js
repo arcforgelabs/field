@@ -1,4 +1,4 @@
-// Issued documents (#223): the tables' tenancy and immutability, and the issue
+// Issued documents: the tables' tenancy and immutability, and the issue
 // service's idempotency, transactionality and hash checks.
 import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

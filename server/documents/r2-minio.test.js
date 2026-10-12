@@ -1,4 +1,4 @@
-// The R2 replica (#240) against a real S3 server with a LOCKED bucket: a
+// The R2 replica (#12) against a real S3 server with a LOCKED bucket: a
 // local MinIO container with object locking and a default COMPLIANCE
 // retention (server/documents/test-minio.js), standing in for the production
 // R2 bucket and its bucket lock. Off unless FIELD_R2_TEST_DOCKER=1.

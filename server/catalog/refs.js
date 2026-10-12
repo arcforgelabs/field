@@ -1,4 +1,4 @@
-// How pricing configuration names a catalogue item (#178 code retirement
+// How pricing configuration names a catalogue item (code retirement
 // step 4): by uid, with the item's legacy code beside it as a fallback.
 // Quote-catalog rules (`authorityItemUid`), recipe components (`itemUid`),
 // quantity-rule outputs (`outputItemUid`) and the wall rate card

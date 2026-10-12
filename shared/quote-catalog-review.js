@@ -1,5 +1,5 @@
 /**
- * The state of a quote row that a "catalogue changed" check reviewed (#148).
+ * The state of a quote row that a "catalogue changed" check reviewed.
  *
  * The server's diff (server/quote-catalog-sync.js) gives each listed row a
  * `reviewKey`: a fingerprint of the row as the check saw it, and of the rows

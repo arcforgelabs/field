@@ -1,4 +1,4 @@
-// Quote reads from rows (#245): the schedule and totals printed from rows
+// Quote reads from rows (#10): the schedule and totals printed from rows
 // equal the renderer's, the quote PDF rendered from rows is byte-identical to
 // the PDF rendered from the files, the database is read when its rows are
 // current, and FIELD_QUOTE_READS=files switches back to the files.

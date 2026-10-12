@@ -1,6 +1,6 @@
 // The price-catalogue item behind a disposal rule is the single source of
-// truth for converting measured volume into that item's own billing unit
-// (DEL-46). This is the one place that conversion arithmetic lives —
+// truth for converting measured volume into that item's own billing unit.
+// This is the one place that conversion arithmetic lives —
 // server/quote-quantity-rules.js (the live quote engine) and
 // server/catalog/rollup.js and legacy-import.js (the catalogue's own price
 // build-up) both delegate

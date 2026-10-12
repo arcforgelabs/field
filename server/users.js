@@ -95,7 +95,7 @@ async function persist() {
   await flushDurableStorageQuietly({ reason: "users" });
 }
 
-// `id` is honoured only when the email is new: Clerk sign-in (#149) creates a
+// `id` is honoured only when the email is new: Clerk sign-in creates a
 // person's token-holding record under their PostgreSQL user id, so tokens stay
 // bound to that id.
 export async function ensureUser({ id, email, password, name, role, kind }) {

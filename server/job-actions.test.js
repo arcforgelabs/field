@@ -404,7 +404,7 @@ test("presentation-only organizer updates do not require quote inputs once a quo
   }
 });
 
-test("DEL-30: a lockStatus-only patch flips delivery state without touching version, totals, or line items", async () => {
+test("a lockStatus-only patch flips delivery state without touching version, totals, or line items", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-lock-only-"));
 
   try {
@@ -423,7 +423,7 @@ test("DEL-30: a lockStatus-only patch flips delivery state without touching vers
     await writeFile(join(jobDir, "meta.json"), JSON.stringify(meta, null, 2));
     await writeFile(join(jobDir, "quote.json"), JSON.stringify(quote, null, 2));
     // Deliberately no transcript.json / quote-inputs.json: if a lock-only
-    // patch fell through to buildAndPersistQuote (the DEL-30 P0-1 defect),
+    // patch fell through to buildAndPersistQuote (an earlier defect),
     // this call would throw "quote inputs not generated" instead of
     // completing via persistCurrentQuoteLockArtifacts.
 
@@ -467,7 +467,7 @@ test("DEL-30: a lockStatus-only patch flips delivery state without touching vers
   }
 });
 
-test("DEL-30: a patch mixing lockStatus with a real line item edit still takes the rebuild path", async () => {
+test("a patch mixing lockStatus with a real line item edit still takes the rebuild path", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-lock-mixed-"));
 
   try {
@@ -508,7 +508,7 @@ test("DEL-30: a patch mixing lockStatus with a real line item edit still takes t
   }
 });
 
-test("DEL-30 (P2-2): unlocking a sent quote forks a new draft version instead of mutating the sent version in place", async () => {
+test("unlocking a sent quote forks a new draft version instead of mutating the sent version in place", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-unlock-sent-"));
 
   try {
@@ -588,7 +588,7 @@ test("DEL-30 (P2-2): unlocking a sent quote forks a new draft version instead of
     assert.equal(initial.quote.version, 1);
 
     // Lock to final while still a draft/never-sent job: this is the
-    // non-forking fast path (P0-1) and stays at version 1.
+    // non-forking fast path and stays at version 1.
     const locked = await updateJobQuote({
       jobDir,
       meta: initial.meta,
@@ -633,7 +633,7 @@ test("DEL-30 (P2-2): unlocking a sent quote forks a new draft version instead of
   }
 });
 
-test("DEL-30 (P3-1): a lock-only patch against a job with no quote fails cleanly and writes nothing", async () => {
+test("a lock-only patch against a job with no quote fails cleanly and writes nothing", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-lock-no-quote-"));
 
   try {
@@ -653,7 +653,7 @@ test("DEL-30 (P3-1): a lock-only patch against a job with no quote fails cleanly
     // updateQuotePresentationOnly's own "quote not generated" precondition,
     // rather than persisting a lock-lifecycle record and activity entry for
     // a quote that does not exist and then crashing the caller on a null
-    // quote. DEL-30 (P3-2): and it must be a 404, via the shared
+    // quote. And it must be a 404, via the shared
     // createJobActionError helper, not a bare Error surfacing as a 500.
 
     await assert.rejects(
@@ -680,7 +680,7 @@ test("DEL-30 (P3-1): a lock-only patch against a job with no quote fails cleanly
   }
 });
 
-test("DEL-30 (P3-2): a presentation-only patch against a job with no quote is a clean 404, not a 500", async () => {
+test("a presentation-only patch against a job with no quote is a clean 404, not a 500", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-presentation-no-quote-"));
 
   try {
@@ -1111,11 +1111,11 @@ test("sendJobQuote sends an invoice for landed jobs and preserves landed status"
   }
 });
 
-// DEL-30 P2-2 (round 5): the milestone-state mint/authorise/payment persist
+// The milestone-state mint/authorise/payment persist
 // happens BEFORE the email network call inside sendJobQuote. A send whose
 // network call fails (a bounded timeout firing is exactly this, from the
-// caller's perspective — GMAIL_SEND_TIMEOUT_MS is what keeps the round-4
-// P2-4 mutation lock from being stolen mid-send) must leave that
+// caller's perspective — GMAIL_SEND_TIMEOUT_MS is what keeps the
+// job mutation lock from being stolen mid-send) must leave that
 // already-persisted state exactly as it was, with none of the POST-send
 // steps (activity, invoiceSentAt, quote lock) having run — so a retry
 // re-sends the identical, already-stored, already-issued document rather
@@ -1215,7 +1215,7 @@ test("a failed email send leaves the pre-send persisted invoice state intact and
 });
 
 test("GMAIL_SEND_TIMEOUT_MS is comfortably under the job-mutation guard's stale-lock threshold", () => {
-  // The bound only closes the P2-4 race if it is guaranteed to fire well
+  // The bound only closes the stolen-lock race if it is guaranteed to fire well
   // before a competing mutation could steal the lock — "comfortably under"
   // per the finding, not merely numerically less than.
   assert.ok(GMAIL_SEND_TIMEOUT_MS < 60_000, "expected the Gmail send timeout to leave a wide safety margin under the 120s stale-lock threshold");
@@ -1466,7 +1466,7 @@ test("generateJobMilestones stores a custom split payment schedule", async () =>
   }
 });
 
-// DEL-30 P2-3: `buildMilestoneInvoices` (the rebuild path) now always
+// `buildMilestoneInvoices` (the rebuild path) now always
 // allows a shortfall rather than throwing, which left no seam that actually
 // rejected an operator-typed schedule whose fixed dollar amounts already
 // exceed the quote total — it would silently pro-rate instead. This is the
@@ -1874,7 +1874,7 @@ test("updateJobQuote rejects changing a locked milestone percentage", async () =
   }
 });
 
-// DEL-30 P2-3: the same authoring-time guard applies when a payment
+// The same authoring-time guard applies when a payment
 // schedule arrives through a quote-update patch, not just through explicit
 // milestone generation.
 test("updateJobQuote rejects a payment schedule patch whose fixed amounts exceed the quote total", async () => {
@@ -2340,7 +2340,7 @@ test("migrateJobMilestoneInvoices freezes a newly carried deposit at its full am
   }
 });
 
-// DEL-30 P2-1 (round 6): migrateJobMilestoneInvoices had NO version-
+// migrateJobMilestoneInvoices had NO version-
 // direction guard at all — it writes targetArtifacts.quote straight over
 // root via persistCurrentQuoteLockArtifacts with no archive of the
 // displaced content, in EITHER direction. Identical fix to revise's.
@@ -3073,7 +3073,7 @@ test("sendJobQuote keeps a timeout outcome unknown and reconciles the stable del
   }
 });
 
-test("DEL-30 defect B: sendJobQuote with no explicit version sends the latest revision and advances past the locked customer-seen version", async () => {
+test("sendJobQuote with no explicit version sends the latest revision and advances past the locked customer-seen version", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-resend-locked-"));
 
   try {
@@ -3275,7 +3275,7 @@ test("sendJobQuote can explicitly resend a historical locked version without dis
   }
 });
 
-test("DEL-30 defect B follow-up: sending a revised quote on a landed job delivers the latest revision without un-landing the job", async () => {
+test("sending a revised quote on a landed job delivers the latest revision without un-landing the job", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-resend-landed-"));
 
   try {
@@ -3421,7 +3421,7 @@ test("DEL-30 defect B follow-up: sending a revised quote on a landed job deliver
   }
 });
 
-// DEL-30: this is a CHARACTERISATION test, not a regression test — it pins
+// This is a CHARACTERISATION test, not a regression test — it pins
 // a deliberate policy decision, not a bug fix. Sending a revised quote must
 // NOT un-land a landed job (see the test above and the comment at
 // job-actions.js:1466), but a lost job is the mirror case: nothing gates on
@@ -3433,7 +3433,7 @@ test("DEL-30 defect B follow-up: sending a revised quote on a landed job deliver
 // stop that. It passes both before and after commit 6ece746, because
 // lost -> sent on send is unchanged, pre-existing behaviour; do not delete
 // it as redundant, and do not "fix" it to preserve "lost".
-test("DEL-30 (deliberate, not a regression): sending a revised quote on a LOST job moves it back to sent, unlike landed", async () => {
+test("sending a revised quote on a LOST job moves it back to sent, unlike landed (deliberate, not a regression)", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-resend-lost-"));
 
   try {
@@ -3964,11 +3964,11 @@ test("paid milestone invoices write receipt artifacts and markJobMilestoneUnpaid
   }
 });
 
-// DEL-30 P3-3: the same explicit/implicit failure isolation that protects
-// invoice artifact writes (DEL-30 P1-C) must also cover receipt writes — an
+// The same explicit/implicit failure isolation that protects
+// invoice artifact writes must also cover receipt writes — an
 // I/O failure on an UNRELATED (implicit) milestone's receipt must not abort
 // the whole mutation either.
-test("an I/O failure writing one milestone's receipt does not abort a mutation that also touches other milestones (DEL-30 P3-3)", async () => {
+test("an I/O failure writing one milestone's receipt does not abort a mutation that also touches other milestones", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-receipt-isolation-"));
 
   try {
@@ -4481,7 +4481,7 @@ test("reviseJobMilestoneInvoice refuses unsafe revisions", async () => {
   }
 });
 
-// DEL-30 P1 (round 5): reviseJobMilestoneInvoice only rejected a version
+// reviseJobMilestoneInvoice only rejected a version
 // older than the invoice's OWN pin — a version older than the CURRENT root
 // but at or above that pin was accepted, then written straight over root
 // with no archive of the displaced content (root artifacts are only ever
@@ -4547,13 +4547,13 @@ test("reviseJobMilestoneInvoice rejects a quote version older than the current r
   }
 });
 
-// DEL-30 P2-1 (round 6): the round-5 fix only rejected a target OLDER than
+// An earlier fix only rejected a target OLDER than
 // the current root. `promoteQuoteVersion` archives the DISPLACED root at
 // its own number and REMOVES the promoted target's archive dir — so
 // promoting an older version back to current can leave an archive dir
 // numbered HIGHER than root (e.g. root v2 with quote-versions/v003
 // present, after forking to v3 and then promoting v2 back down). Naming
-// that archived version in a revise passed both round-5 guards and wrote
+// that archived version in a revise passed both of those guards and wrote
 // it straight over root with no archive of the displaced content.
 test("reviseJobMilestoneInvoice rejects a quote version NEWER than the current root and leaves root and archives untouched", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-revise-newer-than-root-"));
@@ -4678,10 +4678,10 @@ test("reviseJobMilestoneInvoice still rejects a version older than the invoice's
       }),
       (err) => {
         assert.equal(err.statusCode, 409);
-        // Reworded (DEL-30 P2-1, round 6): the old wording ("older than the
+        // Reworded: the old wording ("older than the
         // revision this invoice was issued against (v2)") read as an
         // instruction to pass `--version v2` — which, in the
-        // promote-back-down scenario the round-6 finding describes, is
+        // promote-back-down scenario described above, is
         // exactly the destructive request. The new message points the
         // operator at "promote" and explicitly warns against requesting the
         // pinned version directly.
@@ -4764,7 +4764,7 @@ test("an issued milestone invoice's PDF is captured even when the persisting cal
   }
 });
 
-test("a quote reduced below the frozen claim produces no minted revision, no paid status, and no artifacts for the open milestone (DEL-30 F2)", async () => {
+test("a quote reduced below the frozen claim produces no minted revision, no paid status, and no artifacts for the open milestone", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-overclaim-"));
 
   try {
@@ -4865,7 +4865,7 @@ test("a quote reduced below the frozen claim produces no minted revision, no pai
   }
 });
 
-test("a stored legacy issued invoice with no issuedRevision keeps its stored total, line items and PDF bytes when rebuilt against a changed quote (DEL-30 F3)", async () => {
+test("a stored legacy issued invoice with no issuedRevision keeps its stored total, line items and PDF bytes when rebuilt against a changed quote", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-legacy-freeze-"));
 
   try {
@@ -4888,8 +4888,9 @@ test("a stored legacy issued invoice with no issuedRevision keeps its stored tot
     await writeFile(join(jobDir, "meta.json"), JSON.stringify(meta, null, 2));
     await writeFile(join(jobDir, "quote.json"), JSON.stringify(quote, null, 2));
 
-    // A pre-DEL-30 stored record: issued, but never froze a snapshot and
-    // never stamped pdfIssuedAt (that mechanism did not exist yet).
+    // A stored record from before invoice revisions: issued, but never froze a
+    // snapshot and never stamped pdfIssuedAt (that mechanism did not exist
+    // yet).
     const legacyLineItems = [
       { description: "Scope item", quantity: 1, unit: "lot", unitPrice: 200, totalPrice: 200 },
     ];
@@ -4955,8 +4956,8 @@ test("a stored legacy issued invoice with no issuedRevision keeps its stored tot
   }
 });
 
-// DEL-30 P2-1 (round 5): reviseJobMilestoneInvoice does not synchronize
-// first, so on a never-synchronized pre-DEL-30 invoice the legacy synthesis
+// reviseJobMilestoneInvoice does not synchronize
+// first, so on a never-synchronized legacy invoice the legacy synthesis
 // and the authorization happen in the SAME buildMilestoneInvoices call.
 // Before the fix, the post-hoc ADOPT_PENDING stamp landed on the freshly
 // MINTED revision (which has no prior file) instead of the retired legacy
@@ -4986,7 +4987,8 @@ test("the first revise of a never-synchronized legacy invoice emits no false rec
     await writeFile(join(jobDir, "meta.json"), JSON.stringify(meta, null, 2));
     await writeFile(join(jobDir, "quote.json"), JSON.stringify(quote, null, 2));
 
-    // A pre-DEL-30 stored record with its real, genuinely-sent PDF on disk.
+    // A stored record from before invoice revisions with its real,
+    // genuinely-sent PDF on disk.
     const legacyLineItems = [
       { description: "Scope item", quantity: 1, unit: "lot", unitPrice: 200, totalPrice: 200 },
     ];
@@ -5012,7 +5014,7 @@ test("the first revise of a never-synchronized legacy invoice emits no false rec
     await writeFile(legacyPdfPath, legacyPdfBytes);
 
     // An approved variation lands as the new current quote — this job was
-    // NEVER touched by any DEL-30-era action before this revise.
+    // NEVER touched by any revision-tracking action before this revise.
     const variation = {
       ...quote,
       version: 2,
@@ -5069,13 +5071,13 @@ test("the first revise of a never-synchronized legacy invoice emits no false rec
   }
 });
 
-// DEL-30 P3-2 (round 6): the sibling test above proves a GENUINE change
+// The sibling test above proves a GENUINE change
 // mints -R2 with no false event. This proves the opposite: a revise of a
 // never-synchronized legacy invoice whose reallocated values are IDENTICAL
 // to the legacy stored content must 409 like the native-invoice idempotency
 // gate does, not silently mint a duplicate-content -R2. Before this fix,
 // `currentInvoice.issuedRevision` reading null (the legacy record's raw
-// pre-DEL-30 shape) skipped the fingerprint comparison outright.
+// legacy shape) skipped the fingerprint comparison outright.
 test("the first revise of a never-synchronized legacy invoice with unchanged values is rejected as a no-op, not minted as a duplicate", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-legacy-noop-revise-"));
 
@@ -5099,10 +5101,10 @@ test("the first revise of a never-synchronized legacy invoice with unchanged val
     await writeFile(join(jobDir, "meta.json"), JSON.stringify(meta, null, 2));
     await writeFile(join(jobDir, "quote.json"), JSON.stringify(quote, null, 2));
 
-    // A pre-DEL-30 stored record whose values already match what a fresh
-    // reallocation against the CURRENT (unchanged) quote would produce —
-    // including `sourceCode`, since the fingerprint compares it too and a
-    // freshly built invoice line item threads it through from the quote's
+    // A stored record from before invoice revisions whose values already match
+    // what a fresh reallocation against the CURRENT (unchanged) quote would
+    // produce — including `sourceCode`, since the fingerprint compares it too
+    // and a freshly built invoice line item threads it through from the quote's
     // line-item `code`.
     const legacyLineItems = [
       { description: "Scope item", quantity: 1, unit: "lot", unitPrice: 200, totalPrice: 200, sourceCode: "scope" },
@@ -5160,14 +5162,14 @@ test("the first revise of a never-synchronized legacy invoice with unchanged val
   }
 });
 
-// DEL-30 round-4 backward compatibility: a job persisted BEFORE this round
+// Backward compatibility: a job persisted before `artifactState` existed
 // stores issued revisions with `pdfIssuedAt` / `pdfUnrecoverable` and no
-// `artifactState` field at all. This is a real stored state.json shape
-// (round 1-3 of this same DEL-30 effort), not a hypothetical — it must
+// `artifactState` field at all. This is a real stored state.json shape,
+// not a hypothetical — it must
 // keep resolving correctly with no behaviour change, and a later mutation
 // must upgrade it to the new model transparently rather than erroring or
 // silently reinterpreting it.
-test("a pre-round-4 stored job (pdfIssuedAt/pdfUnrecoverable, no artifactState) reads, serves and mutates correctly", async () => {
+test("a job stored before artifactState (pdfIssuedAt/pdfUnrecoverable, no artifactState) reads, serves and mutates correctly", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-backward-compat-artifact-state-"));
 
   try {
@@ -5193,8 +5195,8 @@ test("a pre-round-4 stored job (pdfIssuedAt/pdfUnrecoverable, no artifactState) 
     await writeFile(join(jobDir, "meta.json"), JSON.stringify(meta, null, 2));
     await writeFile(join(jobDir, "quote.json"), JSON.stringify(quote, null, 2));
 
-    // Milestone 0: successfully issued and stored under the round 1-3
-    // shape — `pdfIssuedAt` and `pdfSha256`, no `artifactState`. Its PDF is
+    // Milestone 0: successfully issued and stored under the old shape
+    // — `pdfIssuedAt` and `pdfSha256`, no `artifactState`. Its PDF is
     // genuinely on disk.
     const storedLineItems = [{ description: "Deposit", quantity: 1, unit: "lot", unitPrice: 110, totalPrice: 110 }];
     const storedPdfBytes = Buffer.from("%PDF-1.4 pre-round-4 stored bytes");
@@ -5202,7 +5204,7 @@ test("a pre-round-4 stored job (pdfIssuedAt/pdfUnrecoverable, no artifactState) 
     await mkdir(join(jobDir, "milestone-invoices"), { recursive: true });
     await writeFile(join(jobDir, storedPdfRelativePath), storedPdfBytes);
 
-    // Milestone 1: an opportunistic write that failed under round 3's model
+    // Milestone 1: an opportunistic write that failed under the old model
     // — `pdfUnrecoverable: true`, no `artifactState`, no file on disk.
     const unrecoverableLineItems = [{ description: "Final", quantity: 1, unit: "lot", unitPrice: 110, totalPrice: 110 }];
 
@@ -5254,7 +5256,7 @@ test("a pre-round-4 stored job (pdfIssuedAt/pdfUnrecoverable, no artifactState) 
           issuedAt: "2026-05-02T00:00:00.000Z",
           // Pinned to a version that will never resolve (not the root
           // version, not archived) — genuinely, not just currently,
-          // unrecoverable, so DEL-30 P2-1's root-fallback does not
+          // unrecoverable, so the root-version fallback does not
           // incidentally "fix" it and change what this test is checking.
           quoteVersion: 99,
           subtotal: 100,
@@ -5275,7 +5277,7 @@ test("a pre-round-4 stored job (pdfIssuedAt/pdfUnrecoverable, no artifactState) 
     assert.equal(hydrated.milestoneInvoices[1].issuedRevision.artifactState, ARTIFACT_STATE.MISSING);
 
     // 2. The read path serves milestone 0's stored bytes and 410s
-    // milestone 1, exactly as it would for round-4-native data.
+    // milestone 1, exactly as it would for data stored with `artifactState`.
     const servedStored = await resolveIssuedMilestoneInvoiceArtifact({
       jobDir,
       documentType: "invoice",
@@ -5314,7 +5316,7 @@ test("a pre-round-4 stored job (pdfIssuedAt/pdfUnrecoverable, no artifactState) 
   }
 });
 
-test("a legacy issued invoice with a missing PDF is reconstructed from its pinned quote version, stamped, and audited — not silently re-rendered from the current quote (DEL-30 P2-B, feeds P2-C)", async () => {
+test("a legacy issued invoice with a missing PDF is reconstructed from its pinned quote version, stamped, and audited — not silently re-rendered from the current quote", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-legacy-reconstruct-"));
 
   try {
@@ -5342,9 +5344,9 @@ test("a legacy issued invoice with a missing PDF is reconstructed from its pinne
     await mkdir(join(jobDir, "quote-versions", "v001"), { recursive: true });
     await writeFile(join(jobDir, "quote-versions", "v001", "quote.json"), JSON.stringify(quote, null, 2));
 
-    // A pre-DEL-30 stored record: issued, never froze a snapshot, and its
-    // PDF file is missing — deleted, lost, never migrated. No bytes are
-    // written to `milestone-invoices/` at all.
+    // A stored record from before invoice revisions: issued, never froze a
+    // snapshot, and its PDF file is missing — deleted, lost, never migrated. No
+    // bytes are written to `milestone-invoices/` at all.
     const legacyMilestoneInvoices = [{
       milestoneIndex: 0,
       milestoneLabel: "Full payment",
@@ -5378,8 +5380,8 @@ test("a legacy issued invoice with a missing PDF is reconstructed from its pinne
     const legacyResult = resynced.meta.milestoneInvoices[0];
     assert.ok(legacyResult.issuedRevision, "the legacy record synthesized an issued revision");
     // Reconstruction must stamp `pdfIssuedAt` so the revision reads as
-    // genuinely issued on every later read (the read-path fix, DEL-30 P2-C,
-    // depends on this being reliable) and record a real sha for the newly
+    // genuinely issued on every later read (the read path depends on this
+    // being reliable) and record a real sha for the newly
     // written bytes.
     assert.ok(legacyResult.issuedRevision.pdfIssuedAt, "pdfIssuedAt was stamped on reconstruction");
     assert.ok(legacyResult.issuedRevision.pdfSha256, "a sha was recorded for the reconstructed bytes");
@@ -5397,14 +5399,14 @@ test("a legacy issued invoice with a missing PDF is reconstructed from its pinne
 });
 
 // Two-milestone fixture: milestone 0 is an already-issued invoice pinned to
-// quote v1, with no PDF on disk (as if touched once while the quote was
-// still at v1, then lost); milestone 1 is a plain open milestone the
-// operator can still act on. The CURRENT root quote is v2 — DEL-30 P2-1
-// made a pinned version that IS the current root reconstructable even
-// unarchived, so genuinely exercising "unrecoverable" now requires the
-// pinned version to be older than root. `pinPdfVersion` controls whether
-// v1 is archived at `quote-versions/v001` (reconstructable) or not
-// (genuinely unrecoverable — no archive, and root has moved on to v2).
+// quote v1, with no PDF on disk (as if touched once while the quote was still
+// at v1, then lost); milestone 1 is a plain open milestone the operator can
+// still act on. The CURRENT root quote is v2. A pinned version that IS the
+// current root is reconstructable even unarchived, so genuinely exercising
+// "unrecoverable" now requires the pinned version to be older than root.
+// `pinPdfVersion` controls whether v1 is archived at `quote-versions/v001`
+// (reconstructable) or not (genuinely unrecoverable — no archive, and root has
+// moved on to v2).
 async function seedJobWithBrokenLegacyMilestoneZero(jobDir, { pinPdfVersion = true } = {}) {
   const meta = {
     id: "job-broken-legacy-1",
@@ -5434,9 +5436,9 @@ async function seedJobWithBrokenLegacyMilestoneZero(jobDir, { pinPdfVersion = tr
   }
 
   // An already-issued revision whose artifact was never confirmed (not raw
-  // legacy shape this time — that path is covered by the P1-B/P2-B tests
-  // above): pinned to v1, no bytes on disk, ARTIFACT_STATE.ADOPT_PENDING
-  // (DEL-30 round-4 model) — the state that says "this record's own
+  // legacy shape this time — that path is covered by the legacy reconstruction
+  // tests above): pinned to v1, no bytes on disk, ARTIFACT_STATE.ADOPT_PENDING
+  // — the state that says "this record's own
   // status/issuedAt already say it was issued to the customer; treat any
   // file at its path as the real document, and reconstruct-or-fail if
   // there is none," without yet having recorded a failed attempt of its
@@ -5475,7 +5477,7 @@ async function seedJobWithBrokenLegacyMilestoneZero(jobDir, { pinPdfVersion = tr
   return { meta, quote: rootQuote };
 }
 
-test("an unrecoverable issued artifact on one milestone does not block a mutation on a different milestone (DEL-30 P1-C)", async () => {
+test("an unrecoverable issued artifact on one milestone does not block a mutation on a different milestone", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-unrecoverable-isolated-"));
 
   try {
@@ -5524,7 +5526,7 @@ test("an unrecoverable issued artifact on one milestone does not block a mutatio
   }
 });
 
-test("an explicit action targeting the unrecoverable invoice itself still fails loudly with a 410 (DEL-30 P1-C)", async () => {
+test("an explicit action targeting the unrecoverable invoice itself still fails loudly with a 410", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-unrecoverable-explicit-"));
 
   try {
@@ -5554,7 +5556,7 @@ test("an explicit action targeting the unrecoverable invoice itself still fails 
   }
 });
 
-test("an ordinary reconstruction on an implicit (swept-in) target still succeeds and stamps, unaffected by the P1-C isolation change (DEL-30 P1-C)", async () => {
+test("an ordinary reconstruction on an implicit (swept-in) target still succeeds and stamps, unaffected by isolating implicit targets", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-implicit-reconstruct-"));
 
   try {
@@ -5593,13 +5595,13 @@ test("an ordinary reconstruction on an implicit (swept-in) target still succeeds
   }
 });
 
-// `reviseJobMilestoneInvoice` passes `writeAllArtifacts: true` — before
-// DEL-30 P2-2 that reclassified EVERY milestone as an explicit (fail-loud)
+// `reviseJobMilestoneInvoice` passes `writeAllArtifacts: true` — that used
+// to reclassify EVERY milestone as an explicit (fail-loud)
 // target, so revising milestone 0 would 410 over milestone 1's unrelated,
 // unrecoverable artifact even though the operator never touched milestone
 // 1 at all. Only `artifactMilestoneIndex` (the milestone actually being
 // revised) is explicit now; `writeAllArtifacts` entries stay implicit.
-test("revising one milestone succeeds while an unrelated milestone's artifact is unrecoverable (DEL-30 P2-2)", async () => {
+test("revising one milestone succeeds while an unrelated milestone's artifact is unrecoverable", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-revise-unrelated-broken-"));
 
   try {
@@ -5676,7 +5678,7 @@ test("revising one milestone succeeds while an unrelated milestone's artifact is
   }
 });
 
-test("unsending an issued invoice leaves the previously stored PDF byte-identical (DEL-30 F4)", async () => {
+test("unsending an issued invoice leaves the previously stored PDF byte-identical", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-unsend-artifact-"));
 
   try {
@@ -5733,7 +5735,7 @@ test("unsending an issued invoice leaves the previously stored PDF byte-identica
   }
 });
 
-test("a reissue after unsend with changed content records an actor and a reason (DEL-30 F6)", async () => {
+test("a reissue after unsend with changed content records an actor and a reason", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-reissue-attribution-"));
 
   try {
@@ -5795,7 +5797,7 @@ test("a reissue after unsend with changed content records an actor and a reason 
   }
 });
 
-// #151: every send records exactly what the customer was sent. These fail if
+// Every send records exactly what the customer was sent. These fail if
 // a quote or invoice send writes no quote_snapshots row.
 async function writeLandedJobForSnapshots(jobDir, id) {
   const meta = {
@@ -5861,7 +5863,7 @@ async function writeLandedJobForSnapshots(jobDir, id) {
   return meta;
 }
 
-test("#151: every quote and invoice send writes a quote snapshot of what was sent", async () => {
+test("every quote and invoice send writes a quote snapshot of what was sent", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-snapshots-"));
   const snapshots = createQuoteSnapshotStore({ db: TEST_PRICE_CATALOG.db });
   const config = { quoteSnapshots: snapshots, priceCatalog: TEST_PRICE_CATALOG_DB };
@@ -5923,7 +5925,7 @@ test("#151: every quote and invoice send writes a quote snapshot of what was sen
   }
 });
 
-test("#151: a send whose snapshot cannot be recorded sends nothing, and the retry records one", async () => {
+test("a send whose snapshot cannot be recorded sends nothing, and the retry records one", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-snapshots-fail-"));
   const working = createQuoteSnapshotStore({ db: TEST_PRICE_CATALOG.db });
   let sends = 0;
@@ -6065,10 +6067,10 @@ test("catalogue changes: a sent quote is never changed, a draft organizer gets t
   assert.equal(forced.organizer.nodes["manual:turf"].sellRate, 45);
 });
 
-// #169: a quote built only from catalogue rows (manual organizer rows with a
+// A quote built only from catalogue rows (manual organizer rows with a
 // catalogue link, no compiled line items) passes the send gate, and its send
 // snapshot names the row's catalogue item and price.
-test("#169: a quote made only of catalogue-linked rows can be sent, and its snapshot names the row's item and price", async () => {
+test("a quote made only of catalogue-linked rows can be sent, and its snapshot names the row's item and price", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-catalogue-only-"));
   const snapshots = createQuoteSnapshotStore({ db: TEST_PRICE_CATALOG.db });
   try {
@@ -6155,7 +6157,7 @@ test("#169: a quote made only of catalogue-linked rows can be sent, and its snap
   }
 });
 
-test("#169: a schedule row with no lineage and no manual row behind it is still refused", () => {
+test("a schedule row with no lineage and no manual row behind it is still refused", () => {
   const quote = {
     lineItems: [],
     presentation: {
@@ -6165,10 +6167,11 @@ test("#169: a schedule row with no lineage and no manual row behind it is still 
   assert.deepEqual(validateQuoteCommercialArtifact(quote).map((issue) => issue.code), ["incomplete-commercial-lineage"]);
 });
 
-// A quote saved before #169's fix carries the "not sendable" verdict worked
-// out then. Reading it re-runs the commercial checks, so it can be sent
-// without an edit; a quote that still fails them stays refused, in plain words.
-test("a catalogue-row quote saved before the #169 fix can be sent without editing it", () => {
+// A quote saved before catalogue-linked rows could be sent carries the "not
+// sendable" verdict worked out then. Reading it re-runs the commercial checks,
+// so it can be sent without an edit; a quote that still fails them stays
+// refused, in plain words.
+test("a catalogue-row quote saved before catalogue rows were sendable can be sent without editing it", () => {
   const meta = { id: "job-stale-verdict", quoteVersion: 1, quoteNumber: "EQ-ST-01", jobNumber: "JOB-ST-01" };
   const base = createQuoteFixture(meta, { version: 1, quoteNumber: "EQ-ST-01", jobNumber: "JOB-ST-01", lineItems: [] });
   const unattested = {

@@ -1,4 +1,4 @@
-// The R2 client (#240) against a recorded fake: what it signs and sends, how
+// The R2 client (#12) against a recorded fake: what it signs and sends, how
 // it reads answers, and that errors carry codes, never credentials.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

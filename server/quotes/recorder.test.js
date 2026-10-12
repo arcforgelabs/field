@@ -1,6 +1,6 @@
-// The quote-row dual-write (#241) through today's real actions: a lock, a
+// The quote-row dual-write (#6) through today's real actions: a lock, a
 // send and a fork each commit a job generation, the installed listener writes
-// the rows, and the send links the issued document (#230). A version the rows
+// the rows, and the send links the issued document. A version the rows
 // cannot reproduce is counted and left out; nothing here can fail the action.
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";

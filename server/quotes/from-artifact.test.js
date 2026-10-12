@@ -1,4 +1,4 @@
-// Mapping today's quote artifacts to quote rows (#241): organizer groups,
+// Mapping today's quote artifacts to quote rows (#6): organizer groups,
 // manual qty x rate rows, catalogue kits as component rows, engine lines,
 // fixed prices, listed-only and excluded rows. Every version reproduces what
 // Field shows: a line keeps the total it printed (decided 2026-10-12), marked

@@ -1,4 +1,4 @@
-// Optimistic concurrency for quote saves (#245). The editor saves through
+// Optimistic concurrency for quote saves (#10). The editor saves through
 // POST /api/jobs/:id/quote-update; it sends back, as If-Match, the rows'
 // version it last read (X-Field-Quote-Rows-Version: "q<version>-<lock>").
 // A save made against rows that have moved on since is refused with 412, so

@@ -20,7 +20,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * DEL-75 toolchain proof only.
+ * Drizzle toolchain proof only.
  *
  * This table is deliberately not a product entity. It proves that a typed
  * PostgreSQL schema can be generated and queried without creating accidental
@@ -46,7 +46,7 @@ export type ToolchainProbe = typeof toolchainProbe.$inferSelect;
 export type NewToolchainProbe = typeof toolchainProbe.$inferInsert;
 
 // ---------------------------------------------------------------------------
-// Durable file storage (#139). With FIELD_STORAGE=postgres the server mirrors
+// Durable file storage. With FIELD_STORAGE=postgres the server mirrors
 // its data directory here (server/storage/durable-store.js): file contents are
 // content-addressed blobs, each mirrored path points at one, and SQLite
 // databases are kept as whole-database images. Boot rebuilds the data
@@ -102,7 +102,7 @@ export type FieldFile = typeof fieldFiles.$inferSelect;
 export type FieldSqliteImage = typeof fieldSqliteImages.$inferSelect;
 
 // ---------------------------------------------------------------------------
-// Tenancy (#178, docs/PRICING_ENGINE.md "Tenancy"). One database serves many
+// Tenancy (docs/PRICING_ENGINE.md "Tenancy"). One database serves many
 // organisations. Every tenant-owned table carries `org_uid` and a row-level
 // security policy that admits only rows of the organisation named by the
 // transaction's `field.org_uid` setting (server/db-runtime/tenancy.js sets it
@@ -157,7 +157,7 @@ const tenantIsolation = (table: string) =>
   });
 
 // ---------------------------------------------------------------------------
-// Field users (#149). With FIELD_AUTH=clerk, people sign in with Clerk and
+// Field users. With FIELD_AUTH=clerk, people sign in with Clerk and
 // these tables decide who they are in Field. `users` is the person (one row
 // per email, linked to a Clerk user on first sign-in by verified primary
 // email); `org_memberships` is their place in an organisation: role and
@@ -219,7 +219,7 @@ export const orgMemberships = pgTable(
 
 export type OrgMembership = typeof orgMemberships.$inferSelect;
 
-// Price catalogue (#148). PostgreSQL is the catalogue's source of truth; the
+// Price catalogue. PostgreSQL is the catalogue's source of truth; the
 // legacy SQLite catalog.db is import-only (server/catalog/legacy-import.js).
 //
 // Identity is `items.uid`: every link (kit components, prices, suppliers,
@@ -410,7 +410,7 @@ const itemFk = (name: string, t: { orgUid: AnyPgColumn }, column: AnyPgColumn) =
   foreignKey({ name, columns: [t.orgUid, column], foreignColumns: [items.orgUid, items.uid] });
 
 /**
- * Legacy item codes (#178 step 2). An item's identity is its uid; a code is
+ * Legacy item codes (code retirement step 2). An item's identity is its uid; a code is
  * only a name something older looks it up by (quote rows' catalogItemCode,
  * json5 recipes and rules, scripts). Every code an item has ever had is a row
  * here, unique per organisation, so it resolves to the same item forever.
@@ -725,7 +725,7 @@ export const dataMigrations = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// Quote snapshots (#151). One row per delivery attempt of a quote, invoice or
+// Quote snapshots. One row per delivery attempt of a quote, invoice or
 // receipt: exactly what the customer was sent (line items with their
 // catalogue item uids and price ids, totals, recipients) so Field keeps an
 // attributable record even after the catalogue or the draft changes. The row
@@ -778,7 +778,7 @@ export const quoteSnapshots = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// Issued documents (#223, #178 step 2; docs/PRICING_ENGINE.md
+// Issued documents (phase 3 step 2; docs/PRICING_ENGINE.md
 // "document_events and issued_documents"). Every quote, invoice and receipt
 // PDF a customer was sent, stored once by SHA-256 and addressable by its own
 // uid, with an append-only history of what happened to it. Written only by
@@ -937,7 +937,7 @@ export const documentNumberCounters = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// Quotes as rows (#241, #178 phase 3; docs/PRICING_ENGINE.md "Quotes and
+// Quotes as rows (#6, pricing engine phase 3; docs/PRICING_ENGINE.md "Quotes and
 // invoices"). One `quotes` row per quote version, its customer-facing
 // sections and its lines, each line holding the values it prints. In this
 // step the job files stay the source of truth: the rows are written alongside
@@ -950,7 +950,7 @@ export const documentNumberCounters = pgTable(
 // `line_total_source` is `computed` (the database checks it), or the amount a
 // document already issued printed, with the reason, when it is `printed`. GST
 // is worked out once on the subtotal per tax rate (server/quotes/totals.js,
-// the one totals function; decided 2026-10-12, #178).
+// the one totals function; decided 2026-10-12).
 //
 // A sent quote never changes (migration 0010): once a quote is sent,
 // accepted or declined, or has a send time, triggers refuse any insert,
@@ -1004,7 +1004,7 @@ export const quotes = pgTable(
     catalogVersion: bigint("catalog_version", { mode: "number" }),
     sentAt: timestamp("sent_at", { withTimezone: true, mode: "date" }),
     acceptedAt: timestamp("accepted_at", { withTimezone: true, mode: "date" }),
-    /** The issued document (#230) this version was sent as. */
+    /** The issued document this version was sent as. */
     issuedDocumentUid: text("issued_document_uid"),
     /** Hash of what the rows were mapped from, so an unchanged version is not rewritten. */
     sourceDigest: text("source_digest"),
@@ -1049,7 +1049,7 @@ export const quoteSections = pgTable(
     showSubtotal: boolean("show_subtotal").notNull().default(true),
     /** The organizer node it was mapped from, while the files are the source of truth. */
     sourceNodeId: text("source_node_id"),
-    // Display (#245, migration 0011), as on quote_lines.
+    // Display (#10, migration 0011), as on quote_lines.
     isExcluded: boolean("is_excluded").notNull().default(false),
     amountBlank: boolean("amount_blank").notNull().default(false),
     isCollapsed: boolean("is_collapsed").notNull().default(false),
@@ -1122,7 +1122,7 @@ export const quoteLines = pgTable(
     isSelected: boolean("is_selected").notNull().default(true),
     /** The organizer node it was mapped from, while the files are the source of truth. */
     sourceNodeId: text("source_node_id"),
-    // Display (#245, migration 0011): what the customer documents print, so
+    // Display (#10, migration 0011): what the customer documents print, so
     // a quote renders from its rows exactly as it did from its files.
     /** Excluded from the price: not printed and never counted (kept for the editor). */
     isExcluded: boolean("is_excluded").notNull().default(false),
@@ -1184,7 +1184,7 @@ export type Quote = typeof quotes.$inferSelect;
 export type QuoteSection = typeof quoteSections.$inferSelect;
 export type QuoteLine = typeof quoteLines.$inferSelect;
 
-// The R2 replica of issued document bytes (#240; docs/REPLIT.md "Issued
+// The R2 replica of issued document bytes (#12; docs/REPLIT.md "Issued
 // documents in R2"). PostgreSQL stays the store of record: document_blobs is
 // written in the issue transaction as before, and after it commits the bytes
 // are copied to a locked R2 bucket at `<org_uid>/<sha256>`. One row per blob

@@ -218,7 +218,7 @@ test("readJobMeta hydrates legacy milestone invoices directly from meta.json whe
   }
 });
 
-// #224: a committed generation is validated against its commit marker on
+// A committed generation is validated against its commit marker on
 // every read. Writing meta into it in place made it fail validation, so it
 // was quarantined and the job silently fell back to the previous generation
 // (losing the newer quote/sent state and the write itself).

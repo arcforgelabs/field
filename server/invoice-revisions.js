@@ -125,17 +125,17 @@ export function normalizeInvoiceRevision(entry = null) {
       : null,
     // True when `quoteVersion` above is not a historically-accurate record
     // of what this revision was actually rendered from, but the best
-    // available substitute: a pre-DEL-30 legacy revision predates
+    // available substitute: a legacy revision predates
     // per-revision quote-version tracking, so its `quoteVersion` is pinned
     // to whatever was live at the moment it was FIRST synthesized during a
-    // rebuild, not the version the customer's document actually reflects
-    // (DEL-30 P3-1). Callers building audit trails or provenance text must
+    // rebuild, not the version the customer's document actually reflects.
+    // Callers building audit trails or provenance text must
     // word it accordingly rather than presenting it as a known fact.
     quoteVersionInferred: Boolean(entry.quoteVersionInferred),
     issuedAt: normalizeIsoTimestamp(entry.issuedAt),
     // Set when a retired revision is restored by reissuing identical
     // content. `issuedAt` stays the original issue event so restoring never
-    // erodes the audit trail (DEL-30 P3-4).
+    // erodes the audit trail.
     reissuedAt: normalizeIsoTimestamp(entry.reissuedAt),
     subtotal,
     gst: roundMoney(entry.gst != null ? entry.gst : Math.max(total - subtotal, 0)),
@@ -146,7 +146,7 @@ export function normalizeInvoiceRevision(entry = null) {
     pdfIssuedAt: normalizeIsoTimestamp(entry.pdfIssuedAt),
     pdfSha256: cleanText(entry.pdfSha256),
     // The single source of truth for "is this revision's PDF real, present
-    // and safe to serve?" (DEL-30 round-4 architecture correction). Derived
+    // and safe to serve?". Derived
     // here so every caller — however the revision arrived (fresh mint,
     // legacy synthesis, or a round trip through disk) — sees the same
     // canonical value instead of recombining `pdfIssuedAt` /
@@ -275,7 +275,7 @@ export function resolveMilestoneRevisionState({
   // Carried through so the mint below can attribute `supersedes` to the
   // revision that was actually just retired, not merely the highest
   // revision number in history — after a restore-below-max those can
-  // diverge (DEL-30 P3-1).
+  // diverge.
   let retiredActive = null;
   if (active && (authorized || !isIssued)) {
     retiredActive = active;
@@ -286,7 +286,7 @@ export function resolveMilestoneRevisionState({
         // The true successor number is not known until the mint below
         // resolves it — a restore-below-max can leave `active.revisionNumber`
         // behind the actual next number. Patched to the real value once
-        // minted (DEL-30 P3-1).
+        // minted.
         supersededByRevisionNumber: null,
       }),
     ]);
@@ -322,7 +322,7 @@ export function resolveMilestoneRevisionState({
   // approved-change revision (which supplies `authorization`). A rebuild
   // that derives `isIssued: true` from state alone — with no prior issued
   // revision, no issue timestamp, and no authorization — has no such event
-  // to mint from, so it must not fabricate one (DEL-30 F2).
+  // to mint from, so it must not fabricate one.
   if (!history.length && !authorized && !normalizeIsoTimestamp(issuedAt)) {
     const unmintedRevisionNumber = Math.max(
       highestRevisionNumber({ revisionHistory: history }) + 1,
@@ -345,7 +345,7 @@ export function resolveMilestoneRevisionState({
       ...reusable,
       // The original issue event's timestamp is part of the audit trail —
       // restoring a retired revision must never overwrite it. The re-issue
-      // gets its own, separate timestamp (DEL-30 P3-4).
+      // gets its own, separate timestamp.
       issuedAt: reusable.issuedAt || normalizeIsoTimestamp(issuedAt) || at,
       reissuedAt: normalizeIsoTimestamp(issuedAt) || at,
       supersededAt: null,
@@ -363,8 +363,7 @@ export function resolveMilestoneRevisionState({
   // The revision this mint actually supersedes is the one just retired
   // above, not necessarily the highest revision number in history — a
   // restore-below-max can leave a higher-numbered retired revision in
-  // history than the one that was active immediately before this mint
-  // (DEL-30 P3-1).
+  // history than the one that was active immediately before this mint.
   const previous = retiredActive || (history.length ? history[history.length - 1] : null);
   const revisionNumber = Math.max(
     highestRevisionNumber({ revisionHistory: history }) + 1,
@@ -398,8 +397,7 @@ export function resolveMilestoneRevisionState({
           // re-authorising after an unsend changed the content) has no
           // authorization to read from, but "who changed what, when and
           // why" still applies — fall back to the acting user and a clear
-          // default reason rather than leaving the event unattributed
-          // (DEL-30 F6).
+          // default reason rather than leaving the event unattributed.
           revisedBy: normalizeActorLabel(authorization?.actor) || normalizeActorLabel(actor) || null,
           revisionReason: authorization?.reason || defaultRevisionReason || null,
           supersedesInvoiceNumber: previous?.invoiceNumber || null,
@@ -431,7 +429,7 @@ export function describeInvoiceRevisionChange({ previous = null, next = null } =
     quoteVersion: to.quoteVersion,
     supersededQuoteVersion: from?.quoteVersion ?? to.supersededQuoteVersion ?? null,
     // Surfaced so audit text can distinguish a known quote version from a
-    // legacy-inferred one (DEL-30 P3-1) — the superseded side is what
+    // legacy-inferred one — the superseded side is what
     // matters for the "quote vN → vM" line, since `to` is always freshly
     // minted against a real, known version.
     supersededQuoteVersionInferred: Boolean(from?.quoteVersionInferred),

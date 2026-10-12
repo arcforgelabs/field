@@ -35,7 +35,7 @@
   // price-catalog item scripts/verification/fixtures.js seeds via createItem()
   // at reset time, the same supported path real catalogue items use. The three
   // verification-spoil-removal-* rules demonstrate a disposal line priced
-  // under each costing basis (per_tonne, per_load, per_m3) (DEL-46). All rates
+  // under each costing basis (per_tonne, per_load, per_m3). All rates
   // there are fictional and sanitized.
   quantityRules: [
     {

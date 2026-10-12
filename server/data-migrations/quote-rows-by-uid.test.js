@@ -1,4 +1,4 @@
-// Code retirement step 3 (#178): quote rows keyed by uid, as a boot data
+// Code retirement step 3: quote rows keyed by uid, as a boot data
 // migration with a dry run, verified before writing and recorded once.
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

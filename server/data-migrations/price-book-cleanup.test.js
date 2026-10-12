@@ -1,4 +1,4 @@
-// Code retirement step 5 (#178): the price book clean-up as a boot data
+// Code retirement step 5: the price book clean-up as a boot data
 // migration, behind the price-equality gate, in one transaction.
 import assert from "node:assert/strict";
 import test from "node:test";

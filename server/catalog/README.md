@@ -1,6 +1,6 @@
 # Price catalogue (`server/catalog/`)
 
-Field's price catalogue lives in PostgreSQL (#139, #148), in the tables of
+Field's price catalogue lives in PostgreSQL, in the tables of
 `server/db/src/schema.ts` (migration `server/db/drizzle/0001_price_catalogue.sql`).
 The SQLite `data/price-catalog/catalog.db` is no longer read at runtime; it is
 an import source only (`legacy-import.js`).
@@ -52,7 +52,7 @@ convert fails closed with the item named, and `health()` lists it
 (`missing_referenced_item`, `archived_item_in_use`, `recipe_unit_mismatch`,
 `rule_unit_mismatch`).
 
-## Items named by uid (#178 code retirement step 4)
+## Items named by uid (code retirement step 4)
 
 Pricing configuration names catalogue items by uid, with the legacy code
 beside it as the fallback (`refs.js` `resolveItemRef`: uid first, then the
@@ -123,7 +123,7 @@ prices.
   lines. A code is only a legacy alias: the rules engine, json5 recipes,
   scripts and older quote rows still name items by code, so every code an
   item has had is a row in `item_code_aliases` (org, code, item uid), unique
-  per organisation case-insensitively (#178 step 2, migration 0006).
+  per organisation case-insensitively (code retirement step 2, migration 0006).
   `findItem` resolves an identity by uid, then by alias. A code never changes:
   a `code` edit is refused with `CODE_READ_ONLY` (repeating the current code
   is accepted), and the database refuses one too (`items_code_immutable`).
@@ -150,7 +150,7 @@ prices.
   `sell_mode` is `fixed` (the row's sell), `markup` (cost × (1 + markup_pct/100))
   or `rollup`. The legacy API fields map onto them: `buy_price_mode` /
   `sell_price_mode` `computed` is `rollup`, `manual` is `manual` / `fixed`.
-  `rollup` is an addition to #148's `markup|fixed`: the SQLite catalogue's
+  `rollup` is an addition to the catalogue design's `markup|fixed`: the SQLite catalogue's
   computed kits (99 of 182 production items) need it to carry over as-is.
 - **One roll-up.** `rollup.js effectivePrices(state)` prices every item; every
   reader uses it. A kit's components are its `kit_components` rows (summed in
@@ -197,7 +197,7 @@ written and migration 0007 dropped them; measured formulas are deferred
 (`docs/PRICING_ENGINE.md` decision 4), and the recipes that need them stay in
 the quote catalog until phase 4.
 
-- **Type, sold, pricing method** (#178 phase 1, migration 0007). `items.type`
+- **Type, sold, pricing method** (pricing engine phase 1, migration 0007). `items.type`
   says what an item is: `material`, `labour`, `equipment`, `subcontract`,
   `fee` or `kit` (null until set; never a category). Adding a component makes
   an item a `kit`. Item rows also carry `is_sold` (the quote picker offers it:
@@ -268,7 +268,7 @@ answers `If-None-Match` with 304), `POST /current-prices { uids }`,
 `GET /items/:codeOrUid/current-price`, `GET /items/:codeOrUid/kit`,
 `GET /items/:codeOrUid/prices`, `GET /export`, plus the existing routes.
 
-"Used on N quotes" (`usage.js`, #178): `GET /items/:codeOrUid/usage?limit=5`
+"Used on N quotes" (`usage.js`): `GET /items/:codeOrUid/usage?limit=5`
 answers `{ item_uid, quote_count, version_count, jobs: [{ job_id,
 quote_number, title, versions, latest_version, on_current_quote, sent,
 updated_at }], scanned_at }` (newest first) and `GET /usage` answers
@@ -280,7 +280,7 @@ quote and saved versions serves both, cached for 30 seconds.
 
 ## Price book and supplier imports
 
-The pricing page's grid, bulk edits and supplier imports (#148 section 5).
+The pricing page's grid, bulk edits and supplier imports.
 Every write runs in the store's write transaction (`store.write`), so it is
 serialised with other catalogue writes, bumps the catalogue version once and
 records field-level history.
@@ -372,7 +372,7 @@ Field refuses to boot on an empty catalogue, so import before first start (or
 boot with `FIELD_PRICE_CATALOG_ALLOW_UNAVAILABLE=1`, which keeps the catalogue
 editor available but blocks pricing).
 
-## Codes in outputs (#178 code retirement step 6)
+## Codes in outputs (code retirement step 6)
 
 An item is its uid and its name. Every input that names an item (a URL's
 `:code`, `child_code`, `variant_of`, MCP `item`/`code`) still takes a legacy
@@ -407,7 +407,7 @@ npm run catalog:price-gate -- --capture before.json   # read-only
 npm run catalog:price-gate -- --compare before.json   # exit 1 if any item prices differently
 ```
 
-## The price book clean-up (#178 step 5)
+## The price book clean-up (code retirement step 5)
 
 `server/data-migrations/price-book-cleanup.js` applies
 `price-book-cleanup.plan.json` once, at boot, in one catalogue transaction:

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Import a Field data directory (e.g. an untarred copy of production's
-// /opt/apps/field/data) into PostgreSQL durable storage (#139), then prove the
+// /opt/apps/field/data) into PostgreSQL durable storage, then prove the
 // import: file count, total bytes, every file's SHA-256 recomputed by
 // PostgreSQL from the stored bytes, and a rebuild into a temporary directory
 // whose tree hash must equal the source's.

@@ -1,5 +1,5 @@
 // A throwaway copy of a deployment's catalogue to rehearse migrations on
-// (`npm run data:migrate -- --dry-run`, #178). The source database is only
+// (`npm run data:migrate -- --dry-run`). The source database is only
 // read: through a session opened with default_transaction_read_only, inside
 // read-only organisation transactions. Its catalogue tables are copied, as
 // they are at whatever schema version the source is on, into an in-memory

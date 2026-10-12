@@ -1,5 +1,5 @@
 // Boots the real server and archives jobs whose quote was sent in their
-// latest committed generation (#224). Archive used to write meta.json and
+// latest committed generation. Archive used to write meta.json and
 // quote-lifecycle.json straight into that committed generation; the next read
 // found it no longer matched its commit marker, quarantined it, and the job
 // fell back to the previous generation: the sent quote read as a draft again.

@@ -1,5 +1,5 @@
 // Every server module reaches the filesystem through server/storage/fs.js or
-// fs-promises.js, so writes under the data root can be recorded (#139). A
+// fs-promises.js, so writes under the data root can be recorded. A
 // direct node:fs import would bypass that silently, so this guard fails on one.
 import test from "node:test";
 import assert from "node:assert/strict";

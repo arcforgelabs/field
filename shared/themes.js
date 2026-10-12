@@ -13,7 +13,7 @@ import { OPENCLAW_FAMILIES } from "./theme-palettes.js";
 
 export { contrast, inkOn, readableOn } from "./color-contrast.js";
 
-// Field Crew (issue #161): warm paper, near-black ink, the logo's yellow,
+// Field Crew: warm paper, near-black ink, the logo's yellow,
 // square corners, 2px ink strokes and spaced uppercase labels. Yellow is too
 // light to read on paper, so in light mode --t-accent is ink and the yellow
 // lives in --t-brand; on near-black yellow reads well, so dark mode's

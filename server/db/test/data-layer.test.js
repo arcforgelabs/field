@@ -137,7 +137,7 @@ test("compiled data layer is importable as ESM by the plain-JS runtime", () => {
   assert.equal(dataLayer.toolchainProbe[Symbol.for("drizzle:Name")], "drizzle_toolchain_probe");
 });
 
-test("generated migrations: the DEL-75 toolchain proof, durable storage, the price catalogue, every SQL file journaled, no quote or customer tables", () => {
+test("generated migrations: the Drizzle toolchain proof, durable storage, the price catalogue, every SQL file journaled, no quote or customer tables", () => {
   const migrationFiles = readdirSync(migrationFolder)
     .filter((fileName) => fileName.endsWith(".sql"))
     .sort();
@@ -152,13 +152,13 @@ test("generated migrations: the DEL-75 toolchain proof, durable storage, the pri
   assert.match(probe, /CREATE TABLE "drizzle_toolchain_probe"/);
   assert.doesNotMatch(probe, /\b(quote|document|invoice|outbox|customer)\b/i);
 
-  // Durable file storage (#139).
+  // Durable file storage.
   const storage = readFileSync(resolve(migrationFolder, "0001_durable_storage.sql"), "utf8");
   for (const table of ["field_blobs", "field_files", "field_sqlite_images"]) {
     assert.match(storage, new RegExp(`CREATE TABLE "${table}"`));
   }
 
-  // Field users for Clerk sign-in (#149).
+  // Field users for Clerk sign-in.
   const users = migrationFiles
     .map((fileName) => readFileSync(resolve(migrationFolder, fileName), "utf8"))
     .find((migration) => /CREATE TABLE "users"/.test(migration));
@@ -167,7 +167,7 @@ test("generated migrations: the DEL-75 toolchain proof, durable storage, the pri
   assert.match(users, /UNIQUE\("clerk_user_id"\)/);
   assert.match(users, /UNIQUE\("email"\)/);
 
-  // Price catalogue (#148).
+  // Price catalogue.
   const catalogue = migrationFiles.find((name) => /_price_catalogue\.sql$/.test(name));
   assert.ok(catalogue, "the price catalogue migration is generated and committed");
   const catalogueSql = readFileSync(resolve(migrationFolder, catalogue), "utf8");
@@ -175,7 +175,7 @@ test("generated migrations: the DEL-75 toolchain proof, durable storage, the pri
     assert.match(catalogueSql, new RegExp(`CREATE TABLE "${table}"`));
   }
   // Document tables arrive only by an approved, named step: quotes as rows
-  // (#241, migration 0010). Anything else that looks like one is a mistake.
+  // (#6, migration 0010). Anything else that looks like one is a mistake.
   const approved = new Map([["quotes", "0010_quote_rows.sql"]]);
   for (const name of migrationFiles) {
     const migration = readFileSync(resolve(migrationFolder, name), "utf8");

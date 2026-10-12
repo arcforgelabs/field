@@ -28,7 +28,7 @@
 // sync-* files, and any failed check fails the run.
 //
 // PROOF_STORAGE=postgres runs the same proof with durable storage on
-// (FIELD_STORAGE=postgres, #139) against PROOF_DB_URL, else
+// (FIELD_STORAGE=postgres) against PROOF_DB_URL, else
 // FIELD_DB_TEST_DATABASE_URL, else a throwaway postgres:16-alpine container
 // (needs Docker). After the proof it also restarts from an EMPTY data
 // directory: PostgreSQL must rebuild the data tree byte-identically (paths,
@@ -36,25 +36,26 @@
 // answer the read-only steps exactly as before, each with 200 (a refusal that
 // survives the restart unchanged is still a failure). The result is written to
 // storage-restart.json (compare.mjs ignores storage-* files) and any
-// difference fails the run. On checkouts with issued documents (#223) and
-// quote rows (#241) it also checks those tables against what was sent
+// difference fails the run. On checkouts with issued documents and
+// quote rows (#6) it also checks those tables against what was sent
 // (storage-documents.json, storage-backfill.json, storage-quote-rows.json).
 //
 // PROOF_R2_REPLICA=minio (with PROOF_STORAGE=postgres) also turns on the R2
-// replica of issued documents (#240, FIELD_DOCUMENT_REPLICA=r2) against a
+// replica of issued documents (#12, FIELD_DOCUMENT_REPLICA=r2) against a
 // throwaway local MinIO container with a LOCKED bucket
 // (server/documents/test-minio.js; needs Docker; never R2 itself). After the
 // proof every issued document must be in the bucket with its recorded hash,
 // /health must report the replica ok, and `npm run documents:verify-r2` must
 // pass. The result is written to storage-replica.json (compare.mjs ignores
 // it); the compared artefacts must not change. Checkouts without the replica
-// (before #240) ignore it.
+// ignore it.
 //
 // Use a trust-auth PostgreSQL (the Docker container and CI are). With password
 // (SCRAM) auth, postgres.js draws its client nonce from the seeded random
 // source the proof installs, which shifts every later UUID and token, so the
 // artefacts no longer match the SQLite baseline although nothing changed.
-// Checkouts from before #231 also take one extra id at boot without durable
+// Older checkouts, from before the storage-mode proof matched the disk
+// baseline, also take one extra id at boot without durable
 // storage (the PGlite lock's file name), so their plain runs differ from later
 // checkouts in ids and tokens only; compare across that line in storage mode.
 import { spawn, execFileSync } from "node:child_process";
@@ -72,15 +73,15 @@ if (process.env.PROOF_R2_REPLICA && !REPLICA_REQUESTED) throw new Error(`PROOF_R
 if (REPLICA_REQUESTED && !STORAGE_MODE) throw new Error("PROOF_R2_REPLICA=minio needs PROOF_STORAGE=postgres");
 const repoRoot = resolve(repoArg);
 const outDir = resolve(outArg);
-// Checkouts with issued documents by uid (#223, server/documents/).
+// Checkouts with issued documents by uid (server/documents/).
 const HAS_ISSUED_DOCUMENTS = existsSync(join(repoRoot, "server/documents/routes.js"));
-// Checkouts with quote rows (#241, server/quotes/).
+// Checkouts with quote rows (#6, server/quotes/).
 const HAS_QUOTE_ROWS = existsSync(join(repoRoot, "server/quotes/backfill.js"));
 let quoteRowStatus = null;
-// Checkouts whose quote documents and totals are read from the rows (#245).
+// Checkouts whose quote documents and totals are read from the rows (#10).
 const HAS_QUOTE_READS = existsSync(join(repoRoot, "server/quotes/read-model.js"));
 let quoteReadStatus = null;
-// Checkouts with the R2 replica (#240).
+// Checkouts with the R2 replica (#12).
 const REPLICA_MODE = REPLICA_REQUESTED && existsSync(join(repoRoot, "server/documents/replicator.js"));
 if (REPLICA_REQUESTED && !REPLICA_MODE) console.log("PROOF_R2_REPLICA: this checkout has no R2 replica; ignored");
 // Filled by replicaProof and verifyR2Proof (below), written to storage-replica.json.
@@ -378,7 +379,7 @@ function sentPdfAttachments() {
   return out;
 }
 
-// Issued documents (#223): job A's documents, listed by the new route, are
+// Issued documents: job A's documents, listed by the new route, are
 // the exact PDFs the customer was emailed: the quote (001.eml), invoice 0
 // (002.eml) and the receipt (003.eml), each fetched by uid. Results go to
 // storage-documents.json (compare.mjs ignores storage-* files).
@@ -421,7 +422,7 @@ async function issuedDocumentsProof(aid) {
   if (!report.ok) throw new Error(`issued documents proof failed: ${JSON.stringify(report.checks.filter((entry) => !entry.ok))}`);
 }
 
-// The R2 replica (#240): every issued document of both jobs is in the locked
+// The R2 replica (#12): every issued document of both jobs is in the locked
 // MinIO bucket at <org_uid>/<sha256>, byte for byte, and the replica reports
 // ok with nothing pending. Written to storage-replica.json.
 function replicaCheck(name, ok, detail = null) {
@@ -506,7 +507,7 @@ async function backfillProof() {
   if (!result.ok) throw new Error(`backfill after the proof recorded or refused something: ${JSON.stringify({ dry: dry.recorded, real: real.recorded, mismatches: real.mismatches, conflicts: real.conflicts, errors: real.errors })}`);
 }
 
-// Quote rows (#241): the live dual-write left job A's and job B's quote
+// Quote rows (#6): the live dual-write left job A's and job B's quote
 // versions as rows whose totals equal the totals printed on the quote PDFs
 // the proof fetched (a04, b03), with A accepted (landed) and B sent, each
 // linked to its issued document. The backfill over the data directory then

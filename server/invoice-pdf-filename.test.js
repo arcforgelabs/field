@@ -6,7 +6,7 @@ import { buildIssuedInvoicePdfFilename } from "./invoice-pdf-filename.js";
 
 // Node rejects any header value containing a code point above 0xFF with
 // `TypeError [ERR_INVALID_CHAR]`. This is the exact failure the issued
-// invoice PDF routes hit in production (DEL-30 P1-A): every one of them sets
+// invoice PDF routes hit in production: every one of them sets
 // `Content-Disposition: inline; filename="${invoiceNumber} — Invoice.pdf"`
 // straight from the stored invoice number, and the em dash (U+2014) alone is
 // enough to 500 the response. Asserting against `OutgoingMessage.setHeader`

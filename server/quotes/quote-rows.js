@@ -1,4 +1,4 @@
-// The quote service (#241): writes one quote version as `quotes`,
+// The quote service (#6): writes one quote version as `quotes`,
 // `quote_sections` and `quote_lines` rows, in ONE organisation transaction.
 //
 //   writeVersion(input)        create or replace a draft version's rows, then
@@ -6,7 +6,7 @@
 //                              never rewritten (the database refuses it too)
 //   replaceDraftVersion(input) writeVersion for a draft
 //   markSent(input)            a version was sent: status, send time and the
-//                              issued document (#230) it was sent as
+//                              issued document it was sent as
 //   deleteDraftVersion(...)    a draft version that no longer exists
 //   getQuoteVersion(...)       one version with its sections and lines
 //   listJobQuotes(jobId)       a job's versions (headers only)
@@ -146,7 +146,7 @@ const CONTENT_FIELDS = [
   "unitCost", "unitSell", "isPriceOverride", "overrideReason", "taxCode", "taxRate", "lineTotal", "lineTotalSource",
   "lineTotalReason", "isOptional", "isSelected", "sourceNodeId",
 ];
-// What documents print besides money (#245, migration 0011).
+// What documents print besides money (#10, migration 0011).
 const DISPLAY_LINE_FIELDS = [
   "isExcluded", "showAmount", "amountBlank", "isCollapsed", "rowStyle", "notes", "rowKind", "displayUnitSell", "lineCost",
 ];

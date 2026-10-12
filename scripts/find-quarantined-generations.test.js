@@ -32,7 +32,7 @@ test("lists quarantined and missing committed generations without changing the d
   try {
     const jobDir = join(dataDir, "2026-10-12", "job-hit");
     await mkdir(jobDir, { recursive: true });
-    const meta = { id: "job-hit", title: "Hit by #224", pipelineStage: "draft" };
+    const meta = { id: "job-hit", title: "Hit by the archive bug", pipelineStage: "draft" };
     await runAtomicJobGeneration(jobDir, async (stage) => {
       await writeFile(join(stage, "meta.json"), JSON.stringify(meta));
       await writeFile(join(stage, "quote.json"), JSON.stringify({ version: 1, totals: { total: 100 } }));
@@ -41,7 +41,7 @@ test("lists quarantined and missing committed generations without changing the d
       await writeFile(join(stage, "meta.json"), JSON.stringify({ ...meta, pipelineStage: "sent", quoteSentAt: "2026-10-12T01:00:00.000Z" }));
       await writeFile(join(stage, "quote.json"), JSON.stringify({ version: 1, totals: { total: 200 } }));
     });
-    // What the archive route did before #224: meta written into the
+    // What the archive route used to do: meta written into the
     // committed generation, which the next read quarantines.
     const active = await resolveActiveJobGeneration(jobDir);
     await writeFile(join(active, "meta.json"), JSON.stringify({ ...meta, pipelineStage: "sent", archivedAt: "2026-10-12T02:00:00.000Z" }));

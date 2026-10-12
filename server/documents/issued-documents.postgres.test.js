@@ -91,7 +91,7 @@ test("as a table owner without CREATEROLE: isolation, immutability and bytes rou
     await rejects(withOrg(db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`delete from document_events`)), /append-only/);
     await rejects(db.execute(sql`select count(*) from issued_documents`), /field\.org_uid is not set/);
 
-    // The R2 replica's record (#240, migration 0012) holds the same way.
+    // The R2 replica's record (#12, migration 0012) holds the same way.
     const store = memoryStore();
     const replicator = createDocumentReplicator({ db, orgUid: DEFAULT_ORG_UID, store, logger: quietLogger, paceMs: 0 });
     assert.deepEqual((await replicator.tick()).map((result) => result.outcome), ["replicated"]);

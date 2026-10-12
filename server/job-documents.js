@@ -144,7 +144,7 @@ function buildPercentAllocations(totalAmount, percentages = []) {
 // remains is shared by the percentage milestones. This is the one place
 // that understands how to mix cents-denominated fixed claims with
 // percentage weights — callers must never blend the two into one weight
-// array themselves (that silently misallocates money, see DEL-30 F1).
+// array themselves (that silently misallocates money).
 //
 // `allowShortfall` governs what happens when the fixed claims exceed
 // `totalAmount`: the strict (default) caller gets a 400, because that is a
@@ -206,7 +206,7 @@ function buildFixedTotalAllocations(totalAmount, milestones = [], { allowShortfa
 // `allowShortfall` note above `allocateFixedThenVariableTotals`) — so it
 // always allows a shortfall rather than throwing on read-ish paths like
 // record payment, void payment, mark unsent/unpaid, update milestone, send
-// and revise (DEL-30 P2-A). A future authoring-time validator (schedule
+// and revise. A future authoring-time validator (schedule
 // creation, `assertMilestoneScheduleMutationAllowed`) should call
 // `buildFixedTotalAllocations` / `allocateFixedThenVariableTotals` with the
 // strict default instead.
@@ -334,7 +334,7 @@ function deriveMilestoneStatus({
   // an open milestone that currently has no claim (e.g. a quote reduced
   // below what earlier milestones already invoice). Requiring a positive
   // total or a recorded payment keeps a rebuild from fabricating a "paid"
-  // $0 money document out of thin air (DEL-30 F2).
+  // $0 money document out of thin air.
   if (roundMoney(amountDue) <= 0 && (roundMoney(total) > 0 || roundMoney(amountPaid) > 0)) {
     return "paid";
   }
@@ -343,7 +343,7 @@ function deriveMilestoneStatus({
   // inventing — honour it. The fabrication guard above still binds when
   // there is no stored paid status to honour: only an explicit stored
   // `requestedStatus === "paid"` reaches this branch, never a status
-  // derived from amounts alone (DEL-30 P3-3).
+  // derived from amounts alone.
   if (requestedStatus === "paid" && roundMoney(amountDue) <= 0) {
     return "paid";
   }
@@ -656,7 +656,7 @@ export function normalizePaymentSchedule(schedule, { allowNull = false } = {}) {
   return { milestones };
 }
 
-// Authoring-time guard (DEL-30 P2-3): `buildMilestoneInvoices` is always a
+// Authoring-time guard: `buildMilestoneInvoices` is always a
 // rebuild (see the `allowShortfall` note above `allocateFixedThenVariableTotals`)
 // and now always allows a shortfall rather than throwing, because a rebuild
 // is never the place to validate operator input. That left NO seam that
@@ -1086,7 +1086,7 @@ function rebalanceAllocationsAroundFrozenInvoices({
     // negative remainder to zero used to collapse every open milestone's
     // subtotal to $0 and its GST to 100% of its total: the money total
     // still reconciled, but the tax split on a customer-facing invoice was
-    // wrong (DEL-30 P3-3, round 5). There is no genuine non-negative
+    // wrong. There is no genuine non-negative
     // remainder left to split in cents here, so fall back to the quote's
     // own subtotal:total ratio applied to each open milestone's own total —
     // an approximation, but an internally coherent one, instead of a
@@ -1132,11 +1132,11 @@ export function buildMilestoneInvoices({
   const quoteVersion = normalizeQuoteVersionNumber(quote?.version)
     || normalizeQuoteVersionNumber(meta?.quoteVersion);
   const frozenByIndex = new Map();
-  // Pre-DEL-30 stored records never froze a snapshot on issue, so
+  // Stored records from before invoice revisions never froze a snapshot on issue, so
   // `existing.issuedRevision` is null for the entire population of invoices
   // sent before this change. First touch must still freeze from what was
   // actually stored and sent, never from a fresh reallocation against a
-  // quote that may have moved on since (DEL-30 F3) — so this map tracks the
+  // quote that may have moved on since — so this map tracks the
   // revision synthesized from that legacy record, to be threaded into the
   // revision-state resolution below instead of `null`.
   const legacyIssuedRevisionByIndex = new Map();
@@ -1154,11 +1154,11 @@ export function buildMilestoneInvoices({
       if (!isAuthorizedIndex) frozenByIndex.set(milestoneIndex, existing.issuedRevision);
       return;
     }
-    // Pre-DEL-30 stored records never froze a snapshot on issue, so
+    // Stored records from before invoice revisions never froze a snapshot on issue, so
     // `existing.issuedRevision` is null for the entire population of invoices
     // sent before this change. First touch must still freeze from what was
     // actually stored and sent, never from a fresh reallocation against a
-    // quote that may have moved on since (DEL-30 F3) — so this map tracks the
+    // quote that may have moved on since — so this map tracks the
     // revision synthesized from that legacy record, to be threaded into the
     // revision-state resolution below instead of `null`. This synthesis must
     // run for authorized indexes too: authorization is exactly the moment
@@ -1176,7 +1176,7 @@ export function buildMilestoneInvoices({
       lineItems: existing.lineItems,
       // Without the stored PDF path, the authorization below would retire
       // this revision into history with `pdfPath: null` and 410 despite the
-      // file existing on disk (DEL-30 P1-B).
+      // file existing on disk.
       pdfPath: existing.pdfPath || null,
       // The legacy record predates per-revision quote-version tracking, so
       // there is no historically-accurate value to recover. Threading the
@@ -1184,10 +1184,9 @@ export function buildMilestoneInvoices({
       // fingerprint stable across calls made against the same live quote
       // (e.g. an unsend immediately followed by a re-issue), instead of
       // comparing a synthesized `null` against a real version and burning a
-      // revision number on identical content (DEL-30 P3-2). This value is
+      // revision number on identical content. This value is
       // NOT what the customer's document was actually rendered from — mark
-      // it inferred so downstream audit text never overstates what is known
-      // (DEL-30 P3-1).
+      // it inferred so downstream audit text never overstates what is known.
       quoteVersion,
       quoteVersionInferred: true,
       // Set directly on the synthesized revision itself, not stamped on
@@ -1198,7 +1197,7 @@ export function buildMilestoneInvoices({
       // post-hoc on `revisionState.issuedRevision` instead would land on
       // the freshly minted revision — which has no prior file and is
       // correctly UNWRITTEN, not ADOPT_PENDING — while leaving the retired
-      // legacy copy in history without any state at all (round 5, P2-1).
+      // legacy copy in history without any state at all.
       artifactState: ARTIFACT_STATE.ADOPT_PENDING,
     });
     if (legacyRevision) {
@@ -1311,15 +1310,15 @@ export function buildMilestoneInvoices({
     });
     const invoiceNumber = revisionState.invoiceNumber;
     const pdfPath = buildMilestoneInvoicePdfPath({ invoiceNumber, milestoneIndex });
-    // `artifactState` travels on the revision object itself now — set once,
-    // at legacy synthesis above, on the exact revision it describes (DEL-30
-    // round 5, P2-1). It must never be re-stamped here based on whether
-    // THIS milestone index happened to synthesize a legacy revision this
-    // build: under an authorization, `revisionState.issuedRevision` is a
-    // freshly MINTED revision (the legacy copy was retired into history),
-    // and stamping ADOPT_PENDING onto that mint — which has no prior file —
-    // would wrongly route it through the adopt-or-reconstruct branch in
-    // `writeMilestoneInvoiceArtifact` instead of a plain first render.
+    // `artifactState` travels on the revision object itself now — set once, at
+    // legacy synthesis above, on the exact revision it describes. It must never
+    // be re-stamped here based on whether THIS milestone index happened to
+    // synthesize a legacy revision this build: under an authorization,
+    // `revisionState.issuedRevision` is a freshly MINTED revision (the legacy
+    // copy was retired into history), and stamping ADOPT_PENDING onto that mint
+    // — which has no prior file — would wrongly route it through the
+    // adopt-or-reconstruct branch in `writeMilestoneInvoiceArtifact` instead of
+    // a plain first render.
     const issuedRevision = revisionState.issuedRevision
       ? {
           ...revisionState.issuedRevision,
@@ -1461,7 +1460,7 @@ export function updateMilestoneInvoice({
     // Only ever used when this authorise transition happens to mint a
     // revision above 1 — i.e. the invoice was previously issued, then
     // returned to draft, and is now being reissued with changed content.
-    // No operator-typed reason is required on this path (DEL-30 F6).
+    // No operator-typed reason is required on this path.
     defaultRevisionReason: "Reissued after the invoice was returned to draft",
   });
 
@@ -1496,7 +1495,7 @@ export function recordMilestoneInvoicePayment({
   // milestone: if the caller doesn't supply one (only the migration path
   // does), default to the milestone's current invoice/revision number so
   // paid state stays traceable to the right numbered document even after a
-  // later revision supersedes it (DEL-30 F5).
+  // later revision supersedes it.
   const sourceInvoiceNumber = cleanText(payment?.sourceInvoiceNumber) || cleanText(current.invoiceNumber) || null;
   const sourceRevisionNumber = Number.isFinite(Number(payment?.sourceRevisionNumber)) && Number(payment.sourceRevisionNumber) > 0
     ? Number(payment.sourceRevisionNumber)
@@ -1615,7 +1614,7 @@ export function markMilestoneInvoiceUnpaid({
     // The content is not changing here, only the issue state — carry the
     // quote version the retiring revision was issued against so a
     // subsequent identical re-issue still fingerprint-matches and restores
-    // it instead of burning a number (DEL-30 F4).
+    // it instead of burning a number.
     quoteVersion: current.issuedRevision?.quoteVersion ?? null,
   });
 

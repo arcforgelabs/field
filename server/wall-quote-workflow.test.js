@@ -88,7 +88,7 @@ function wallQuoteFixture({ version, quoteNumber, jobNumber }) {
   };
 }
 
-// DEL-67 P2: POST /api/jobs/:id/wall-build (server/index.js) is a
+// POST /api/jobs/:id/wall-build (server/index.js) is a
 // hand-rolled sibling of buildAndPersistQuote's rebuild pipeline and had
 // the identical bug — delivery state keyed on "did THIS call fork" instead
 // of "is this job already past draft". Traced failure: a landed

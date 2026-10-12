@@ -1,4 +1,4 @@
--- Reverses migration 0005_tenancy (#178 phase 0b) for an emergency rollback to
+-- Reverses migration 0005_tenancy (pricing engine phase 0b) for an emergency rollback to
 -- a release from before it. Run as the database owner, in ONE transaction,
 -- after stopping the app:
 --

@@ -124,7 +124,7 @@ export async function updatePendingQuoteDelivery(jobDir, attemptId, patch, {
 /**
  * Claim a pending attempt with a durable compare-and-swap revision.
  *
- * With durable storage (#139) the claim must be stored in PostgreSQL before
+ * With durable storage the claim must be stored in PostgreSQL before
  * Gmail is called: otherwise a restart could rebuild the attempt as "pending"
  * and the next send would email the customer twice (Gmail does not dedupe on
  * Message-ID). If it cannot be stored, the claim is undone and the send is

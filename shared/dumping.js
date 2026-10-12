@@ -3,7 +3,7 @@
 // per_load / per_m3) and the conversion factor that basis needs — see
 // server/catalog/store.js. This module never carries a rate,
 // cost, charge, or markup constant; add one here and you have recreated the
-// second source of truth this file used to be (DEL-46).
+// second source of truth this file used to be.
 
 export const DEFAULT_SOIL_DUMPS = [
   buildDumpSite({
