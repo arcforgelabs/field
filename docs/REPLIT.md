@@ -10,6 +10,7 @@ Field is a quoting and invoicing app: catalogue, quote builder, quote and
 invoice PDFs, and sending them by email. It does no AI work of its own.
 
 - Run and deploy with `scripts/replit-start.sh` (build: `scripts/replit-build.sh`).
+- Runtime: Node 24 (`.replit` module `nodejs-24`), matching CI and the Dockerfile.
 - Field keeps its state under its data directory (`FIELD_DATA`, default
   `data/`). A published Replit app does not keep files between publishes, so
   the published app must run with durable storage on (`FIELD_STORAGE=postgres`,
@@ -24,7 +25,7 @@ Secrets, which reach the app as environment variables:
 
 | Secret | What it holds |
 | --- | --- |
-| `FIELD_CONFIG_JSON` | The whole config object as one JSON value, shaped like `config.json.example`: `authToken`, `publicUrl`, `mail` (sender and `deliveryPolicy`), `googleOAuth` (`clientId`, `clientSecret`), `googleDriveFolderId`, `bootstrapUsers`, `mcp`. Leave out `port` and `dataDir`. When it is set, `FIELD_CONFIG` and `config.json` are ignored, and invalid JSON stops Field at boot. |
+| `FIELD_CONFIG_JSON` | The whole config object as one JSON value, shaped like `config.json.example`: `authToken`, `publicUrl`, `mail` (sender and `deliveryPolicy`), `googleOAuth` (`clientId`, `clientSecret`), `googleDriveFolderId`, `bootstrapUsers`, `mcp`, and `businessProfile` (your trading name, ABN, address, contact details and bank account; README "Business profile"). Leave out `port` and `dataDir`. When it is set, `FIELD_CONFIG` and `config.json` are ignored, and invalid JSON stops Field at boot. |
 | `FIELD_TOKEN` | Optional. Overrides `authToken`. |
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | Optional. The service account key JSON itself (paste the whole file). A file path still works elsewhere, and `googleServiceAccountKey` in config can hold either. |
 

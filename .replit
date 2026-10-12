@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "web", "bash"]
+modules = ["nodejs-24", "web", "bash"]
 run = ["bash", "scripts/replit-start.sh"]
 
 # Marks the Replit runtime for the app and for operator CLIs run from the
