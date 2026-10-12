@@ -512,7 +512,7 @@ installIssuedDocumentRecorder(issuedDocumentRecorder);
 
 // The invoice issue service (#28, step 4b): an invoice is issued when it is
 // finalised (authorised, sent, revised), in one PostgreSQL transaction that
-// allocates its INV-YYYY-MM-N number, renders and stores its PDF and writes
+// allocates its INV-YYYY-M-N number, renders and stores its PDF and writes
 // its row. Without a database, issuing an invoice is refused: it is never
 // issued outside the sequence.
 try {

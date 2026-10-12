@@ -173,7 +173,7 @@ describe("invoice-row dual-write", () => {
       await actions.generate(jobDir, [{ label: "Deposit", percentage: 50 }, { label: "Completion", percentage: 50 }]);
       await actions.issue(jobDir, 0);
       const deposit = (await readJobMeta(jobDir)).milestoneInvoices[0];
-      assert.match(deposit.invoiceNumber, /^INV-\d{4}-\d{2}-[1-9]\d*$/);
+      assert.match(deposit.invoiceNumber, /^INV-\d{4}-([1-9]|1[0-2])-[1-9]\d*$/);
       let state = await summary("job-issue");
       assert.deepEqual(state.invoices.map(([number, status]) => [number, status]), [["EI-2610-02-M2", "draft"], [deposit.invoiceNumber, "issued"]]);
       const row = state.read.invoices.find((invoice) => invoice.number === deposit.invoiceNumber);

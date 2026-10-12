@@ -963,7 +963,7 @@ function withIssuedNumber(entry, { number, reference, issuedAt }) {
 
 // Issue every invoice this call issues (an authorise, a send, a revision),
 // through the invoice issue service (server/invoices/issue.js): it allocates
-// the INV-YYYY-MM-N number, renders the PDF once with it, stores the bytes
+// the INV-YYYY-M-N number, renders the PDF once with it, stores the bytes
 // and the issued invoice row, in one PostgreSQL transaction. The milestone
 // then carries that number, and the exact stored bytes are written at its
 // PDF path, so the artifact write below adopts them instead of rendering

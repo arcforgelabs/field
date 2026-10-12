@@ -434,8 +434,10 @@ async function takeMigrationLock(client) {
 // migrating at once (test databases, or two installations sharing a cluster)
 // can both create, alter or grant field_app (0005) and collide. Drizzle runs
 // pending migrations in one transaction, so a run that hit this was rolled
-// back and is safe to repeat.
-const ROLE_CONFLICT_RETRIES = 5;
+// back and is safe to repeat. Every migration after 0005 lengthens that one
+// transaction, and so the window two runs can collide in: retry more, and
+// back off further, than a single migration would need.
+const ROLE_CONFLICT_RETRIES = 10;
 
 function isClusterRoleConflict(error) {
   for (let current = error; current; current = current.cause) {
@@ -457,7 +459,7 @@ export async function migratePostgresDatabase(db, { migrationsFolder = MIGRATION
       return await migratePostgres(db, { migrationsFolder });
     } catch (error) {
       if (attempt > ROLE_CONFLICT_RETRIES || !isClusterRoleConflict(error)) throw error;
-      await new Promise((wake) => setTimeout(wake, 50 * attempt + Math.floor(Math.random() * 100)));
+      await new Promise((wake) => setTimeout(wake, 100 * attempt + Math.floor(Math.random() * 250)));
     }
   }
 }

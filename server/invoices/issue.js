@@ -2,7 +2,7 @@
 // invoice is issued when it is finalised, in ONE organisation transaction
 // that holds the organisation's issue lock:
 //
-//   1. allocate the number: INV-YYYY-MM-N from document_number_counters (per
+//   1. allocate the number: INV-YYYY-M-N from document_number_counters (per
 //      organisation, document type and month; N restarts each month);
 //   2. render the PDF once, with that number;
 //   3. store its bytes (document_blobs) and its issued document, with an

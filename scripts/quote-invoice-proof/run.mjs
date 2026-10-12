@@ -689,7 +689,7 @@ async function invoiceRowsProof({ aid }) {
   check("job A: two milestones, two invoices under their numbers as issued", rows.milestones.length === 2 && rows.invoices.length === 2
     && i0 && i1, { numbers: rows.invoices.map((invoice) => invoice.number) });
   if (HAS_INVOICE_ISSUE) {
-    check("job A: invoice 0 was issued from the sequence (INV-YYYY-MM-N), with the job number as its reference", /^INV-\d{4}-\d{2}-[1-9]\d*$/.test(i0?.number || "")
+    check("job A: invoice 0 was issued from the sequence (INV-YYYY-M-N), with the job number as its reference", /^INV-\d{4}-([1-9]|1[0-2])-[1-9]\d*$/.test(i0?.number || "")
       && Boolean(i0?.reference) && i0.reference === detail.meta.jobNumber, { number: i0?.number, reference: i0?.reference, jobNumber: detail.meta.jobNumber });
   }
   check("job A: invoice 0 is paid, with the exact subtotal, GST and total printed on a08-invoice-0.pdf", i0 && printed

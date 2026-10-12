@@ -45,10 +45,10 @@ const TEST_PRICE_CATALOG = await createTestPriceCatalog({ track: false });
 const TEST_PRICE_CATALOG_DB = TEST_PRICE_CATALOG.store;
 test.after(() => TEST_PRICE_CATALOG.close());
 // Invoices are issued through the issue service (server/invoices/issue.js),
-// as on a server with a database: INV-YYYY-MM-N numbers, stored PDFs.
+// as on a server with a database: INV-YYYY-M-N numbers, stored PDFs.
 const TEST_INVOICE_ISSUER = await installTestInvoiceIssuer();
 test.after(() => TEST_INVOICE_ISSUER.close());
-const SEQUENCE_NUMBER = /^INV-\d{4}-\d{2}-[1-9]\d*$/;
+const SEQUENCE_NUMBER = /^INV-\d{4}-([1-9]|1[0-2])-[1-9]\d*$/;
 
 function createQuoteFixture(meta, overrides = {}) {
   return {

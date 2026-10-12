@@ -1,4 +1,4 @@
-// The invoice issue service (#28, step 4b): INV-YYYY-MM-N numbers from
+// The invoice issue service (#28, step 4b): INV-YYYY-M-N numbers from
 // document_number_counters, allocated in the issue transaction with no gaps
 // and never reused; the PDF rendered once and stored with its issued
 // document and `issued` event; the invoice row frozen with its job
@@ -14,6 +14,7 @@ import { createInvoiceRowService } from "./invoice-rows.js";
 import {
   createInvoiceIssueService,
   createUnavailableInvoiceIssuer,
+  formatInvoiceNumber,
   invoiceIssueKey,
   invoiceIssuer,
   invoicePeriod,
@@ -101,19 +102,19 @@ describe("invoice issue service", () => {
     await t.close();
   });
 
-  test("numbers are INV-YYYY-MM-N from the issue time's month, in order, per organisation", async () => {
+  test("numbers are INV-YYYY-M-N from the issue time's month, in order, per organisation", async () => {
     const period = invoicePeriod(new Date("2026-10-12T02:00:00.000Z"));
     const first = await issue(a);
     const second = await issue(a);
-    assert.equal(first.number, `INV-${period}-1`);
-    assert.equal(second.number, `INV-${period}-2`);
+    assert.equal(first.number, formatInvoiceNumber(period, 1));
+    assert.equal(second.number, formatInvoiceNumber(period, 2));
     assert.equal(first.replayed, false);
     assert.ok(isSequenceInvoiceNumber(first.number));
-    assert.equal((await issue(b)).number, `INV-${period}-1`, "another organisation has its own sequence");
+    assert.equal((await issue(b)).number, formatInvoiceNumber(period, 1), "another organisation has its own sequence");
     // A new month starts again at 1.
     const nextMonth = new Date(2026, 10, 3, 9, 0, 0).toISOString();
-    assert.equal((await issue(a, { issuedAt: nextMonth })).number, `INV-${invoicePeriod(nextMonth)}-1`);
-    assert.equal((await issue(a)).number, `INV-${period}-3`);
+    assert.equal((await issue(a, { issuedAt: nextMonth })).number, formatInvoiceNumber(invoicePeriod(nextMonth), 1));
+    assert.equal((await issue(a)).number, formatInvoiceNumber(period, 3));
   });
 
   test("the PDF is rendered once with the number, stored, and recorded as issued with the frozen row", async () => {
@@ -168,7 +169,7 @@ describe("invoice issue service", () => {
     await rejects(issue(a, { render: async () => { throw new Error("renderer crashed"); } }), /renderer crashed/);
     await rejects(issue(a, { reference: "  " }), /job number as its reference/);
     assert.equal(await counter(ORG_A, period), before);
-    assert.equal((await issue(a)).number, `INV-${period}-${before + 1}`);
+    assert.equal((await issue(a)).number, formatInvoiceNumber(period, before + 1));
   });
 
   test("issues racing each other get distinct numbers, one after another", async () => {
@@ -184,6 +185,9 @@ describe("invoice issue service", () => {
       values ('inv_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'job-x', 'INV-2026-10-77', 'deposit', 'issued', 1, 0, 1, now(), 'no-reference', now(), now())`)), /invoices_issue_check/);
     await rejects(withOrg(t.db, ORG_A, (tx) => tx.execute(sql`insert into invoices (uid, job_id, number, kind, status, subtotal, tax_total, total, issued_at, issue_key, reference, created_at, updated_at)
       values ('inv_01ARZ3NDEKTSV4RRFFQ69G5FAW', 'job-x', 'EI-2610-03-M1', 'deposit', 'issued', 1, 0, 1, now(), 'bad-number', '2610-03', now(), now())`)), /invoices_issue_check/);
+    // The month is not zero-padded (owner's decision, 2026-10-13).
+    await rejects(withOrg(t.db, ORG_A, (tx) => tx.execute(sql`insert into invoices (uid, job_id, number, kind, status, subtotal, tax_total, total, issued_at, issue_key, reference, created_at, updated_at)
+      values ('inv_01ARZ3NDEKTSV4RRFFQ69G5FAX', 'job-x', 'INV-2026-01-5', 'deposit', 'issued', 1, 0, 1, now(), 'padded', '2610-03', now(), now())`)), /invoices_issue_check/);
   });
 
   test("the issue key names the job, milestone, revision and money", () => {

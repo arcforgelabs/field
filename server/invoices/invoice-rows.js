@@ -27,6 +27,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { schema } from "../db-runtime/index.js";
 import { orgScope } from "../db-runtime/tenancy.js";
 import { centsToText, fixed, quoteTotals, toCents } from "../quotes/totals.js";
+import { compareDocumentNumbers } from "./numbers.js";
 import {
   newInvoiceLineUid,
   newInvoiceUid,
@@ -313,7 +314,9 @@ export function createInvoiceRowService({ db, orgUid = undefined, now = () => ne
 
   async function loadJob(tx, jobId) {
     const milestoneRows = await tx.select().from(paymentMilestones).where(eq(paymentMilestones.jobId, jobId)).orderBy(asc(paymentMilestones.sortOrder));
-    const invoiceRows = await tx.select().from(invoices).where(eq(invoices.jobId, jobId)).orderBy(asc(invoices.createdAt), asc(invoices.number));
+    // Oldest first; numbers by their period and sequence, never their text.
+    const invoiceRows = (await tx.select().from(invoices).where(eq(invoices.jobId, jobId)))
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt) || compareDocumentNumbers(a.number, b.number));
     const lineRows = invoiceRows.length
       ? await tx.select().from(invoiceLines).where(inArray(invoiceLines.invoiceUid, invoiceRows.map((row) => row.uid))).orderBy(asc(invoiceLines.sortOrder))
       : [];

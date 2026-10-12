@@ -16,7 +16,7 @@ import { migratePostgresDatabase, queryRows, schema } from "../db-runtime/index.
 import { startTestPostgres, testPostgresMode } from "../db-runtime/test-postgres.js";
 import { DEFAULT_ORG_UID, inspectRowSecurity, withOrg } from "../db-runtime/tenancy.js";
 import { claimLineName, claimMoney } from "./from-milestones.js";
-import { createInvoiceIssueService, invoicePeriod } from "./issue.js";
+import { createInvoiceIssueService, formatInvoiceNumber, invoicePeriod } from "./issue.js";
 
 const ORG_B = "org_01TESTSECONDORGANISATION0";
 const enabled = testPostgresMode().kind !== "none";
@@ -48,7 +48,7 @@ test("through SET ROLE field_app: the issue allocates, stores and writes with th
   assert.equal((await inspectRowSecurity(db)).via, "set-role");
   const service = createInvoiceIssueService({ db, orgUid: DEFAULT_ORG_UID });
   const first = await service.issueInvoice({ jobId: "job-app", idempotencyKey: "app-1", reference: "2610-10", issuedAt: "2026-10-12T02:00:00.000Z", invoice: invoice(), render: async (number) => Buffer.from(`%PDF-1.4\n${number}\n%%EOF\n`) });
-  assert.match(first.number, /^INV-\d{4}-\d{2}-1$/);
+  assert.match(first.number, /^INV-\d{4}-([1-9]|1[0-2])-1$/);
   const replay = await service.issueInvoice({ jobId: "job-app", idempotencyKey: "app-1", reference: "2610-10", issuedAt: "2026-10-12T02:00:00.000Z", invoice: invoice(), render: async () => { throw new Error("not rendered again"); } });
   assert.equal(replay.number, first.number);
 });
@@ -91,8 +91,8 @@ test("as a table owner without CREATEROLE: concurrent issues are numbered 1..n, 
     const numbers = results.filter((result) => result.status === "fulfilled").map((result) => result.value.number);
     assert.equal(results.filter((result) => result.status === "rejected").length, 1);
     assert.deepEqual(numbers.map((number) => Number(number.split("-").at(-1))).sort((x, y) => x - y), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    assert.ok(numbers.every((number) => number.startsWith(`INV-${period}-`)));
-    assert.equal((await issue(b, 99)).number, `INV-${period}-1`);
+    assert.ok(numbers.every((number) => number.startsWith(formatInvoiceNumber(period, 1).replace(/1$/, ""))));
+    assert.equal((await issue(b, 99)).number, formatInvoiceNumber(period, 1));
 
     // The same key again, on another connection, returns the first answer.
     const again = await issue(a, 0);

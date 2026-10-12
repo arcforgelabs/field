@@ -1342,7 +1342,7 @@ export const invoices = pgTable(
     reference: text("reference"),
     /**
      * The issue service's idempotency key (step 4b, server/invoices/issue.js):
-     * set on an invoice issued with an INV-YYYY-MM-N number from
+     * set on an invoice issued with an INV-YYYY-M-N number from
      * document_number_counters, null on one issued before (EI-…). A retried
      * issue with the same key finds this row and returns it.
      */
@@ -1398,7 +1398,7 @@ export const invoices = pgTable(
     check("invoices_revision_check", sql`${t.revision} > 0`),
     check("invoices_quote_version_check", sql`${t.quoteVersion} is null or ${t.quoteVersion} > 0`),
     check("invoices_version_check", sql`${t.version} > 0`),
-    check("invoices_issue_check", sql`${t.issueKey} is null or (${t.issuedAt} is not null and ${t.number} ~ '^INV-[0-9]{4}-[0-9]{2}-[1-9][0-9]*$' and ${t.reference} is not null and btrim(${t.reference}) <> '')`),
+    check("invoices_issue_check", sql`${t.issueKey} is null or (${t.issuedAt} is not null and ${t.number} ~ '^INV-[0-9]{4}-([1-9]|1[0-2])-[1-9][0-9]*$' and ${t.reference} is not null and btrim(${t.reference}) <> '')`),
     tenantIsolation("invoices"),
   ],
 );

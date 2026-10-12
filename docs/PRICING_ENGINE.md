@@ -23,7 +23,7 @@ those rows, while the files are still written alongside. Phase 3 step 4a
 is built too (#27): every job's payment schedule, milestone invoices,
 payments and receipts are also written as rows and checked against what was
 issued. Step 4b part one is built too (#28): invoices are issued from the
-issue service, with `INV-YYYY-MM-N` numbers allocated in the issue
+issue service, with `INV-YYYY-M-N` numbers allocated in the issue
 transaction (see "Phase 3, step by step").
 
 The owner's six decisions of 2026-10-12 (from the document audit) are
@@ -177,10 +177,14 @@ reused, from a per-type sequence: quotes `EQ-YYMM-NN` (as today). Revisions
 of a quote keep its number and add a version (`EQ-2501-03 v2`).
 
 > **Decision, 2026-10-12:** invoice numbers are
-> `INV-YYYY-MM-N`, from one sequence per organisation, allocated when the
+> `INV-YYYY-M-N`, from one sequence per organisation, allocated when the
 > invoice is issued (`document_number_counters`). An invoice connected to a
 > job carries the job number as a required reference. Numbers already issued
-> (`EI-…`) stay as they are. **Built (#28, step 4b part one):** see "How step
+> (`EI-…`) stay as they are. **Decided 2026-10-13:** the month is not
+> zero-padded: January 2026 is `INV-2026-1-1`, October `INV-2026-10-2`.
+> Numbers are ordered by their period and sequence, never as text
+> (`compareDocumentNumbers`, `server/invoices/numbers.js`). **Built (#28,
+> step 4b part one):** see "How step
 > 4b issues invoices".
 
 ### Numbers, money and rounding
@@ -549,7 +553,7 @@ Milestone invoicing is used on 51 of 65 jobs, so it gets proper tables.
 >   revisions (`issuedRevision`, `revisionHistory`, the `-R2` and `-R3`
 >   numbers, `reviseJobMilestoneInvoice`) migrate as a credit note plus a
 >   new invoice (step 4b).
-> - **Numbers:** `INV-YYYY-MM-N`, one sequence per organisation, allocated
+> - **Numbers:** `INV-YYYY-M-N`, one sequence per organisation, allocated
 >   in the issue transaction, with the job number as a required reference
 >   (see "Identity"). Numbers already issued (`EI-…-M<n>`, `-R<k>`, `ER-…`
 >   receipts) stay exactly as issued.
@@ -572,7 +576,7 @@ Milestone invoicing is used on 51 of 65 jobs, so it gets proper tables.
 - `payment_milestones`: `uid`, `quote_uid`, `label` ("Deposit",
   "On completion"), `percent` or `amount`, `sort_order`. Defaults come from
   the account's rules.
-- `invoices`: `uid` (`inv_…`), `number` (`INV-YYYY-MM-N`), `quote_uid`,
+- `invoices`: `uid` (`inv_…`), `number` (`INV-YYYY-M-N`), `quote_uid`,
   `job_id` (the required reference), `milestone_uid` null, `kind`
   (`deposit`, `progress`, `final`, `variation`), `status` (`draft`,
   `issued`, `paid`, `void`), `issued_on`, `due_on`, `subtotal`,
@@ -595,7 +599,7 @@ differences:**
   `is_default_schedule` is ready for step 4c. Nothing today is known to
   come from account rules, so it is false.
 - `invoices` keep their numbers as issued (`EI-…-M<n>`, `EI-…-M<n>-R<k>`).
-  `INV-YYYY-MM-N` arrives with step 4b. `status` also has `credited`: a
+  `INV-YYYY-M-N` arrives with step 4b. `status` also has `credited`: a
   revision that was superseded in place is its own row, `credited`, and its
   successor names it in `supersedes_invoice_uid`, until step 4b adds the
   credit note that corrects it. A revision returned to draft (unsent, or
@@ -659,7 +663,8 @@ tables are filled alongside them and read only by the by-uid routes.
   attempt) and an `idempotency_key`, so a retried write adds nothing.
 - `document_number_counters`: `(org_uid, document_type, period)` and
   `last_value`. The invoice issue service advances the `invoice` counter
-  (period `YYYY-MM`) inside the issue transaction (step 4b). Quotes and
+  (period `YYYY-MM`, zero-padded so periods compare in order; the printed
+  number drops the zero) inside the issue transaction (step 4b). Quotes and
   receipts do not use it yet.
 
 Rules:
@@ -947,7 +952,7 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 3, part two | Quote reads from rows (#10): display columns (migration 0011); the quote PDF, the quote email's totals, the job's cached totals and the job detail's customer pricing (client and MCP) come from the rows; editor saves carry `If-Match` | Built |
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
 | 4a | Invoices, payments and receipts as rows (#27): `payment_milestones`, `invoices`, `invoice_lines`, `payments`, `receipts`, and the shape of `credit_notes` (migration 0013); dual-write after every committed milestone change; a backfill verified against what was issued | Built |
-| 4b | The issue service for invoices (#28): `INV-YYYY-MM-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Part one built (issue service, migration 0014); credit notes and claim lines next |
+| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Part one built (issue service, migration 0014); credit notes and claim lines next |
 | 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Later |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
@@ -1122,7 +1127,7 @@ number and bytes now come from PostgreSQL.
   milestone whose issued revision has no document yet, and issues each one
   through the service before the job generation commits.
 - **One transaction.** Under the organisation's issue lock
-  (`pg_advisory_xact_lock`), the service allocates `INV-YYYY-MM-N` from
+  (`pg_advisory_xact_lock`), the service allocates `INV-YYYY-M-N` from
   `document_number_counters` (period: the issue time's month in the server's
   local time, the date the PDF prints), renders the PDF once with that number
   and the job reference, stores the bytes in `document_blobs` with an

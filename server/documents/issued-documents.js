@@ -20,6 +20,7 @@ import { schema } from "../db-runtime/index.js";
 import { orgScope } from "../db-runtime/tenancy.js";
 import { DocumentBytesError, createPostgresBlobStore, sha256Hex } from "./blob-store.js";
 import { isDocumentUid, newDocumentEventUid, newDocumentUid } from "./uid.js";
+import { compareDocumentNumbers } from "../invoices/numbers.js";
 
 const { issuedDocuments, documentEvents, ISSUED_DOCUMENT_TYPES, ISSUED_DOCUMENT_SOURCES, DOCUMENT_EVENTS } = schema;
 
@@ -309,9 +310,12 @@ export function createIssuedDocumentService({
     /** A job's issued documents (oldest first), each with its events, and events with no document. */
     async listJobDocuments(jobId) {
       return scope.transaction(async (tx) => {
-        const rows = await tx.select().from(issuedDocuments)
-          .where(eq(issuedDocuments.jobId, String(jobId)))
-          .orderBy(asc(issuedDocuments.issuedAt), asc(issuedDocuments.documentType), asc(issuedDocuments.number));
+        // By issue time, then type, then number by its period and sequence
+        // (INV-2026-9-… before INV-2026-10-…), never by its text.
+        const rows = (await tx.select().from(issuedDocuments).where(eq(issuedDocuments.jobId, String(jobId))))
+          .sort((a, b) => new Date(a.issuedAt) - new Date(b.issuedAt)
+            || a.documentType.localeCompare(b.documentType)
+            || compareDocumentNumbers(a.number, b.number));
         const events = await tx.select().from(documentEvents)
           .where(eq(documentEvents.jobId, String(jobId)))
           .orderBy(asc(documentEvents.at), asc(documentEvents.createdAt), asc(documentEvents.uid));

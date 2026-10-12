@@ -2000,7 +2000,7 @@ function formatDate(value) {
 }
 
 // What an invoice prints as its number. A milestone invoice that has not
-// been issued has no number yet: the issue service allocates INV-YYYY-MM-N
+// been issued has no number yet: the issue service allocates INV-YYYY-M-N
 // when it is issued (server/invoices/issue.js), so its preview says so
 // rather than printing the provisional EI-… number it is tracked under.
 const DRAFT_INVOICE_REF = "Draft, not yet issued";
