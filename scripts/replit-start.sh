@@ -11,4 +11,5 @@ export FIELD_RUNTIME="${FIELD_RUNTIME:-replit}"
 if [ -z "${FIELD_REVISION:-}" ] && [ -s .field-revision ]; then
   export FIELD_REVISION="$(cat .field-revision)"
 fi
-exec node server/index.js
+# Sentry starts before Express so its routes are traced (no-op without SENTRY_DSN).
+exec node --import ./server/observability/instrument.js server/index.js

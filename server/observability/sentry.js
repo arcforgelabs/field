@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { scrubBreadcrumb, scrubEvent, scrubText } from "../../shared/sentry-scrub.js";
+import { createEventThrottle, scrubBreadcrumb, scrubEvent, scrubLog, scrubText, scrubValue } from "../../shared/sentry-scrub.js";
 import { replitPlacement } from "../runtime-config.js";
 
 export { scrubEvent };
@@ -40,11 +40,33 @@ export function resolveSentryDsn(env = process.env) {
   }
 }
 
-// Tracing is off unless SENTRY_TRACES_SAMPLE_RATE asks for it: Field reports
-// errors, and every span is one more place a URL could carry customer data.
-export function resolveTracesSampleRate(value) {
-  const rate = Number.parseFloat(String(value ?? "0"));
-  return Number.isFinite(rate) ? Math.min(1, Math.max(0, rate)) : 0;
+// A sample rate from a setting: a number from 0 to 1, else the default.
+export function resolveSampleRate(value, fallback) {
+  const text = readString(value);
+  if (!text) return fallback;
+  const rate = Number.parseFloat(text);
+  return Number.isFinite(rate) ? Math.min(1, Math.max(0, rate)) : fallback;
+}
+
+// Defaults sized for Sentry's free Developer plan with a handful of users:
+// 5M spans, 50 replays and 5 GB of logs a month. Each is a setting, so a
+// trial or a paid plan can raise it without a code change (docs/REPLIT.md).
+export const SENTRY_DEFAULTS = Object.freeze({
+  tracesSampleRate: 0.2,
+  replaysSessionSampleRate: 0.05,
+  replaysOnErrorSampleRate: 1,
+});
+
+function settingOn(value, fallback = true) {
+  const text = readString(value).toLowerCase();
+  if (!text) return fallback;
+  return !["0", "false", "off", "no"].includes(text);
+}
+
+// Health checks and static files would spend the span quota and say nothing.
+export function ignoreIncomingRequest(url) {
+  const path = String(url || "").split("?")[0];
+  return path === "/health" || path.startsWith("/assets/") || /\.(?:js|css|map|png|svg|ico|woff2?|webmanifest)$/.test(path);
 }
 
 let initialized = false;
@@ -52,6 +74,9 @@ let enabled = false;
 let Sentry = null;
 let browserConfig = null;
 
+// Runs from server/observability/instrument.js (node --import) before Express
+// loads, so Express routes are traced; server/index.js calls it again, which
+// is a no-op, and starts it late when the preload was not used.
 export async function initFieldSentry(env = process.env) {
   if (initialized) return { enabled };
   initialized = true;
@@ -64,7 +89,8 @@ export async function initFieldSentry(env = process.env) {
   Sentry = await import("@sentry/node");
   const environment = resolveSentryEnvironment(env);
   const release = resolveSentryRelease(env) || undefined;
-  const tracesSampleRate = resolveTracesSampleRate(env.SENTRY_TRACES_SAMPLE_RATE);
+  const tracesSampleRate = resolveSampleRate(env.SENTRY_TRACES_SAMPLE_RATE, SENTRY_DEFAULTS.tracesSampleRate);
+  const logs = settingOn(env.SENTRY_LOGS);
   Sentry.init({
     dsn,
     environment,
@@ -72,17 +98,52 @@ export async function initFieldSentry(env = process.env) {
     sendDefaultPii: false,
     includeLocalVariables: false,
     tracesSampleRate,
-    beforeSend: scrubEvent,
+    enableLogs: logs,
+    enableMetrics: settingOn(env.SENTRY_METRICS),
+    integrations: [
+      Sentry.httpIntegration({ ignoreIncomingRequests: ignoreIncomingRequest }),
+      ...(logs ? [Sentry.consoleLoggingIntegration({ levels: ["log", "info", "warn", "error"] })] : []),
+    ],
+    // Same error at most once an hour, at most 20 errors an hour in all
+    // (shared/sentry-scrub.js), so a repeating failure cannot use up the plan.
+    beforeSend: (() => {
+      const throttle = createEventThrottle();
+      return (event) => {
+        const allowed = throttle(event);
+        return allowed && scrubEvent(allowed);
+      };
+    })(),
     beforeSendTransaction: scrubEvent,
     beforeBreadcrumb: scrubBreadcrumb,
+    beforeSendLog: scrubLog,
+    beforeSendMetric: (metric) => ({ ...metric, attributes: scrubValue(metric.attributes) }),
   });
   enabled = true;
-  browserConfig = { dsn, environment, release: release || "", tracesSampleRate };
+  browserConfig = {
+    dsn,
+    environment,
+    release: release || "",
+    tracesSampleRate,
+    replaysSessionSampleRate: resolveSampleRate(env.SENTRY_REPLAYS_SESSION_SAMPLE_RATE, SENTRY_DEFAULTS.replaysSessionSampleRate),
+    replaysOnErrorSampleRate: resolveSampleRate(env.SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE, SENTRY_DEFAULTS.replaysOnErrorSampleRate),
+    feedback: settingOn(env.SENTRY_FEEDBACK),
+  };
   if (readString(env.SENTRY_VERIFY) === "1") {
     Sentry.captureException(new Error("Field Sentry verification (server)"));
     await Sentry.flush(5000);
   }
   return { enabled };
+}
+
+// A product counter (for example a document issued). Attributes name kinds,
+// never customers; a no-op while Sentry is off.
+export function countFieldMetric(name, attributes = {}) {
+  if (!enabled || typeof Sentry?.metrics?.count !== "function") return;
+  try {
+    Sentry.metrics.count(name, 1, { attributes });
+  } catch {
+    // A metric must never break the work it counts.
+  }
 }
 
 export function isSentryEnabled() {

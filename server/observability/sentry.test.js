@@ -8,7 +8,9 @@ import {
   resolveSentryDsn,
   resolveSentryEnvironment,
   resolveSentryRelease,
-  resolveTracesSampleRate,
+  resolveSampleRate,
+  ignoreIncomingRequest,
+  SENTRY_DEFAULTS,
   scrubEvent,
   sentryBrowserBootstrapScript,
   sentryErrorResponseReporter,
@@ -34,11 +36,22 @@ test("the release is SENTRY_RELEASE, then the build's FIELD_REVISION", () => {
   assert.equal(resolveSentryRelease({ FIELD_REVISION: "abc123", SENTRY_RELEASE: "field@1" }), "field@1");
 });
 
-test("tracing is off unless asked for", () => {
-  assert.equal(resolveTracesSampleRate(undefined), 0);
-  assert.equal(resolveTracesSampleRate("0.25"), 0.25);
-  assert.equal(resolveTracesSampleRate("7"), 1);
-  assert.equal(resolveTracesSampleRate("nope"), 0);
+test("sample rates come from settings, within 0 to 1, else the free-plan defaults", () => {
+  assert.equal(resolveSampleRate(undefined, SENTRY_DEFAULTS.tracesSampleRate), 0.2);
+  assert.equal(resolveSampleRate("", 0.05), 0.05);
+  assert.equal(resolveSampleRate("0", 0.05), 0);
+  assert.equal(resolveSampleRate("0.25", 0.2), 0.25);
+  assert.equal(resolveSampleRate("7", 0.2), 1);
+  assert.equal(resolveSampleRate("nope", 0.2), 0.2);
+  assert.deepEqual({ ...SENTRY_DEFAULTS }, { tracesSampleRate: 0.2, replaysSessionSampleRate: 0.05, replaysOnErrorSampleRate: 1 });
+});
+
+test("health checks and static files are never traced", () => {
+  assert.equal(ignoreIncomingRequest("/health"), true);
+  assert.equal(ignoreIncomingRequest("/assets/index-abc.js"), true);
+  assert.equal(ignoreIncomingRequest("/favicon.svg"), true);
+  assert.equal(ignoreIncomingRequest("/api/jobs"), false);
+  assert.equal(ignoreIncomingRequest("/"), false);
 });
 
 test("Field Sentry events drop customer payloads", () => {
@@ -73,6 +86,7 @@ test("5xx answers and background failures reach Sentry once, scrubbed", async (t
     SENTRY_DSN: "http://publickey@127.0.0.1:9/1",
     SENTRY_ENVIRONMENT: "test",
     FIELD_REVISION: "0123456789abcdef",
+    SENTRY_REPLAYS_SESSION_SAMPLE_RATE: "1",
   });
   const events = [];
   Sentry.getClient().on("beforeSendEvent", (event) => events.push(event));
@@ -82,6 +96,10 @@ test("5xx answers and background failures reach Sentry once, scrubbed", async (t
   assert.match(script, /^<script>window\.__FIELD_SENTRY__=\{.*\};<\/script>$/);
   assert.match(script, /"environment":"test"/);
   assert.match(script, /"release":"0123456789abcdef"/);
+  assert.match(script, /"tracesSampleRate":0.2/);
+  assert.match(script, /"replaysSessionSampleRate":1/);
+  assert.match(script, /"replaysOnErrorSampleRate":1/);
+  assert.match(script, /"feedback":true/);
 
   const app = express();
   app.use(sentryErrorResponseReporter());
@@ -104,10 +122,16 @@ test("5xx answers and background failures reach Sentry once, scrubbed", async (t
   reportBackgroundError(new Error("Gmail quota for jane@example.com"), { area: "scheduled-email", stage: "send" });
   await Sentry.flush(2000);
 
-  const messages = events.map((event) => event.exception?.values?.[0]?.value).sort();
+  const transactions = events.filter((event) => event.type === "transaction");
+  for (const transaction of transactions) {
+    assert.ok(!JSON.stringify(transaction).includes("token=abc"), "no query string in a transaction");
+    assert.ok(!JSON.stringify(transaction).includes("12-main-st"), "no address-like job id in a transaction");
+  }
+  const errors = events.filter((event) => !event.type);
+  const messages = errors.map((event) => event.exception?.values?.[0]?.value).sort();
   assert.deepEqual(messages, ["Gmail quota for [email]", "Gmail refused [email]", "thrown once"]);
 
-  const response = events.find((event) => event.exception.values[0].value === "Gmail refused [email]");
+  const response = errors.find((event) => event.exception.values[0].value === "Gmail refused [email]");
   assert.equal(response.exception.values[0].type, "HTTP 500");
   assert.equal(response.tags["http.route"], "/api/jobs/:id/send");
   assert.equal(response.environment, "test");
@@ -115,7 +139,7 @@ test("5xx answers and background failures reach Sentry once, scrubbed", async (t
   assert.ok(!JSON.stringify(response).includes("token=abc"));
   assert.ok(!JSON.stringify(response).includes("12-main-st"));
 
-  const background = events.find((event) => event.exception.values[0].value === "Gmail quota for [email]");
+  const background = errors.find((event) => event.exception.values[0].value === "Gmail quota for [email]");
   assert.equal(background.tags["field.area"], "scheduled-email");
   assert.equal(background.tags["field.stage"], "send");
 });

@@ -1,14 +1,16 @@
 // Keeps customer details out of Sentry. The server (server/observability/sentry.js)
-// and the browser (client/src/instrument.ts) run every event, transaction and
-// breadcrumb through these functions before anything leaves the process.
+// and the browser (client/src/instrument.ts) run every event, transaction,
+// breadcrumb and log line through these functions before anything leaves the
+// process.
 //
 // What goes: request bodies, cookies, headers (except User-Agent), query
 // strings, the user, console breadcrumbs, local variables, and any value whose
 // key names customer, contact, address, money or credential details. What is
 // rewritten in free text (error messages, URLs, paths, breadcrumbs): email
 // addresses, Australian phone numbers, BSBs, query strings, and job folder or
-// job route segments that are not UUIDs or route parameters (older job
-// folders were named after the site address). Long strings are cut short.
+// job route segments that are not UUIDs, route parameters or single words
+// (older job folders were named after the site address). Long strings are cut
+// short.
 
 const SENSITIVE_KEY =
   /email|phone|mobile|address|customer|client|contact|recipient|attention|site|title|subject|notes?$|body$|html$|pdf|attachment|abn|bsb|bank|account.?(number|name)|password|passphrase|token|secret|authorization|cookie|api.?key|dsn/i;
@@ -20,6 +22,9 @@ const PHONE = /(?<![\w-])(?:\+?61[\s-]?[2-478]|\(0[2-478]\)|0[2-478])(?:[\s-]?\d
 const BSB = /(?<![\w-])\d{3}-\d{3}(?![\w-])/g;
 const QUERY = /([\w\-./:%@#]+)\?[^\s"'<>)]+/g;
 const JOB_SEGMENT = /(\/\d{4}-\d{2}-\d{2}\/|\/jobs\/)([^/\s?#"'<>]+)/gi;
+// A single lowercase word (`manual`, `bulk-archive` has a hyphen and stays
+// redacted) is a route, not a job named after an address.
+const ROUTE_WORD = /^[a-z]+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UI_ATTRIBUTE = /(\[[\w-]+=)"[^"]*"\]/g;
 
@@ -31,7 +36,7 @@ export function scrubText(value, max = MAX_TEXT) {
   let text = value
     .replace(EMAIL, "[email]")
     .replace(QUERY, "$1?[query]")
-    .replace(JOB_SEGMENT, (match, prefix, segment) => (UUID.test(segment) || segment.startsWith(":") ? match : `${prefix}[job]`))
+    .replace(JOB_SEGMENT, (match, prefix, segment) => (UUID.test(segment) || segment.startsWith(":") || ROUTE_WORD.test(segment) ? match : `${prefix}[job]`))
     .replace(PHONE, "[phone]")
     .replace(BSB, "[bsb]");
   if (text.length > max) text = `${text.slice(0, max)}…[cut]`;
@@ -124,4 +129,48 @@ export function scrubEvent(event) {
     }));
   }
   return next;
+}
+
+// Sentry's free plan stores about 5,000 errors a month. One failure that
+// repeats (a scheduler tick every 15 seconds, a page polling a broken route)
+// would spend that in a day and hide every later problem. This sends the same
+// error at most once per `windowMs`, and at most `maxPerWindow` errors in all
+// per window. Digits are ignored when comparing, so ids and counts do not make
+// a repeat look new. Transactions are not limited here.
+export function createEventThrottle({ windowMs = 60 * 60 * 1000, maxPerWindow = 20, now = () => Date.now() } = {}) {
+  const lastSent = new Map();
+  let windowStart = 0;
+  let sentInWindow = 0;
+  return (event) => {
+    if (!event || event.type === "transaction") return event;
+    const at = now();
+    if (at - windowStart >= windowMs) {
+      windowStart = at;
+      sentInWindow = 0;
+      for (const [key, time] of lastSent) if (at - time >= windowMs) lastSent.delete(key);
+    }
+    const exception = event.exception?.values?.[0];
+    const key = (Array.isArray(event.fingerprint) && event.fingerprint.length
+      ? event.fingerprint.join("|")
+      : `${exception?.type || ""}:${exception?.value || event.message || ""}`)
+      .replace(/\d+/g, "0")
+      .slice(0, 500);
+    const previous = lastSent.get(key);
+    if (previous !== undefined && at - previous < windowMs) return null;
+    if (sentInWindow >= maxPerWindow) return null;
+    lastSent.set(key, at);
+    sentInWindow += 1;
+    return event;
+  };
+}
+
+// A log line (server console output sent to Sentry Logs): the same free-text
+// rewriting as error messages, and the same key rules for its attributes.
+export function scrubLog(log) {
+  if (!log || typeof log !== "object") return log;
+  return {
+    ...log,
+    message: scrubText(typeof log.message === "string" ? log.message : String(log.message ?? "")),
+    attributes: log.attributes ? scrubValue(log.attributes) : log.attributes,
+  };
 }

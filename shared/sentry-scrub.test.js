@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { scrubBreadcrumb, scrubEvent, scrubText, scrubValue } from "./sentry-scrub.js";
+import { createEventThrottle, scrubBreadcrumb, scrubEvent, scrubLog, scrubText, scrubValue } from "./sentry-scrub.js";
 
 const JOB_UUID = "3f2b8c1e-9a4d-4e6f-8b2a-1c3d5e7f9a0b";
 
@@ -23,6 +23,7 @@ test("free text loses emails, phone numbers, BSBs and query strings", () => {
 test("job segments are kept when they are UUIDs and redacted when they could be an address", () => {
   assert.equal(scrubText(`/api/jobs/${JOB_UUID}/quote`), `/api/jobs/${JOB_UUID}/quote`);
   assert.equal(scrubText("/api/jobs/12-main-st-exampleton/quote"), "/api/jobs/[job]/quote");
+  assert.equal(scrubText("POST /api/jobs/manual"), "POST /api/jobs/manual");
   assert.equal(
     scrubText("ENOENT: open '/app/data/2026-01-04/12-main-st-exampleton/quote.json'"),
     "ENOENT: open '/app/data/2026-01-04/[job]/quote.json'",
@@ -116,4 +117,24 @@ test("console breadcrumbs never leave", () => {
     category: "navigation",
     data: { from: "/#/jobs", to: "/#/jobs/[job]" },
   });
+});
+
+test("log lines get the same scrubbing as error messages", () => {
+  assert.deepEqual(
+    scrubLog({ level: "error", message: "[email-quote] failed for jane@example.com", attributes: { recipient: "jane@example.com", "sentry.origin": "auto.console.logging" } }),
+    { level: "error", message: "[email-quote] failed for [email]", attributes: { recipient: "[redacted]", "sentry.origin": "auto.console.logging" } },
+  );
+});
+
+test("a repeating error is sent once an hour, and at most 20 errors an hour in all", () => {
+  let now = 0;
+  const throttle = createEventThrottle({ now: () => now });
+  const error = (value) => ({ exception: { values: [{ type: "Error", value }] } });
+  assert.ok(throttle(error("queue tick failed after 3 tries")));
+  assert.equal(throttle(error("queue tick failed after 4 tries")), null, "digits do not make a repeat new");
+  assert.ok(throttle({ type: "transaction" }), "transactions are not limited");
+  for (let i = 0; i < 19; i += 1) assert.ok(throttle(error(`distinct ${String.fromCharCode(97 + i)}`)));
+  assert.equal(throttle(error("one more distinct")), null, "the hourly cap holds");
+  now = 60 * 60 * 1000;
+  assert.ok(throttle(error("queue tick failed after 9 tries")), "an hour later it is sent again");
 });

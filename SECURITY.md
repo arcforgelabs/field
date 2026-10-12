@@ -60,8 +60,9 @@ credential value anywhere public.
   inside the installation's data directory, written with mode `0600`.
 - Surveyor artifacts (`.artifacts/`) are customer data. Never commit them, and
   never attach raw evidence to an issue.
-- Error reports to Sentry pass through `shared/sentry-scrub.js` on the server
-  and in the browser, and session replays mask all text and inputs
+- Errors, traces and logs sent to Sentry pass through `shared/sentry-scrub.js`
+  on the server and in the browser, and session replays mask all text and
+  inputs. Nothing is sent without `SENTRY_DSN`
   (`docs/REPLIT.md`, "Error monitoring (Sentry)"). A change that sends more
   to Sentry extends that scrubbing and its tests in the same pull request.
 - CI runs gitleaks on every push and pull request
