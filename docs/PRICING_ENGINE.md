@@ -613,8 +613,9 @@ differences:**
   that differs from GST on its own subtotal the invoice keeps the GST it was
   issued with, `printed`, with the reason.
 - `invoice_lines` hold what the invoice PDF claims: one `claim` line, the
-  milestone's share of the quote ex GST, against the quote. Today's PDF also
-  prints the quote's schedule, which is the quote's rows.
+  milestone's share of the quote ex GST, against the quote. Since step 4b
+  that is all the PDF claims; invoices issued earlier also printed the
+  quote's schedule, which is the quote's rows.
 - `credit_notes` and `credit_note_lines` exist with their checks and
   triggers. Step 4b writes them (see "How step 4b credits an invoice").
 - `payments` belong to the invoice they were recorded against
@@ -956,7 +957,7 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 3, part two | Quote reads from rows (#10): display columns (migration 0011); the quote PDF, the quote email's totals, the job's cached totals and the job detail's customer pricing (client and MCP) come from the rows; editor saves carry `If-Match` | Built |
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
 | 4a | Invoices, payments and receipts as rows (#27): `payment_milestones`, `invoices`, `invoice_lines`, `payments`, `receipts`, and the shape of `credit_notes` (migration 0013); dual-write after every committed milestone change; a backfill verified against what was issued | Built |
-| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Parts one and two built (issue service, migration 0014; credit notes, migrations 0015 and 0016); claim lines next |
+| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (revisions made in place before them stay as issued); issue separate from email; claim-line invoice documents | Built (issue service, migration 0014; credit notes, migrations 0015 and 0016; claim-line documents) |
 | 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Later |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
@@ -1061,9 +1062,9 @@ How step 3 part two reads the quote tables (`server/quotes/read-model.js`,
   `FIELD_QUOTE_READS=files` sends every read to the files, for rollback.
   Reads are counted by source under `quoteReads` in
   `GET /api/storage/status`.
-- **What reads them.** The quote PDF (built, previewed and sent; invoices
-  and receipts still print the quote's schedule from the files until they
-  are rows), the quote email's totals, the job's cached totals (the job
+- **What reads them.** The quote PDF (built, previewed and sent; receipts
+  still print the quote's schedule from the files, and milestone invoices
+  print claim lines since step 4b), the quote email's totals, the job's cached totals (the job
   list), and the job detail's `customerPricing`, which the client and the
   MCP quote tool read.
 - **Saves.** `GET /api/jobs/:id` and every quote save answer with
@@ -1235,3 +1236,21 @@ How step 4b credits an invoice (#28, part two; migration
   credit note's stored bytes go with the invoice (`attachCreditNote` on
   `POST /api/jobs/:id/email-quote`). Attaching other Field documents is
   part of the email editor's redesign.
+
+How step 4b prints a milestone invoice (#28, part three). Only invoices
+issued from now on change; an issued PDF never does.
+
+- **Claim lines, not the quote's schedule.** The PDF has one claim line per
+  milestone it bills, named as its invoice line is ("Deposit, 50 % of
+  EQ-2610-03 v2", the quote version it was issued against), with the
+  milestone context under it and its subtotal, GST and total. Then the claim
+  box ("This claim (ex GST)", "GST (10%)", "Amount Due", the labels
+  `issued-totals.js` reads) and a small quote summary: the quote and
+  version, the contract value, what earlier milestones claimed, this claim
+  and what remains. The quote's schedule is not printed: the quote is its
+  own document.
+- **A tax invoice.** An issued milestone invoice is titled "Tax invoice" and
+  prints what the ATO asks of one: the supplier's name and ABN, the date,
+  the recipient, a description of what is claimed and the GST, with the job
+  reference. A draft preview stays "Invoice" with "Draft, not yet issued".
+- Receipts, and an invoice for a job with no milestones, print as before.

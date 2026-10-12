@@ -940,7 +940,8 @@ async function renderQuotePdfBuffer({
       : (quote.quoteNumber || meta.id);
   const pdfBusiness = resolveBusiness(quote);
   // A quote prints its schedule and totals from its rows (#10); invoices and
-  // receipts still print the quote's schedule from the files until they are
+  // receipts (milestone invoices print claim lines, step 4b) still print the
+  // quote's schedule from the files until they are
   // rows themselves.
   const scheduleView = resolvedDocumentType === "quote" ? await loadQuoteRows({ quote, meta }) : null;
   return await new Promise((resolve, reject) => {
@@ -948,7 +949,7 @@ async function renderQuotePdfBuffer({
       size: "A4",
       margins: { top: 50, bottom: 60, left: 50, right: 50 },
       info: {
-        Title: `${documentLabel} ${documentRef}`,
+        Title: `${invoiceTitle({ documentLabel, isInvoice: resolvedDocumentType === "invoice", milestoneInvoice })} ${documentRef}`,
         Author: businessDisplayName(pdfBusiness),
         Subject: `${documentLabel} for ${meta.title || "Earthworks"}`,
         ...(creationDate ? { CreationDate: creationDate } : {}),
@@ -1250,7 +1251,7 @@ function renderQuotePdf(doc, {
     deliveryDefaults,
     biz,
     documentType,
-    documentLabel,
+    documentLabel: invoiceTitle({ documentLabel, isInvoice, milestoneInvoice }),
     issuedAt,
   });
 
@@ -1279,40 +1280,51 @@ function renderQuotePdf(doc, {
     renderHeader(doc, { isDraft, vLabel, quoteRef, quote, deliveryDefaults, biz });
   }
 
-  // ─── LINE ITEMS TABLE ───
-  addSpace(doc, 20);
-  renderLineItemsTable(doc, customerScheduleItems, currency, {
-    heading: isInvoice ? "CONTRACT SCHEDULE" : "PRICING SCHEDULE",
-    subheading: isInvoice
-      ? "Full scope from the approved quote. This invoice claims a portion shown below."
-      : null,
-  });
-
-  // ─── TOTALS / CLAIM ───
-  addSpace(doc, 14);
   if (isInvoice && milestoneInvoice) {
-    renderProgressClaimBox(doc, {
+    // ─── CLAIM LINES (step 4b, #28) ───
+    // A milestone invoice claims a share of the quote: one claim line per
+    // milestone it bills, against the quote it references, with its
+    // subtotal, GST and total. The quote's schedule is the quote's
+    // document; only a small summary of the contract is printed here.
+    addSpace(doc, 20);
+    renderClaimLines(doc, { milestoneInvoice, quote, currency });
+    addSpace(doc, 14);
+    renderClaimTotalsBox(doc, { milestoneInvoice, currency });
+    addSpace(doc, 14);
+    renderQuoteSummary(doc, {
       quote: pdfQuote,
       milestoneInvoice,
       priorClaimsTotal: sumPriorMilestoneClaims({ meta, milestoneInvoice }),
+      quoteVersion: milestoneInvoice.issuedRevision?.quoteVersion || quote.version || null,
       currency,
     });
   } else {
+    // ─── LINE ITEMS TABLE ───
+    addSpace(doc, 20);
+    renderLineItemsTable(doc, customerScheduleItems, currency, {
+      heading: isInvoice ? "CONTRACT SCHEDULE" : "PRICING SCHEDULE",
+      subheading: isInvoice
+        ? "Full scope from the approved quote. This invoice claims a portion shown below."
+        : null,
+    });
+
+    // ─── TOTALS ───
+    addSpace(doc, 14);
     renderTotalsBox(doc, pdfQuote, currency);
     if (invoicePaymentSummary) {
       addSpace(doc, 12);
       renderInvoicePaymentSummary(doc, invoicePaymentSummary);
     }
-  }
 
-  // ─── VARIETY PROFILES (after totals, before payment) ───
-  const varietyProfiles = quote.varietyProfiles || [];
-  if (varietyProfiles.length) {
-    addSpace(doc, 20);
-    renderVarietyProfiles(doc, varietyProfiles);
-  } else if (images?.length) {
-    addSpace(doc, 12);
-    renderVarietyImages(doc, images);
+    // ─── VARIETY PROFILES (after totals, before payment) ───
+    const varietyProfiles = quote.varietyProfiles || [];
+    if (varietyProfiles.length) {
+      addSpace(doc, 20);
+      renderVarietyProfiles(doc, varietyProfiles);
+    } else if (images?.length) {
+      addSpace(doc, 12);
+      renderVarietyImages(doc, images);
+    }
   }
 
   // ─── PAYMENT (stays with pricing) ───
@@ -1743,6 +1755,127 @@ function renderTotalsBox(doc, quote, currency) {
   doc.y = boxTop + 86;
 }
 
+// An issued milestone invoice is a tax invoice, and says so (step 4b). A
+// draft has no number yet and is not one.
+function invoiceTitle({ documentLabel, isInvoice, milestoneInvoice }) {
+  return isInvoice && milestoneInvoice && !isDraftInvoice(milestoneInvoice) ? "Tax invoice" : documentLabel;
+}
+
+function trimPercent(value) {
+  return String(value).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+}
+
+/** "Deposit, 50 % of EQ-2610-03 v2": the milestone, its share and the quote (as the invoice rows name it). */
+export function invoiceClaimLineName(milestoneInvoice, quoteVersion = null) {
+  const label = milestoneInvoice?.milestoneLabel || `Milestone ${Number(milestoneInvoice?.milestoneIndex || 0) + 1}`;
+  const percent = Number(milestoneInvoice?.percentage) > 0 && !(Number(milestoneInvoice?.fixedTotal) > 0) ? Number(milestoneInvoice.percentage) : null;
+  const quoteNumber = milestoneInvoice?.reference || null;
+  const version = Number(quoteVersion) > 0 ? ` v${Number(quoteVersion)}` : "";
+  const quoteReference = quoteNumber ? `${quoteNumber}${version}` : "the quote";
+  return `${label}${percent ? `, ${trimPercent(percent.toFixed(3))} % of` : " of"} ${quoteReference}`;
+}
+
+function renderClaimLines(doc, { milestoneInvoice, quote, currency }) {
+  const quoteVersion = milestoneInvoice.issuedRevision?.quoteVersion || quote.version || null;
+  const cols = { item: M, exGst: M + 270, gst: M + 345, incGst: M + 410 };
+  const rowEnd = W - M;
+  ensurePageSpace(doc, 80);
+  doc.font("Helvetica-Bold").fontSize(9).fillColor(C.light);
+  doc.text("CLAIM", M, doc.y);
+  doc.moveDown(0.4);
+  const headY = doc.y;
+  doc.rect(M, headY, CW, 18).fill(C.surfaceCool);
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(C.muted);
+  doc.text("Description", cols.item + 6, headY + 5, { lineBreak: false });
+  doc.text("Ex GST", cols.exGst, headY + 5, { width: cols.gst - cols.exGst - 8, align: "right", lineBreak: false });
+  doc.text("GST", cols.gst, headY + 5, { width: cols.incGst - cols.gst - 8, align: "right", lineBreak: false });
+  doc.text("Inc GST", cols.incGst, headY + 5, { width: rowEnd - cols.incGst, align: "right", lineBreak: false });
+  doc.y = headY + 24;
+  const rowY = doc.y;
+  doc.save();
+  doc.rect(M, rowY - 2, 3, 30).fill(C.brand);
+  doc.restore();
+  doc.font("Helvetica-Bold").fontSize(9.5).fillColor(C.dark);
+  doc.text(invoiceClaimLineName(milestoneInvoice, quoteVersion), cols.item + 10, rowY, { width: cols.exGst - cols.item - 20 });
+  const nameBottom = doc.y;
+  doc.font("Helvetica").fontSize(8.5).fillColor(C.muted);
+  doc.text(milestoneInvoice.contextNote || `Milestone ${Number(milestoneInvoice.milestoneIndex || 0) + 1}`, cols.item + 10, nameBottom + 1, { width: cols.exGst - cols.item - 20 });
+  const rowBottom = doc.y;
+  doc.font("Helvetica").fontSize(9.5).fillColor(C.body);
+  doc.text(formatMoney(milestoneInvoice.subtotal, currency), cols.exGst, rowY, { width: cols.gst - cols.exGst - 8, align: "right", lineBreak: false });
+  doc.text(formatMoney(milestoneInvoice.gst, currency), cols.gst, rowY, { width: cols.incGst - cols.gst - 8, align: "right", lineBreak: false });
+  doc.text(formatMoney(milestoneInvoice.total, currency), cols.incGst, rowY, { width: rowEnd - cols.incGst, align: "right", lineBreak: false });
+  doc.y = Math.max(rowBottom, rowY + 28) + 6;
+  doc.moveTo(M, doc.y).lineTo(rowEnd, doc.y).strokeColor(C.ruleLight).lineWidth(0.5).stroke();
+  doc.y += 4;
+}
+
+// The invoice's totals. The labels and their order are what
+// server/invoices/issued-totals.js reads back from an issued invoice.
+function renderClaimTotalsBox(doc, { milestoneInvoice, currency }) {
+  const round2 = (value) => Math.round(Number(value || 0) * 100) / 100;
+  const boxW = 260;
+  const boxX = W - M - boxW;
+  const height = 84;
+  ensurePageSpace(doc, height + 10);
+  const boxTop = doc.y;
+  doc.save();
+  doc.roundedRect(boxX, boxTop, boxW, height, 4).fill(C.surfaceWarm);
+  doc.restore();
+  doc.save();
+  doc.rect(boxX, boxTop, 3, height).fill(C.brand);
+  doc.restore();
+  const labelX = boxX + 16;
+  const innerW = boxW - 32;
+  let y = boxTop + 12;
+  doc.font("Helvetica").fillColor(C.body).fontSize(9.5);
+  doc.text("This claim (ex GST)", labelX, y, { lineBreak: false });
+  doc.text(formatMoney(round2(milestoneInvoice.subtotal), currency), labelX, y, { width: innerW, align: "right", lineBreak: false });
+  y += 15;
+  doc.text("GST (10%)", labelX, y, { lineBreak: false });
+  doc.text(formatMoney(round2(milestoneInvoice.gst), currency), labelX, y, { width: innerW, align: "right", lineBreak: false });
+  y += 13;
+  doc.moveTo(labelX, y + 4).lineTo(labelX + innerW, y + 4).strokeColor(C.brandBorder).lineWidth(0.5).stroke();
+  y += 13;
+  doc.font("Helvetica-Bold").fillColor(C.dark).fontSize(13);
+  doc.text("Amount Due", labelX, y, { lineBreak: false });
+  doc.text(formatMoney(round2(milestoneInvoice.total), currency), labelX, y, { width: innerW, align: "right", lineBreak: false });
+  doc.font("Helvetica").fillColor(C.muted).fontSize(8);
+  doc.text("Total including GST", labelX, y + 17, { lineBreak: false });
+  doc.y = boxTop + height + 10;
+}
+
+// A small summary of the contract this invoice claims against.
+function renderQuoteSummary(doc, { quote, milestoneInvoice, priorClaimsTotal, quoteVersion, currency }) {
+  const round2 = (value) => Math.round(Number(value || 0) * 100) / 100;
+  const contractTotal = round2(quote?.totals?.total);
+  const previous = round2(priorClaimsTotal);
+  const thisClaim = round2(milestoneInvoice.total);
+  const remaining = round2(contractTotal - previous - thisClaim);
+  const quoteNumber = milestoneInvoice.reference || null;
+  ensurePageSpace(doc, 80);
+  doc.font("Helvetica-Bold").fontSize(9).fillColor(C.light);
+  doc.text("QUOTE SUMMARY", M, doc.y);
+  doc.moveDown(0.3);
+  const rows = [
+    ["Quote", quoteNumber ? `${quoteNumber}${Number(quoteVersion) > 0 ? ` v${Number(quoteVersion)}` : ""}` : "—"],
+    ["Contract value (inc GST)", formatMoney(contractTotal, currency)],
+    ["Previously claimed", formatMoney(previous, currency)],
+    ["This claim (inc GST)", formatMoney(thisClaim, currency)],
+    ["Remaining after this claim", formatMoney(remaining, currency)],
+  ];
+  const labelW = 170;
+  const valueW = 110;
+  doc.font("Helvetica").fontSize(8.5).fillColor(C.body);
+  for (const [label, value] of rows) {
+    const y = doc.y;
+    doc.text(label, M, y, { width: labelW, lineBreak: false });
+    doc.text(value, M + labelW, y, { width: valueW, align: "right", lineBreak: false });
+    doc.y = y + 12;
+  }
+  doc.y += 2;
+}
+
 function sumPriorMilestoneClaims({ meta, milestoneInvoice }) {
   if (!milestoneInvoice || !Array.isArray(meta?.milestoneInvoices)) return 0;
   const currentIndex = Number(milestoneInvoice.milestoneIndex || 0);
@@ -1753,80 +1886,6 @@ function sumPriorMilestoneClaims({ meta, milestoneInvoice }) {
     sum += Number(other.total || 0);
   }
   return Math.round(sum * 100) / 100;
-}
-
-function renderProgressClaimBox(doc, {
-  quote,
-  milestoneInvoice,
-  priorClaimsTotal,
-  currency,
-}) {
-  const round2 = (value) => Math.round(Number(value || 0) * 100) / 100;
-  const contractTotal = round2(quote?.totals?.total);
-  const thisSubtotal = round2(milestoneInvoice?.subtotal);
-  const thisGst = round2(milestoneInvoice?.gst);
-  const thisTotal = round2(milestoneInvoice?.total);
-  const previousClaims = round2(priorClaimsTotal);
-
-  const boxW = 260;
-  const boxX = W - M - boxW;
-  const height = 134;
-  ensurePageSpace(doc, height + 10);
-  const boxTop = doc.y;
-
-  doc.save();
-  doc.roundedRect(boxX, boxTop, boxW, height, 4).fill(C.surfaceWarm);
-  doc.restore();
-
-  doc.save();
-  doc.rect(boxX, boxTop, 3, height).fill(C.brand);
-  doc.restore();
-
-  const labelX = boxX + 16;
-  const valueX = boxX + boxW - 16;
-  const innerW = valueX - labelX;
-
-  // Title
-  doc.font("Helvetica-Bold").fillColor(C.light).fontSize(8);
-  doc.text("THIS CLAIM", labelX, boxTop + 10, { lineBreak: false });
-
-  let y = boxTop + 26;
-
-  // Contract value (inc GST)
-  doc.font("Helvetica").fillColor(C.body).fontSize(9.5);
-  doc.text("Contract value (inc GST)", labelX, y, { lineBreak: false });
-  doc.text(formatMoney(contractTotal, currency), labelX, y, { width: innerW, align: "right", lineBreak: false });
-  y += 15;
-
-  // Previously claimed
-  doc.text("Previously claimed", labelX, y, { lineBreak: false });
-  doc.text(formatMoney(previousClaims, currency), labelX, y, { width: innerW, align: "right", lineBreak: false });
-  y += 13;
-
-  // Separator
-  doc.moveTo(labelX, y + 4).lineTo(valueX, y + 4).strokeColor(C.brandBorder).lineWidth(0.5).stroke();
-  y += 11;
-
-  // This claim subtotal
-  doc.text("This claim (ex GST)", labelX, y, { lineBreak: false });
-  doc.text(formatMoney(thisSubtotal, currency), labelX, y, { width: innerW, align: "right", lineBreak: false });
-  y += 15;
-
-  // GST
-  doc.text("GST (10%)", labelX, y, { lineBreak: false });
-  doc.text(formatMoney(thisGst, currency), labelX, y, { width: innerW, align: "right", lineBreak: false });
-  y += 13;
-
-  // Separator
-  doc.moveTo(labelX, y + 4).lineTo(valueX, y + 4).strokeColor(C.brandBorder).lineWidth(0.5).stroke();
-  y += 11;
-
-  // Amount Due (prominent)
-  doc.font("Helvetica-Bold").fillColor(C.dark).fontSize(13);
-  doc.text("Amount Due", labelX, y, { lineBreak: false });
-  doc.text(formatMoney(thisTotal, currency), labelX, y, { width: innerW, align: "right", lineBreak: false });
-
-  doc.y = boxTop + height + 10;
 }
 
 function renderInvoicePaymentSummary(doc, paymentSummary) {
