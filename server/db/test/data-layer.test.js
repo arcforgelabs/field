@@ -175,8 +175,9 @@ test("generated migrations: the Drizzle toolchain proof, durable storage, the pr
     assert.match(catalogueSql, new RegExp(`CREATE TABLE "${table}"`));
   }
   // Document tables arrive only by an approved, named step: quotes as rows
-  // (#6, migration 0010). Anything else that looks like one is a mistake.
-  const approved = new Map([["quotes", "0010_quote_rows.sql"]]);
+  // (#6, migration 0010) and invoices as rows (#27, migration 0013). Anything
+  // else that looks like one is a mistake.
+  const approved = new Map([["quotes", "0010_quote_rows.sql"], ["invoices", "0013_invoice_rows.sql"]]);
   for (const name of migrationFiles) {
     const migration = readFileSync(resolve(migrationFolder, name), "utf8");
     for (const match of migration.matchAll(/CREATE TABLE "([^"]*\b(?:quote|document|invoice|outbox|customer)s?\b[^"]*)"/gi)) {

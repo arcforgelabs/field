@@ -152,6 +152,39 @@ job generation still holds every file as it was, and point-in-time restore
 covers the database; the changes are additive (uids beside codes), so an
 older release reads re-keyed files unchanged.
 
+## Invoice rows backfill
+
+The release with migration `0013_invoice_rows` (#27) writes invoice rows for
+every milestone change from then on. Jobs invoiced before it need the
+backfill once. Publish first, so boot applies 0013. Then, in the workspace
+shell (it shares `DATABASE_URL` with the published app):
+
+```bash
+git fetch origin && git switch -C main origin/main
+npm ci && npm run db:build
+npm run db:smoke                    # no pending schema migrations
+node scripts/backfill-invoice-rows.js --from-storage --dry-run --json > /tmp/invoice-rows-dry-run.json; echo "exit $?"
+node scripts/backfill-invoice-rows.js --from-storage
+rm /tmp/invoice-rows-dry-run.json
+```
+
+- `--from-storage` restores the stored job files, through a read-only
+  session, into a new directory under `/tmp`, and deletes that directory
+  when the run ends. The dry run writes nothing anywhere.
+- Exit 0: every job verified. Exit 2: some jobs were refused; each is listed
+  with both numbers (for example an invoice whose stored money differs from
+  the totals its PDF printed), and nothing is written for those jobs. The
+  real run still writes every job that verifies. Exit 1: it could not run
+  (no database, or a migration still pending).
+- Warnings do not refuse a job: `tax-total-printed` (a milestone's GST kept
+  as issued), `reconcile-stale` (drafts built against an earlier quote),
+  `issued-unverified` (no readable copy of the PDF) and
+  `payment-on-superseded` (a payment on a revision that was later revised).
+- A second run writes nothing new. Invoices link the quote versions they
+  bill when the quote rows exist; run it again after the quote-row backfill
+  to fill those links (each is filled once).
+- Delete the JSON afterwards: it names customer jobs and amounts.
+
 ## Durable storage
 
 With `FIELD_STORAGE=postgres` the data directory is a working copy of what
