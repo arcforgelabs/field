@@ -16,6 +16,7 @@ import { createQuoteRowRecorder, createUnavailableQuoteRowRecorder, installQuote
 import { loadQuoteRows, quoteReadsStatus, quoteRowsFromArtifact } from "./quotes/read-model.js";
 import { createInvoiceRowService } from "./invoices/invoice-rows.js";
 import { createInvoiceRowRecorder, createUnavailableInvoiceRowRecorder, installInvoiceRowRecorder } from "./invoices/recorder.js";
+import { createInvoiceIssueService, createUnavailableInvoiceIssuer, installInvoiceIssuer } from "./invoices/issue.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
 // A job detail's quote read from its rows (#10), kept beside the detail object.
@@ -508,6 +509,24 @@ try {
   issuedDocumentRecorder = createUnavailableIssuedDocumentRecorder(reason);
 }
 installIssuedDocumentRecorder(issuedDocumentRecorder);
+
+// The invoice issue service (#28, step 4b): an invoice is issued when it is
+// finalised (authorised, sent, revised), in one PostgreSQL transaction that
+// allocates its INV-YYYY-M-N number, renders and stores its PDF and writes
+// its row. Without a database, issuing an invoice is refused: it is never
+// issued outside the sequence.
+try {
+  installInvoiceIssuer(createInvoiceIssueService({
+    db: getDb(),
+    orgUid: deploymentOrg?.uid,
+    ...(issuedDocumentBlobs ? { blobs: issuedDocumentBlobs } : {}),
+    onBlobsStored: (sha256s) => documentReplica.notifyStored(sha256s),
+  }));
+} catch (err) {
+  const reason = err.code === "FIELD_NO_DATABASE" ? "this server has no database" : err.message;
+  console.warn(`[invoice-issue] ${reason}: invoices cannot be issued (sending or authorising an invoice is refused)`);
+  installInvoiceIssuer(createUnavailableInvoiceIssuer(reason));
+}
 
 // Quote rows (#6): every committed change to a job's quote versions is also
 // written as quotes, quote_sections and quote_lines rows, checked against the

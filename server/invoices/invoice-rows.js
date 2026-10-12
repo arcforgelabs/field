@@ -27,6 +27,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { schema } from "../db-runtime/index.js";
 import { orgScope } from "../db-runtime/tenancy.js";
 import { centsToText, fixed, quoteTotals, toCents } from "../quotes/totals.js";
+import { compareDocumentNumbers } from "./numbers.js";
 import {
   newInvoiceLineUid,
   newInvoiceUid,
@@ -223,6 +224,86 @@ function linesFingerprint(lines, milestoneUidOf) {
   ]));
 }
 
+async function insertLines(tx, invoiceUid, invoice, refs, actor, at) {
+  if (!invoice.lines.length) return;
+  await tx.insert(invoiceLines).values(invoice.lines.map((line, index) => ({
+    uid: newInvoiceLineUid(at.getTime()),
+    invoiceUid,
+    sortOrder: line.sortOrder ?? index,
+    lineType: line.lineType,
+    quoteUid: line.lineType === "claim" ? (invoice.quoteUid || null) : (line.quoteUid || null),
+    milestoneUid: line.milestoneKey != null ? (refs.milestoneUid(line.milestoneKey) || null) : null,
+    itemUid: line.itemUid || null,
+    name: line.name,
+    description: line.description || null,
+    quantity: fixed(line.quantity ?? 1, 4),
+    unitCode: line.unitCode || "lot",
+    unitSell: line.unitSell == null ? null : fixed(line.unitSell, 4),
+    taxCode: line.taxCode || "GST",
+    taxRate: fixed(line.taxRate ?? 10, 3),
+    lineTotal: fixed(line.lineTotal, 2),
+    lineTotalSource: line.lineTotalSource === "printed" ? "printed" : "computed",
+    lineTotalReason: line.lineTotalSource === "printed" ? (line.lineTotalReason || null) : null,
+    createdAt: at,
+    createdBy: actor,
+  })));
+}
+
+function headerValues(invoice, totals, refs) {
+  return {
+    number: invoice.number,
+    kind: invoice.kind,
+    revision: invoice.revision || 1,
+    currency: invoice.currency || "AUD",
+    subtotal: totals.subtotal,
+    taxTotal: totals.taxTotal,
+    total: totals.total,
+    taxTotalSource: totals.taxTotalSource,
+    taxTotalReason: totals.taxTotalReason,
+    quoteUid: invoice.quoteUid || null,
+    quoteVersion: invoice.quoteVersion || null,
+    quoteVersionInferred: Boolean(invoice.quoteVersionInferred),
+    milestoneUid: invoice.milestoneKey != null ? (refs.milestoneUid(invoice.milestoneKey) || null) : null,
+    dueOn: invoice.dueOn || null,
+    reference: invoice.reference || null,
+    revisionReason: invoice.revisionReason || null,
+    revisedBy: invoice.revisedBy || null,
+    note: invoice.note || null,
+    issuedDocumentUid: invoice.issuedDocumentUid || null,
+  };
+}
+
+// The issued fields, set last so lines can be written while it is a draft.
+function issueValues(invoice) {
+  return {
+    status: invoice.status,
+    issuedAt: date(invoice.issuedAt),
+    issuedOn: invoice.issuedOn || (invoice.issuedAt ? new Date(invoice.issuedAt).toISOString().slice(0, 10) : null),
+    supersededAt: date(invoice.supersededAt),
+  };
+}
+
+/**
+ * Write one invoice that is being issued now, inside the caller's
+ * organisation transaction (the invoice issue service, issue.js): its row,
+ * then its lines while it is still a draft, then its issue fields, the way
+ * writeJob writes a new issued invoice, so a later sync of the job's files
+ * finds the row exactly as it maps it. `milestoneUid` and `quoteUid` are the
+ * rows the invoice belongs to when they exist (else the next sync fills them
+ * once). Returns the new invoice's uid.
+ */
+export async function insertIssuedInvoiceRow(tx, { jobId, invoice, issueKey, issuedDocumentUid = null, milestoneUid = null, quoteUid = null, actor = null, at = new Date() }) {
+  if (!invoice.issuedAt || invoice.status === "draft") throw invalid(`invoice ${invoice.number}: only an issued invoice is written here`);
+  const refs = { milestoneUid: () => milestoneUid };
+  const withLinks = { ...invoice, quoteUid: quoteUid || invoice.quoteUid || null, issuedDocumentUid: issuedDocumentUid || invoice.issuedDocumentUid || null };
+  const totals = invoiceTotals(withLinks);
+  const uid = newInvoiceUid(at.getTime());
+  await tx.insert(invoices).values({ uid, jobId, ...headerValues(withLinks, totals, refs), status: "draft", amountPaid: "0.00", createdAt: at, createdBy: actor, updatedAt: at, updatedBy: actor });
+  await insertLines(tx, uid, withLinks, refs, actor, at);
+  await tx.update(invoices).set({ ...issueValues(withLinks), issueKey, updatedAt: at, updatedBy: actor }).where(eq(invoices.uid, uid));
+  return uid;
+}
+
 /**
  * The service for one organisation. `db` is an orgScope, or a database with
  * `orgUid`.
@@ -233,7 +314,9 @@ export function createInvoiceRowService({ db, orgUid = undefined, now = () => ne
 
   async function loadJob(tx, jobId) {
     const milestoneRows = await tx.select().from(paymentMilestones).where(eq(paymentMilestones.jobId, jobId)).orderBy(asc(paymentMilestones.sortOrder));
-    const invoiceRows = await tx.select().from(invoices).where(eq(invoices.jobId, jobId)).orderBy(asc(invoices.createdAt), asc(invoices.number));
+    // Oldest first; numbers by their period and sequence, never their text.
+    const invoiceRows = (await tx.select().from(invoices).where(eq(invoices.jobId, jobId)))
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt) || compareDocumentNumbers(a.number, b.number));
     const lineRows = invoiceRows.length
       ? await tx.select().from(invoiceLines).where(inArray(invoiceLines.invoiceUid, invoiceRows.map((row) => row.uid))).orderBy(asc(invoiceLines.sortOrder))
       : [];
@@ -242,65 +325,6 @@ export function createInvoiceRowService({ db, orgUid = undefined, now = () => ne
     const paymentRows = await tx.select().from(payments).where(eq(payments.jobId, jobId)).orderBy(asc(payments.recordedAt));
     const receiptRows = await tx.select().from(receipts).where(eq(receipts.jobId, jobId)).orderBy(asc(receipts.issuedAt));
     return { milestoneRows, invoiceRows, linesByInvoice, paymentRows, receiptRows };
-  }
-
-  async function insertLines(tx, invoiceUid, invoice, refs, actor, at) {
-    if (!invoice.lines.length) return;
-    await tx.insert(invoiceLines).values(invoice.lines.map((line, index) => ({
-      uid: newInvoiceLineUid(at.getTime()),
-      invoiceUid,
-      sortOrder: line.sortOrder ?? index,
-      lineType: line.lineType,
-      quoteUid: line.lineType === "claim" ? (invoice.quoteUid || null) : (line.quoteUid || null),
-      milestoneUid: line.milestoneKey != null ? (refs.milestoneUid(line.milestoneKey) || null) : null,
-      itemUid: line.itemUid || null,
-      name: line.name,
-      description: line.description || null,
-      quantity: fixed(line.quantity ?? 1, 4),
-      unitCode: line.unitCode || "lot",
-      unitSell: line.unitSell == null ? null : fixed(line.unitSell, 4),
-      taxCode: line.taxCode || "GST",
-      taxRate: fixed(line.taxRate ?? 10, 3),
-      lineTotal: fixed(line.lineTotal, 2),
-      lineTotalSource: line.lineTotalSource === "printed" ? "printed" : "computed",
-      lineTotalReason: line.lineTotalSource === "printed" ? (line.lineTotalReason || null) : null,
-      createdAt: at,
-      createdBy: actor,
-    })));
-  }
-
-  function headerValues(invoice, totals, refs) {
-    return {
-      number: invoice.number,
-      kind: invoice.kind,
-      revision: invoice.revision || 1,
-      currency: invoice.currency || "AUD",
-      subtotal: totals.subtotal,
-      taxTotal: totals.taxTotal,
-      total: totals.total,
-      taxTotalSource: totals.taxTotalSource,
-      taxTotalReason: totals.taxTotalReason,
-      quoteUid: invoice.quoteUid || null,
-      quoteVersion: invoice.quoteVersion || null,
-      quoteVersionInferred: Boolean(invoice.quoteVersionInferred),
-      milestoneUid: invoice.milestoneKey != null ? (refs.milestoneUid(invoice.milestoneKey) || null) : null,
-      dueOn: invoice.dueOn || null,
-      reference: invoice.reference || null,
-      revisionReason: invoice.revisionReason || null,
-      revisedBy: invoice.revisedBy || null,
-      note: invoice.note || null,
-      issuedDocumentUid: invoice.issuedDocumentUid || null,
-    };
-  }
-
-  // The issued fields, set last so lines can be written while it is a draft.
-  function issueValues(invoice) {
-    return {
-      status: invoice.status,
-      issuedAt: date(invoice.issuedAt),
-      issuedOn: invoice.issuedOn || (invoice.issuedAt ? new Date(invoice.issuedAt).toISOString().slice(0, 10) : null),
-      supersededAt: date(invoice.supersededAt),
-    };
   }
 
   /** Fields of an issued invoice that never change, compared with the mapping. */

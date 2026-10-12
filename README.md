@@ -35,6 +35,7 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `docs/REMOTE_MCP.md` | The OAuth MCP surface AI agents and other systems connect through |
 | `docs/concepts/surveyor.md` | Surveyor, Field's before/after proof lane |
 | `docs/lessons-learned.md` | Persistent production bugs and the fixes that resolved them |
+| `docs/review/` | Before and after renders of customer documents a change alters, from synthetic data, for the owner's review |
 | `server/catalog/README.md` | The PostgreSQL price catalogue |
 | `server/db/README.md` | The database runtime, migrations and tenancy |
 | `skills/using-field/SKILL.md` | Operator and agent runbook for the API, CLI and quote lifecycle |

@@ -253,7 +253,7 @@ before 0007).
 `document_blobs` (PDF bytes once per organisation by SHA-256, hash checked by
 a `CHECK`), `issued_documents` (one immutable row per issued document,
 `doc_…`), `document_events` (append-only, `dev_…`) and
-`document_number_counters` (not used yet). Triggers refuse `UPDATE`,
+`document_number_counters` (the invoice number sequence, used since 0014). Triggers refuse `UPDATE`,
 `DELETE` and `TRUNCATE` on blobs and events and on every `issued_documents`
 column except `details`, for the owner as well as `field_app`, which is
 granted only `SELECT, INSERT` (and `UPDATE (details)`). Only
@@ -325,10 +325,19 @@ the owner as well as `field_app`; its status, amount paid, due date, kind
 and note may change, and links missing when it was written are filled once.
 A payment is never deleted and may only be voided, once; a receipt may only
 be voided. `TRUNCATE` is always refused. `field_app` may read and write the
-rows otherwise. Only `server/invoices/` reads or writes them; nothing in the
-app reads them yet. `rollback/0013_invoice_rows.down.sql` drops them (the
-backfill rebuilds them from the job files after 0013 is applied again); run
-it before 0012's.
+rows otherwise. Only `server/invoices/` reads or writes them.
+`rollback/0013_invoice_rows.down.sql` drops them (the backfill rebuilds them
+from the job files after 0013 is applied again); run it before 0012's.
+
+### Invoice issue
+
+`0014_invoice_issue` (#28; design in `docs/PRICING_ENGINE.md` "Invoices and
+payments") adds `invoices.issue_key`, the idempotency key of the invoice
+issue service (`server/invoices/issue.js`). An invoice with a key was issued
+from the sequence: its number is `INV-YYYY-M-N`, unique in the organisation,
+and it carries the job reference. Invoices issued before 0014 keep their
+`EI-…` numbers and a null key. `rollback/0014_invoice_issue.down.sql` refuses
+once any invoice has been issued with an `INV` number; run it before 0013's.
 
 ### Adding tables
 

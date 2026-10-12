@@ -7,6 +7,12 @@ import { join } from "node:path";
 import { buildWallQuoteMeta } from "./wall-quote-workflow.js";
 import { sendJobQuote } from "./job-actions.js";
 import { buildQuotePricingAttestation } from "./quote-pricing-attestation.js";
+import { installTestInvoiceIssuer } from "./invoices/test-issuer.js";
+
+// Sending an invoice issues it through the issue service, as on a server
+// with a database.
+const TEST_INVOICE_ISSUER = await installTestInvoiceIssuer();
+test.after(() => TEST_INVOICE_ISSUER.close());
 
 function wallQuoteFixture({ version, quoteNumber, jobNumber }) {
   return {
