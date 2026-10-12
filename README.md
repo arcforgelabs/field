@@ -146,6 +146,11 @@ npm --prefix client test    # client tests
 npm run build               # data layer and client bundle
 ```
 
+`npm test` runs 8 test files at a time and the client suite uses 4 workers,
+because one workstation often runs several suites at once. Set
+`FIELD_TEST_CONCURRENCY` to change both, for example
+`FIELD_TEST_CONCURRENCY=4 npm test`.
+
 Database tests that need a real PostgreSQL skip unless
 `FIELD_DB_TEST_DATABASE_URL` is set (CI runs them against a PostgreSQL
 service) or `FIELD_DB_TEST_DOCKER=1` lets them start one in Docker.
