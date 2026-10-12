@@ -313,7 +313,7 @@ export async function writeQuoteVersionSnapshot({
 // invoiced, never revised — has no archive directory at all, so a lookup
 // keyed purely on the versions directory always misses even when the
 // pinned version IS the current, locked root quote. Mirror
-// `reviseJobMilestoneInvoice`'s own current-vs-requested-version fallback
+// `creditAndReissueJobMilestoneInvoice`'s own current-vs-requested-version fallback
 // instead of 410ing the common case.
 async function resolvePinnedQuoteArtifactsForReconstruction(jobDir, pinnedQuoteVersion) {
   if (!pinnedQuoteVersion) return null;
@@ -973,6 +973,189 @@ async function renderQuotePdfBuffer({
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// CREDIT (ADJUSTMENT) NOTE
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * The PDF of a credit note (#28, step 4b): an issued invoice credited in
+ * full, with the invoice issued in its place. Laid out to meet the ATO's
+ * requirements for an adjustment note: it says it is an adjustment note;
+ * names the supplier with its ABN; names the recipient (required where the
+ * original invoice was $1,000 or more; always printed here); gives its date
+ * and number, the original invoice and the reason; and shows the amount of
+ * the adjustment, the GST adjustment and the difference between the price on
+ * the original invoice and the adjusted price.
+ *
+ *   creditNote   { number, issuedAt, reason, currency, lines: [{ name,
+ *                subtotal, gst, total }], subtotal, gst, total } (credited,
+ *                positive)
+ *   credited     { number, issuedAt, subtotal, gst, total } the original
+ *   replacement  { number, subtotal, gst, total } the invoice issued in its place
+ */
+export async function generateCreditNotePdfBuffer({
+  meta,
+  quote,
+  creditNote,
+  credited,
+  replacement,
+  reference = null,
+  creationDate = null,
+}) {
+  const biz = resolveBusiness(quote);
+  const deliveryDefaults = (quote?.quoteCatalog || quote?.profile || {}).deliveryDefaults || {};
+  const currency = creditNote.currency || "AUD";
+  return await new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: "A4",
+      margins: { top: 50, bottom: 60, left: 50, right: 50 },
+      info: {
+        Title: `Adjustment note ${creditNote.number}`,
+        Author: businessDisplayName(biz),
+        Subject: `Adjustment note for ${credited.number}`,
+        ...(creationDate ? { CreationDate: creationDate } : {}),
+      },
+    });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    doc._footerRef = creditNote.number;
+    doc._footerBizName = businessDisplayName(biz);
+    renderHeader(doc, {
+      quoteRef: creditNote.number,
+      deliveryDefaults,
+      biz,
+      documentLabel: "Adjustment note",
+      issuedAt: creditNote.issuedAt,
+    });
+
+    // Recipient, and the documents this note adjusts.
+    const topY = doc.y;
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(C.light);
+    doc.text("ISSUED TO", M, topY);
+    doc.font("Helvetica").fontSize(10).fillColor(C.dark);
+    doc.text(meta?.contactName || meta?.customerName || meta?.title || meta?.label || "Customer", M, topY + 14, { width: 240 });
+    let leftY = doc.y;
+    doc.font("Helvetica").fontSize(9).fillColor(C.body);
+    if (meta?.siteAddress) {
+      doc.text(meta.siteAddress, M, leftY + 2, { width: 240 });
+      leftY = doc.y;
+    }
+    if (meta?.contactEmail) doc.text(meta.contactEmail, M, leftY + 2, { width: 240 });
+    leftY = doc.y;
+
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(C.light);
+    doc.text("ADJUSTMENT NOTE DETAILS", 300, topY, { width: CW - 250, align: "right" });
+    doc.font("Helvetica").fontSize(9).fillColor(C.body);
+    const details = [
+      `Issued: ${formatDate(creditNote.issuedAt)}`,
+      `Original tax invoice: ${credited.number}`,
+      credited.issuedAt ? `Invoice date: ${formatDate(credited.issuedAt)}` : null,
+      reference ? `Job reference: ${reference}` : null,
+      `Replaced by: ${replacement.number}`,
+    ].filter(Boolean);
+    details.forEach((line, index) => doc.text(line, 300, topY + 14 + index * 13, { width: CW - 250, align: "right" }));
+    doc.y = Math.max(leftY + 10, topY + 18 + details.length * 13);
+
+    // Why.
+    addSpace(doc, 12);
+    const reasonTop = doc.y;
+    doc.font("Helvetica").fontSize(9);
+    const reasonText = String(creditNote.reason || "");
+    const reasonHeight = doc.heightOfString(reasonText, { width: CW - 28, lineGap: 3 }) + 32;
+    doc.roundedRect(M, reasonTop, CW, reasonHeight, 4).fill(C.surfaceWarm);
+    doc.fillColor(C.light).font("Helvetica-Bold").fontSize(9);
+    doc.text("REASON FOR THE ADJUSTMENT", M + 14, reasonTop + 10, { lineBreak: false });
+    doc.fillColor(C.body).font("Helvetica").fontSize(9);
+    doc.text(reasonText, M + 14, reasonTop + 22, { width: CW - 28, lineGap: 3 });
+    doc.y = reasonTop + reasonHeight + 16;
+
+    // The adjustment, line by line.
+    const cols = { item: M, exGst: M + 270, gst: M + 345, incGst: M + 410 };
+    const rowEnd = W - M;
+    doc.font("Helvetica-Bold").fontSize(9).fillColor(C.light);
+    doc.text("ADJUSTMENT", M, doc.y);
+    doc.moveDown(0.4);
+    const headY = doc.y;
+    doc.rect(M, headY, CW, 18).fill(C.surfaceCool);
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(C.muted);
+    doc.text("Description", cols.item + 6, headY + 5, { lineBreak: false });
+    doc.text("Ex GST", cols.exGst, headY + 5, { width: cols.gst - cols.exGst - 8, align: "right", lineBreak: false });
+    doc.text("GST", cols.gst, headY + 5, { width: cols.incGst - cols.gst - 8, align: "right", lineBreak: false });
+    doc.text("Inc GST", cols.incGst, headY + 5, { width: rowEnd - cols.incGst, align: "right", lineBreak: false });
+    doc.y = headY + 22;
+    for (const line of creditNote.lines) {
+      const rowY = doc.y;
+      doc.font("Helvetica").fontSize(9).fillColor(C.body);
+      doc.text(line.name, cols.item + 6, rowY + 2, { width: cols.exGst - cols.item - 16 });
+      const height = Math.max(doc.y - rowY, 14);
+      doc.text(formatMoney(-line.subtotal, currency), cols.exGst, rowY + 2, { width: cols.gst - cols.exGst - 8, align: "right", lineBreak: false });
+      doc.text(formatMoney(-line.gst, currency), cols.gst, rowY + 2, { width: cols.incGst - cols.gst - 8, align: "right", lineBreak: false });
+      doc.text(formatMoney(-line.total, currency), cols.incGst, rowY + 2, { width: rowEnd - cols.incGst, align: "right", lineBreak: false });
+      doc.y = rowY + height + 6;
+      doc.moveTo(M, doc.y).lineTo(rowEnd, doc.y).strokeColor(C.ruleLight).lineWidth(0.5).stroke();
+      doc.y += 4;
+    }
+
+    // The totals of the adjustment.
+    addSpace(doc, 10);
+    const boxW = 260;
+    const boxX = W - M - boxW;
+    const boxTop = doc.y;
+    doc.save();
+    doc.roundedRect(boxX, boxTop, boxW, 76, 4).fill(C.surfaceWarm);
+    doc.restore();
+    doc.save();
+    doc.rect(boxX, boxTop, 3, 76).fill(C.brand);
+    doc.restore();
+    const labelX = boxX + 16;
+    const innerW = boxW - 32;
+    doc.font("Helvetica").fillColor(C.body).fontSize(9.5);
+    doc.text("Adjustment (ex GST)", labelX, boxTop + 12, { lineBreak: false });
+    doc.text(formatMoney(-creditNote.subtotal, currency), labelX, boxTop + 12, { width: innerW, align: "right", lineBreak: false });
+    doc.text("GST adjustment", labelX, boxTop + 28, { lineBreak: false });
+    doc.text(formatMoney(-creditNote.gst, currency), labelX, boxTop + 28, { width: innerW, align: "right", lineBreak: false });
+    doc.moveTo(labelX, boxTop + 44).lineTo(labelX + innerW, boxTop + 44).strokeColor(C.brandBorder).lineWidth(0.5).stroke();
+    doc.font("Helvetica-Bold").fillColor(C.dark).fontSize(12);
+    doc.text("Total credited", labelX, boxTop + 52, { lineBreak: false });
+    doc.text(formatMoney(-creditNote.total, currency), labelX, boxTop + 52, { width: innerW, align: "right", lineBreak: false });
+    doc.y = boxTop + 90;
+
+    // The price difference: the original invoice against the adjusted price.
+    ensurePageSpace(doc, 110);
+    doc.font("Helvetica-Bold").fontSize(9).fillColor(C.light);
+    doc.text("PRICE DIFFERENCE", M, doc.y);
+    doc.moveDown(0.4);
+    const diffTop = doc.y;
+    const diffCols = { label: M, exGst: M + 270, gst: M + 345, incGst: M + 410 };
+    const diffRow = (label, subtotal, gst, total, { bold = false } = {}) => {
+      const y = doc.y;
+      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(9).fillColor(bold ? C.dark : C.body);
+      doc.text(label, diffCols.label, y, { width: diffCols.exGst - diffCols.label - 16, lineBreak: false });
+      doc.text(formatMoney(subtotal, currency), diffCols.exGst, y, { width: diffCols.gst - diffCols.exGst - 8, align: "right", lineBreak: false });
+      doc.text(formatMoney(gst, currency), diffCols.gst, y, { width: diffCols.incGst - diffCols.gst - 8, align: "right", lineBreak: false });
+      doc.text(formatMoney(total, currency), diffCols.incGst, y, { width: rowEnd - diffCols.incGst, align: "right", lineBreak: false });
+      doc.y = y + 16;
+    };
+    const cents = (value) => Math.round(Number(value || 0) * 100);
+    const diff = (a, b) => (cents(a) - cents(b)) / 100;
+    diffRow(`Original invoice ${credited.number}`, credited.subtotal, credited.gst, credited.total);
+    diffRow(`Adjusted price: invoice ${replacement.number}`, replacement.subtotal, replacement.gst, replacement.total);
+    doc.moveTo(M, doc.y).lineTo(rowEnd, doc.y).strokeColor(C.brandBorder).lineWidth(0.5).stroke();
+    doc.y += 4;
+    diffRow("Difference", diff(replacement.subtotal, credited.subtotal), diff(replacement.gst, credited.gst), diff(replacement.total, credited.total), { bold: true });
+    doc.y = Math.max(doc.y, diffTop + 52) + 10;
+
+    doc.font("Helvetica").fontSize(8.5).fillColor(C.muted);
+    doc.text(`This adjustment note cancels tax invoice ${credited.number} in full. Tax invoice ${replacement.number} replaces it; any payment made against ${credited.number} is applied to ${replacement.number}.`, M, doc.y, { width: CW, lineGap: 2 });
+
+    renderPageFooter(doc, creditNote.number);
+    doc.end();
+  });
+}
+
 // ── Color palette ──
 const C = {
   brand: "#c8912a",
@@ -1180,7 +1363,8 @@ function renderHeader(doc, {
   doc.text(`${biz.phone}  ·  ${biz.email}`, M, bizY + 24);
 
   // Document title + ref block (right side)
-  doc.fillColor(C.dark).font("Helvetica-Bold").fontSize(28);
+  // A longer title ("Adjustment note") is set smaller so it clears the business name.
+  doc.fillColor(C.dark).font("Helvetica-Bold").fontSize(String(documentLabel || "").length > 8 ? 22 : 28);
   doc.text(documentLabel, 300, 30, { width: CW - 250, align: "right" });
 
   doc.font("Helvetica").fontSize(9).fillColor(C.muted);
@@ -1238,6 +1422,13 @@ function renderParties(doc, {
         !isReceipt && milestoneInvoice?.dueDate ? `Due: ${formatDate(milestoneInvoice.dueDate)}` : null,
         // An invoice issued from the sequence (INV-…) carries the job number.
         !isReceipt && milestoneInvoice?.issuedRevision?.jobReference ? `Job reference: ${milestoneInvoice.issuedRevision.jobReference}` : null,
+        // An invoice issued in place of a credited one says which.
+        !isReceipt && milestoneInvoice?.issuedRevision?.creditNoteNumber && milestoneInvoice.issuedRevision.supersedesInvoiceNumber
+          ? `Replaces: ${milestoneInvoice.issuedRevision.supersedesInvoiceNumber}`
+          : null,
+        !isReceipt && milestoneInvoice?.issuedRevision?.creditNoteNumber
+          ? `Credit note: ${milestoneInvoice.issuedRevision.creditNoteNumber}`
+          : null,
         milestoneInvoice?.milestoneLabel
           ? `Milestone: ${milestoneInvoice.milestoneLabel}${milestoneInvoice?.milestoneCount ? ` (${Number(milestoneInvoice.milestoneIndex || 0) + 1} of ${milestoneInvoice.milestoneCount})` : ""}`
           : null,

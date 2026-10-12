@@ -2,7 +2,7 @@
 // invoice its state and the one thing to do next (send it, record the
 // payment, or send the receipt).
 import { useState } from "react";
-import { Check, Eye, MoreHorizontal, Send, Undo2, Wallet } from "lucide-react";
+import { Check, Eye, FileMinus, MoreHorizontal, Send, Undo2, Wallet } from "lucide-react";
 import type { MilestoneInvoice, RecordingDetail } from "@/lib/types";
 import { api } from "@/lib/api";
 import { openDocumentPdf } from "@/lib/open-document";
@@ -24,7 +24,9 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
   const paid = invoices.reduce((sum, invoice) => sum + (invoice.amountPaid || 0), 0);
   const firstOpen = invoices.find((invoice) => invoice.status !== "paid");
   const shell = useShell();
+  const [crediting, setCrediting] = useState<MilestoneInvoice | null>(null);
   const pdf = (invoice: MilestoneInvoice, type: "invoice" | "receipt") => void openDocumentPdf(api.quotePdfUrl(meta.id, undefined, invoice.milestoneIndex, type), shell.toast);
+  const credit = (invoice: MilestoneInvoice): MenuItem => ({ label: "Credit and reissue", icon: <FileMinus />, onSelect: () => setCrediting(invoice) });
 
   if (!invoices.length) {
     const schedule = buildVisiblePaymentSchedule(meta.paymentSchedule || null, [], null);
@@ -67,10 +69,12 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
           ...(invoice.status === "draft" ? [{ label: "Mark as sent (sent outside Field)", icon: <Check />, onSelect: () => run("sent", () => api.updateMilestone(meta.id, invoice.milestoneIndex, { status: "authorised" }), `${invoice.invoiceNumber} marked sent`) } as MenuItem] : []),
           ...(invoice.status === "authorised" ? [
             { label: "Resend invoice", icon: <Send />, onSelect: () => onSend(invoice.milestoneIndex, "invoice") } as MenuItem,
+            credit(invoice),
             { label: "Mark as not sent", icon: <Undo2 />, onSelect: () => run("unsent", () => api.markMilestoneUnsent(meta.id, invoice.milestoneIndex), `${invoice.invoiceNumber} back to not sent`) } as MenuItem,
           ] : []),
           ...(invoice.status === "paid" ? [
             { label: "Preview receipt", icon: <Eye />, onSelect: () => pdf(invoice, "receipt") } as MenuItem,
+            credit(invoice),
             { label: "Mark as unpaid", icon: <Undo2 />, onSelect: () => run("unpaid", () => api.markMilestoneUnpaid(meta.id, invoice.milestoneIndex), `${invoice.invoiceNumber} marked unpaid`) } as MenuItem,
           ] : []),
         ];
@@ -104,8 +108,60 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
         );
       })}
       <div className="fx-doc-actions">
-        <span className="fx-mute" style={{ fontSize: 12 }}>Sent and paid invoices are locked. Later milestones follow the quote's payment schedule.</span>
+        <span className="fx-mute" style={{ fontSize: 12 }}>Sent and paid invoices are locked: to correct one, credit and reissue it. Later milestones follow the quote's payment schedule.</span>
       </div>
+      {crediting && (
+        <CreditInvoiceDialog
+          invoice={crediting}
+          onCancel={() => setCrediting(null)}
+          onCredit={async (reason) => {
+            const target = crediting;
+            setCrediting(null);
+            await run("credit", () => api.creditAndReissueInvoice(meta.id, target.milestoneIndex, { reason, expectedRevisionNumber: target.revisionNumber ?? null }), `${target.invoiceNumber} credited. The new invoice is ready to send.`);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Credit an issued invoice and issue its replacement (step 4b): a credit
+ * note for its full amount, with the reason, and a new invoice from the
+ * current quote. Payments made against it move to the new invoice.
+ */
+export function CreditInvoiceDialog({ invoice, onCancel, onCredit }: {
+  invoice: MilestoneInvoice;
+  onCancel: () => void;
+  onCredit: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const valid = reason.trim().length > 0;
+  return (
+    <div className="fx-scrim" onMouseDown={onCancel}>
+      <form
+        className="fx-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="credit-title"
+        onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => { if (event.key === "Escape") onCancel(); }}
+        onSubmit={(event) => { event.preventDefault(); if (valid) onCredit(reason.trim()); }}
+      >
+        <div className="fx-dialog__h" id="credit-title">Credit and reissue {invoice.invoiceNumber}</div>
+        <div className="fx-dialog__b">
+          <p className="fx-dim" style={{ margin: 0, fontSize: 12.5 }}>
+            Field issues a credit note for the full {money(invoice.total)} of {invoice.invoiceNumber}, then a new invoice for {invoice.milestoneLabel} from the current quote.
+            {invoice.amountPaid > 0 ? ` The ${money(invoice.amountPaid)} already paid moves to the new invoice.` : ""}
+          </p>
+          <label className="fx-label" htmlFor="credit-reason">Reason<textarea id="credit-reason" className="fx-input" rows={3} autoFocus placeholder="For example: approved variation to the retaining wall" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+          <p className="fx-mute" style={{ margin: 0, fontSize: 12 }}>The reason is printed on the credit note.</p>
+        </div>
+        <div className="fx-dialog__f">
+          <button type="button" className="fx-btn fx-btn--ghost" onClick={onCancel}>Cancel</button>
+          <button type="submit" className="fx-btn fx-btn--primary" disabled={!valid}>Credit and reissue</button>
+        </div>
+      </form>
     </div>
   );
 }

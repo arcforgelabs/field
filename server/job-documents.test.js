@@ -1058,7 +1058,7 @@ test("an authorized revision on a never-synchronized legacy invoice mints UNWRIT
 
   // This is the first revision-tracking touch of this invoice — the legacy
   // synthesis and the authorization both happen in this single
-  // buildMilestoneInvoices call (reviseJobMilestoneInvoice does not
+  // buildMilestoneInvoices call (creditAndReissueJobMilestoneInvoice does not
   // synchronize first).
   const revised = buildMilestoneInvoices({
     meta,

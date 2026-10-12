@@ -31,6 +31,8 @@
 import { sql } from "drizzle-orm";
 import { withOrg } from "../db-runtime/tenancy.js";
 import { DataMigrationError } from "./errors.js";
+import { creditNotesForRevisions } from "./credit-notes-for-revisions.js";
+import { recordDataMigrationLedger } from "./ledger.js";
 import { priceBookCleanup } from "./price-book-cleanup.js";
 import { quoteRowsByUid } from "./quote-rows-by-uid.js";
 import { describeRefusedJob, invoiceRowsBackfill, quoteRowsBackfill } from "./row-backfills.js";
@@ -42,7 +44,7 @@ export { DataMigrationError };
  * read the files as it left them, and the invoice rows after the quote rows,
  * so invoices link the quote versions they bill.
  */
-export const DATA_MIGRATIONS = Object.freeze([quoteRowsByUid, priceBookCleanup, quoteRowsBackfill, invoiceRowsBackfill]);
+export const DATA_MIGRATIONS = Object.freeze([quoteRowsByUid, priceBookCleanup, quoteRowsBackfill, invoiceRowsBackfill, creditNotesForRevisions]);
 
 function rowsOf(result) {
   return Array.isArray(result) ? result : result?.rows || [];
@@ -57,9 +59,7 @@ export async function readDataMigrationLedger(db, orgUid) {
 
 /** Records a migration as applied, inside the caller's organisation transaction. */
 export async function recordDataMigration(tx, { id, summary, appliedAt }) {
-  await tx.execute(sql`
-    insert into data_migrations (id, applied_at, summary)
-    values (${id}, ${appliedAt.toISOString()}::timestamptz, ${JSON.stringify(summary || {})}::jsonb)`);
+  await recordDataMigrationLedger(tx, { id, summary, appliedAt });
 }
 
 /**

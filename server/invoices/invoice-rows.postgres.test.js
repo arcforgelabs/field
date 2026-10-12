@@ -82,8 +82,11 @@ test("as a table owner without CREATEROLE: rows round-trip, other organisations 
     assert.deepEqual((await a.readJob(revised.jobId)).invoices.map((invoice) => [invoice.number, invoice.status]), [
       ["EI-2605-04-M1", "credited"], ["EI-2605-04-M1-R2", "issued"], ["EI-2605-04-M2", "draft"],
     ]);
+    // The revision made in place has its credit note (#28), as issued.
+    assert.deepEqual((await a.readJob(revised.jobId)).creditNotes.map((note) => [note.number, note.origin, note.total]), [["CN-EI-2605-04-M1", "revision-migration", "110.00"]]);
+    await rejects(withOrg(db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`delete from credit_notes`)), /was issued: delete refused/);
 
-    assert.deepEqual(await b.readJob(paid.jobId), { milestones: [], invoices: [], payments: [], receipts: [] });
+    assert.deepEqual(await b.readJob(paid.jobId), { milestones: [], invoices: [], creditNotes: [], payments: [], allocations: [], receipts: [] });
     const [seen] = await withOrg(db, ORG_B, (tx) => queryRows(sql`select (select count(*) from invoices)::int as i, (select count(*) from invoice_lines)::int as l, (select count(*) from payments)::int as p, (select count(*) from receipts)::int as r`, tx));
     assert.deepEqual(seen, { i: 0, l: 0, p: 0, r: 0 });
     // The owner itself is filtered (FORCE) and cannot change what was issued (triggers).

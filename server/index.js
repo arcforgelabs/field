@@ -124,7 +124,7 @@ import {
   readJobQuoteCatalogChanges,
   recordJobMilestonePayment,
   regenerateRecordingQuote,
-  reviseJobMilestoneInvoice,
+  creditAndReissueJobMilestoneInvoice,
   sendJobQuote,
   setJobPipelineStage,
   updateJobMilestone,
@@ -3314,13 +3314,16 @@ app.get("/api/jobs/:id/milestones/:index/revisions", requireAuth, async (req, re
   }
 });
 
-app.post("/api/jobs/:id/milestones/:index/revise", requireAuth, async (req, res) => {
+// Credit an issued invoice and issue its replacement (step 4b). `/revise` is
+// the older name of the same action: an issued invoice is never revised in
+// place any more.
+async function creditAndReissueRoute(req, res) {
   const job = await findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "not found" });
 
   try {
-    const result = await runExclusiveJobMutation(job.meta.id, "revise milestone invoice", async () => {
-      return await runAtomicJobGeneration(job.dir, async (stagedJobDir) => reviseJobMilestoneInvoice({
+    const result = await runExclusiveJobMutation(job.meta.id, "credit and reissue milestone invoice", async () => {
+      return await runAtomicJobGeneration(job.dir, async (stagedJobDir) => creditAndReissueJobMilestoneInvoice({
         jobDir: stagedJobDir,
         meta: await readNormalizedJobMeta(stagedJobDir) || normalizeJobMeta(job.meta),
         config,
@@ -3336,6 +3339,8 @@ app.post("/api/jobs/:id/milestones/:index/revise", requireAuth, async (req, res)
     const detail = buildClientJobDetail(await loadJobDetail({ ...job, meta: result.meta }));
     res.json({
       ok: true,
+      creditNote: result.creditNote,
+      invoice: result.invoice,
       revision: result.revision,
       paymentSchedule: result.paymentSchedule || detail.meta?.paymentSchedule || null,
       milestones: result.milestoneInvoices || detail.meta?.milestoneInvoices || [],
@@ -3344,7 +3349,9 @@ app.post("/api/jobs/:id/milestones/:index/revise", requireAuth, async (req, res)
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
-});
+}
+app.post("/api/jobs/:id/milestones/:index/credit-and-reissue", requireAuth, creditAndReissueRoute);
+app.post("/api/jobs/:id/milestones/:index/revise", requireAuth, creditAndReissueRoute);
 
 app.post("/api/jobs/:id/milestones/migrate", requireAuth, async (req, res) => {
   const job = await findJob(req.params.id);

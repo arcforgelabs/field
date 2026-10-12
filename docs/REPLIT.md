@@ -249,7 +249,10 @@ After the release that adds them is published:
 Warnings do not refuse a job: `tax-total-printed` (a milestone's GST kept as
 issued), `reconcile-stale` (drafts built against an earlier quote),
 `issued-unverified` (no readable copy of the PDF) and `payment-on-superseded`
-(a payment on a revision that was later revised).
+(a payment on a revision that was replaced without being credited). A
+revision made in place before credit notes gets its credit note
+(`CN-<its number>`, no PDF) and its payments move to the replacement, in the
+same run.
 
 ## Durable storage
 

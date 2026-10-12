@@ -22,7 +22,7 @@ export function emptyInvoiceBackfillReport(dryRun = false) {
     invoices: 0,
     byStatus: {},
     actions: {},
-    written: { milestones: {}, invoices: {}, payments: {}, receipts: {} },
+    written: { milestones: {}, invoices: {}, creditNotes: {}, payments: {}, allocations: {}, receipts: {} },
     mismatches: [],
     conflicts: [],
     warnings: [],
@@ -47,8 +47,8 @@ export function addJobToReport(report, result) {
     bump(report.byStatus, invoice.status);
   }
   if (result.summary) {
-    for (const table of ["milestones", "invoices", "payments", "receipts"]) {
-      for (const [action, count] of Object.entries(result.summary[table])) if (count) bump(report.written[table], action, count);
+    for (const table of ["milestones", "invoices", "creditNotes", "payments", "allocations", "receipts"]) {
+      for (const [action, count] of Object.entries(result.summary[table] || {})) if (count) bump(report.written[table], action, count);
     }
   }
   for (const failure of result.failures) {

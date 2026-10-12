@@ -67,3 +67,21 @@ export function compareDocumentNumbers(a, b) {
   if (right) return -1;
   return String(a ?? "").localeCompare(String(b ?? ""), "en", { numeric: true });
 }
+
+// Credit (adjustment) notes (#28, step 4b): CN-YYYY-MM-N from the same
+// counters (document type `credit_note`), allocated when the note is issued.
+export const CREDIT_NOTE_NUMBER_PATTERN = /^CN-(\d{4})-(\d{2})-([1-9]\d*)$/;
+
+export function formatCreditNoteNumber(period, value) {
+  return `CN-${period}-${value}`;
+}
+
+/**
+ * The number recorded for a credit note against an invoice that was revised
+ * in place before credit notes existed (EI-2605-04-M1 is credited by
+ * CN-EI-2605-04-M1). Such a note was never issued to the customer as a
+ * document, so it takes no number from the sequence.
+ */
+export function revisionCreditNoteNumber(invoiceNumber) {
+  return `CN-${String(invoiceNumber || "").trim()}`;
+}

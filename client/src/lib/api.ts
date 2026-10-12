@@ -611,7 +611,9 @@ export const api = {
       revisions: import("./types.ts").InvoiceRevision[];
     }>(`/api/jobs/${id}/milestones/${milestoneIndex}/revisions`);
   },
-  reviseInvoice(
+  // Step 4b (#28): an issued invoice is credited in full with a credit
+  // (adjustment) note and a new invoice is issued in its place.
+  creditAndReissueInvoice(
     id: string,
     milestoneIndex: number,
     body: {
@@ -622,7 +624,8 @@ export const api = {
   ) {
     return request<{
       ok: boolean;
-      revision: {
+      creditNote: import("./types.ts").CreditNote | null;
+      invoice: {
         invoiceNumber: string;
         revisionNumber: number;
         supersedesInvoiceNumber: string | null;
@@ -634,7 +637,7 @@ export const api = {
       paymentSchedule: import("./types.ts").PaymentSchedule | null;
       milestones: import("./types.ts").MilestoneInvoice[];
       detail: import("./types.ts").RecordingDetail;
-    }>(`/api/jobs/${id}/milestones/${milestoneIndex}/revise`, {
+    }>(`/api/jobs/${id}/milestones/${milestoneIndex}/credit-and-reissue`, {
       method: "POST",
       body: JSON.stringify(body),
     });

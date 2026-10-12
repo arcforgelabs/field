@@ -22,9 +22,10 @@ totals, the job's totals and the API and MCP customer pricing are read from
 those rows, while the files are still written alongside. Phase 3 step 4a
 is built too (#27): every job's payment schedule, milestone invoices,
 payments and receipts are also written as rows and checked against what was
-issued. Step 4b part one is built too (#28): invoices are issued from the
-issue service, with `INV-YYYY-M-N` numbers allocated in the issue
-transaction (see "Phase 3, step by step").
+issued. Step 4b parts one and two are built too (#28): invoices are issued from
+the issue service, with `INV-YYYY-M-N` numbers allocated in the issue
+transaction, and an issued invoice is corrected by a credit note and a new
+invoice (see "Phase 3, step by step").
 
 The owner's six decisions of 2026-10-12 (from the document audit) are
 recorded where they change the design: credit notes ("Invoices and
@@ -615,7 +616,7 @@ differences:**
   milestone's share of the quote ex GST, against the quote. Today's PDF also
   prints the quote's schedule, which is the quote's rows.
 - `credit_notes` and `credit_note_lines` exist with their checks and
-  triggers. Nothing writes them until step 4b.
+  triggers. Step 4b writes them (see "How step 4b credits an invoice").
 - `payments` belong to the invoice they were recorded against
   (`sourceInvoiceNumber`), keep `voided_at`, `void_reason` and
   `voided_by`, and are never deleted. A payment the files drop ("mark
@@ -952,7 +953,7 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 3, part two | Quote reads from rows (#10): display columns (migration 0011); the quote PDF, the quote email's totals, the job's cached totals and the job detail's customer pricing (client and MCP) come from the rows; editor saves carry `If-Match` | Built |
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
 | 4a | Invoices, payments and receipts as rows (#27): `payment_milestones`, `invoices`, `invoice_lines`, `payments`, `receipts`, and the shape of `credit_notes` (migration 0013); dual-write after every committed milestone change; a backfill verified against what was issued | Built |
-| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Part one built (issue service, migration 0014); credit notes and claim lines next |
+| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Parts one and two built (issue service, migration 0014; credit notes, migration 0015); claim lines next |
 | 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Later |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
@@ -1162,3 +1163,46 @@ number and bytes now come from PostgreSQL.
 - **Invoice rows.** The row the issue writes is mapped exactly as the job's
   files map it afterwards (`mapInvoiceForIssue`), so the dual-write finds it
   unchanged and only fills its links.
+
+How step 4b credits an invoice (#28, part two; migration
+`0015_credit_notes`). An issued invoice is never revised in place.
+
+- **Credit and reissue.** The operator credits an issued invoice with a
+  reason ("Credit and reissue" in the job's invoices, `field credit-invoice`,
+  `POST /api/jobs/:id/milestones/:index/credit-and-reissue`; `/revise` and
+  `revise-invoice` are the older names). Field mints the next revision from
+  the current quote, then the issue service, in one transaction under the
+  issue lock: allocates `CN-YYYY-M-N` (counter `credit_note`) and
+  `INV-YYYY-M-N`; renders and stores the credit note's PDF and the new
+  invoice's; writes the `credit_notes` row (the credited invoice in full, its
+  lines each pointing at the invoice line they credit, the reason, who did
+  it, `replacement_invoice_uid`) and the new invoice
+  (`supersedes_invoice_uid`); sets the credited invoice to `credited`; adds a
+  `credited` event to its issued document; and moves its payments.
+- **The credit note PDF** is an adjustment note: titled "Adjustment note",
+  the supplier and ABN, the recipient (always printed; the ATO requires it
+  where the original was $1,000 or more), date and number, the original
+  invoice and job reference, the reason, the amount of the adjustment and the
+  GST adjustment, and the price difference between the original invoice and
+  its replacement. The replacement invoice prints "Replaces" and "Credit
+  note".
+- **Payments move as allocations.** A payment is never changed: a
+  `payment_allocations` row (append-only) moves it from the credited
+  invoice to the replacement. The invoice that holds a payment is the
+  `to_invoice_uid` of its latest allocation, else the invoice it was recorded
+  against, and an invoice's `amount_paid` is the active payments it holds.
+- **Revisions made in place before credit notes** (`-R<k>`) are recorded the
+  same way, without a document: a credit note `CN-<superseded number>`,
+  origin `revision-migration`, no PDF and no number from the sequence (it was
+  never issued to the customer), plus the allocations. The boot data
+  migration `2026-10-12-credit-notes-for-revisions` does it for every job,
+  through the invoice-row sync with `verifyIssued`: both invoices are checked
+  against their stored revisions and, to the cent, the totals their PDFs
+  printed, before anything is written. A job that fails is listed and
+  written nothing, and the migration is not recorded, so it runs again at
+  the next boot. `npm run data:migrate -- --dry-run` shows what it would
+  record. The dual-write records the same for any job on its next change.
+- **Not changed:** returning an invoice to draft (unsend, mark unpaid) and
+  issuing different content later issues a new invoice without a credit
+  note, as an invoice returned to draft was not a delivered document. That
+  is a later decision.

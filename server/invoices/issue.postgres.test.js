@@ -51,6 +51,26 @@ test("through SET ROLE field_app: the issue allocates, stores and writes with th
   assert.match(first.number, /^INV-\d{4}-([1-9]|1[0-2])-1$/);
   const replay = await service.issueInvoice({ jobId: "job-app", idempotencyKey: "app-1", reference: "2610-10", issuedAt: "2026-10-12T02:00:00.000Z", invoice: invoice(), render: async () => { throw new Error("not rendered again"); } });
   assert.equal(replay.number, first.number);
+  // Credit it and reissue: the credit note, its lines, the allocation table
+  // and the credited event, all with field_app's grants.
+  await withOrg(db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`insert into payments (uid, job_id, invoice_uid, amount, paid_on, recorded_at, created_at, updated_at)
+    values ('pay_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'job-app', ${first.invoiceUid}, 50, '2026-10-12', now(), now(), now())`));
+  const credited = await service.creditAndReissue({
+    jobId: "job-app",
+    idempotencyKey: "app-credit-1",
+    reference: "2610-10",
+    issuedAt: "2026-10-13T02:00:00.000Z",
+    issuedBy: "user-1",
+    reason: "Approved variation",
+    credited: { number: first.number, invoice: { ...invoice(), key: first.number, number: first.number, issuedAt: first.issuedAt } },
+    creditNote: invoice(),
+    renderCreditNote: async (number) => Buffer.from(`%PDF-1.4\n${number}\n%%EOF\n`),
+    invoice: { ...invoice(), revision: 2 },
+    render: async (number) => Buffer.from(`%PDF-1.4\n${number}\n%%EOF\n`),
+  });
+  assert.match(credited.creditNote.number, /^CN-\d{4}-\d{2}-1$/);
+  const [moved] = await withOrg(db, DEFAULT_ORG_UID, (tx) => queryRows(sql`select (select count(*) from payment_allocations)::int as allocations, (select amount_paid from invoices where uid = ${credited.invoice.invoiceUid}) as paid`, tx));
+  assert.deepEqual(moved, { allocations: 1, paid: "50.00" });
 });
 
 test("as a table owner without CREATEROLE: concurrent issues are numbered 1..n, a failed one leaves no gap, organisations do not share a sequence", { skip: !enabled && "set FIELD_DB_TEST_DOCKER=1 or FIELD_DB_TEST_DATABASE_URL" }, async () => {

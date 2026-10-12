@@ -17,7 +17,7 @@ import {
   readJobQuoteCatalogChanges,
   recordJobMilestonePayment,
   regenerateRecordingQuote,
-  reviseJobMilestoneInvoice,
+  creditAndReissueJobMilestoneInvoice,
   sendJobQuote,
   setJobPipelineStage,
   updateJobMilestone,
@@ -4306,7 +4306,7 @@ test("a sent invoice and its PDF survive an approved quote change untouched", as
   }
 });
 
-test("reviseJobMilestoneInvoice issues an attributable new invoice without disturbing the original", async () => {
+test("creditAndReissueJobMilestoneInvoice credits the issued invoice with a credit note and issues its replacement, without disturbing the original", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-revise-"));
 
   try {
@@ -4317,7 +4317,7 @@ test("reviseJobMilestoneInvoice issues an attributable new invoice without distu
     const originalPdfBytes = await readFile(originalPdfPath);
     await applyApprovedVariation(jobDir, seeded.quote);
 
-    const revised = await reviseJobMilestoneInvoice({
+    const revised = await creditAndReissueJobMilestoneInvoice({
       jobDir,
       meta: seeded.meta,
       config: {},
@@ -4380,12 +4380,31 @@ test("reviseJobMilestoneInvoice issues an attributable new invoice without distu
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line))
-      .find((entry) => entry.kind === "invoice.revised");
-    assert.ok(revisionEvent, "a revision activity entry is recorded");
-    assert.ok(revisionEvent.body.includes(`${revisedNumber} (revision 2) supersedes ${originalNumber}`), revisionEvent.body);
+      .find((entry) => entry.kind === "invoice.credited");
+    assert.ok(revisionEvent, "a credit activity entry is recorded");
+    assert.ok(revisionEvent.body.includes(`${originalNumber} credited by ${revised.creditNote.number}; ${revisedNumber} issued in its place`), revisionEvent.body);
     assert.match(revisionEvent.body, /Reason: Approved rock clause variation on the north bench/);
     assert.equal(revisionEvent.actor.label, "Alex");
     assert.equal(revised.quoteLifecycle.lastSentQuoteVersion, 3);
+
+    // The credit note: from its own sequence, crediting the original in
+    // full, with the reason and who did it, and its own stored PDF.
+    const note = revised.creditNote;
+    assert.match(note.number, /^CN-\d{4}-\d{2}-[1-9]\d*$/);
+    assert.deepEqual([note.reason, note.issuedBy, note.subtotal, note.gst, note.total, note.replacementInvoiceNumber], ["Approved rock clause variation on the north bench", "Alex", 100, 10, 110, revisedNumber]);
+    assert.deepEqual(current.revisionHistory[0].creditNote, note);
+    assert.equal(current.issuedRevision.creditNoteNumber, note.number);
+    const notePdf = await readFile(join(jobDir, note.pdfPath));
+    assert.equal(createHash("sha256").update(notePdf).digest("hex"), note.pdfSha256);
+    const issuedNote = await TEST_INVOICE_ISSUER.documents.findIssuedDocument({ documentType: "credit_note", number: note.number });
+    assert.equal(issuedNote.pdfSha256, note.pdfSha256);
+    assert.equal(issuedNote.details.reason, "Approved rock clause variation on the north bench");
+    const { documents: jobDocuments } = await TEST_INVOICE_ISSUER.documents.listJobDocuments("job-invoice-revise-1");
+    const originalDocument = jobDocuments.find((document) => document.number === originalNumber);
+    const credited = originalDocument.events.find((event) => event.event === "credited");
+    assert.deepEqual([credited.by, credited.data.creditNoteNumber, credited.data.replacementInvoiceNumber, credited.data.reason], ["Alex", note.number, revisedNumber, "Approved rock clause variation on the north bench"]);
+    const text = notePdf.toString("latin1");
+    assert.ok(text.includes("Adjustment note"), "the PDF says it is an adjustment note");
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }
@@ -4398,7 +4417,7 @@ test("a repeated or stale revision request never duplicates an invoice revision"
     const seeded = await seedLandedJobWithSentInvoice(jobDir, { id: "job-invoice-revise-2" });
     await applyApprovedVariation(jobDir, seeded.quote);
 
-    const first = await reviseJobMilestoneInvoice({
+    const first = await creditAndReissueJobMilestoneInvoice({
       jobDir,
       meta: seeded.meta,
       config: {},
@@ -4411,7 +4430,7 @@ test("a repeated or stale revision request never duplicates an invoice revision"
 
     // A retried request still carrying the old revision number is rejected.
     await assert.rejects(
-      reviseJobMilestoneInvoice({
+      creditAndReissueJobMilestoneInvoice({
         jobDir,
         meta: first.meta,
         config: {},
@@ -4426,7 +4445,7 @@ test("a repeated or stale revision request never duplicates an invoice revision"
     // And a request with no guard at all still cannot mint a duplicate,
     // because the approved values are already invoiced.
     await assert.rejects(
-      reviseJobMilestoneInvoice({
+      creditAndReissueJobMilestoneInvoice({
         jobDir,
         meta: first.meta,
         config: {},
@@ -4434,7 +4453,7 @@ test("a repeated or stale revision request never duplicates an invoice revision"
         reason: "Approved rock clause variation",
         actor: { kind: "user", label: "Alex" },
       }),
-      /nothing to revise/i,
+      /nothing to credit and reissue/i,
     );
 
     const hydrated = await readJobMeta(jobDir);
@@ -4445,27 +4464,27 @@ test("a repeated or stale revision request never duplicates an invoice revision"
   }
 });
 
-test("reviseJobMilestoneInvoice refuses unsafe revisions", async () => {
+test("creditAndReissueJobMilestoneInvoice refuses unsafe revisions", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-revise-refuse-"));
 
   try {
     const seeded = await seedLandedJobWithSentInvoice(jobDir, { id: "job-invoice-revise-3" });
 
     await assert.rejects(
-      reviseJobMilestoneInvoice({
+      creditAndReissueJobMilestoneInvoice({
         jobDir,
         meta: seeded.meta,
         config: {},
         milestoneIndex: 0,
         reason: "   ",
       }),
-      /revision reason is required/i,
+      /a reason is required to credit and reissue/i,
     );
 
     // The second milestone has never been issued, so there is no money
     // document to supersede.
     await assert.rejects(
-      reviseJobMilestoneInvoice({
+      creditAndReissueJobMilestoneInvoice({
         jobDir,
         meta: seeded.meta,
         config: {},
@@ -4496,7 +4515,7 @@ test("reviseJobMilestoneInvoice refuses unsafe revisions", async () => {
     };
     await writeFile(join(jobDir, "quote.json"), JSON.stringify(reduced, null, 2));
     await assert.rejects(
-      reviseJobMilestoneInvoice({
+      creditAndReissueJobMilestoneInvoice({
         jobDir,
         meta: paid.meta,
         config: {},
@@ -4510,14 +4529,14 @@ test("reviseJobMilestoneInvoice refuses unsafe revisions", async () => {
   }
 });
 
-// reviseJobMilestoneInvoice only rejected a version
+// creditAndReissueJobMilestoneInvoice only rejected a version
 // older than the invoice's OWN pin — a version older than the CURRENT root
 // but at or above that pin was accepted, then written straight over root
 // with no archive of the displaced content (root artifacts are only ever
 // archived on fork). The promoted-from archive dir was also left in place,
 // so root's version number then collided with an existing quote-versions
 // dir and bricked the next fork with "version N is already archived".
-test("reviseJobMilestoneInvoice rejects a quote version older than the current root and leaves root and archives untouched", async () => {
+test("creditAndReissueJobMilestoneInvoice rejects a quote version older than the current root and leaves root and archives untouched", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-revise-stale-version-"));
 
   try {
@@ -4541,7 +4560,7 @@ test("reviseJobMilestoneInvoice rejects a quote version older than the current r
 
     const hydrated = await readJobMeta(jobDir);
     await assert.rejects(
-      () => reviseJobMilestoneInvoice({
+      () => creditAndReissueJobMilestoneInvoice({
         jobDir,
         meta: hydrated,
         config: {},
@@ -4584,7 +4603,7 @@ test("reviseJobMilestoneInvoice rejects a quote version older than the current r
 // present, after forking to v3 and then promoting v2 back down). Naming
 // that archived version in a revise passed both of those guards and wrote
 // it straight over root with no archive of the displaced content.
-test("reviseJobMilestoneInvoice rejects a quote version NEWER than the current root and leaves root and archives untouched", async () => {
+test("creditAndReissueJobMilestoneInvoice rejects a quote version NEWER than the current root and leaves root and archives untouched", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-revise-newer-than-root-"));
 
   try {
@@ -4609,7 +4628,7 @@ test("reviseJobMilestoneInvoice rejects a quote version NEWER than the current r
 
     const hydrated = await readJobMeta(jobDir);
     await assert.rejects(
-      () => reviseJobMilestoneInvoice({
+      () => creditAndReissueJobMilestoneInvoice({
         jobDir,
         meta: hydrated,
         config: {},
@@ -4657,14 +4676,14 @@ test("reviseJobMilestoneInvoice rejects a quote version NEWER than the current r
   }
 });
 
-test("reviseJobMilestoneInvoice still succeeds when explicitly naming the current quote version", async () => {
+test("creditAndReissueJobMilestoneInvoice still succeeds when explicitly naming the current quote version", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-revise-explicit-current-"));
 
   try {
     const seeded = await seedLandedJobWithSentInvoice(jobDir, { id: "job-invoice-revise-explicit-current-1" });
     await applyApprovedVariation(jobDir, seeded.quote);
 
-    const revised = await reviseJobMilestoneInvoice({
+    const revised = await creditAndReissueJobMilestoneInvoice({
       jobDir,
       meta: seeded.meta,
       config: {},
@@ -4681,7 +4700,7 @@ test("reviseJobMilestoneInvoice still succeeds when explicitly naming the curren
   }
 });
 
-test("reviseJobMilestoneInvoice still rejects a version older than the invoice's own pin, distinct from the current-root guard", async () => {
+test("creditAndReissueJobMilestoneInvoice still rejects a version older than the invoice's own pin, distinct from the current-root guard", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-revise-older-than-pin-"));
 
   try {
@@ -4697,7 +4716,7 @@ test("reviseJobMilestoneInvoice still rejects a version older than the invoice's
 
     const hydrated = await readJobMeta(jobDir);
     await assert.rejects(
-      () => reviseJobMilestoneInvoice({
+      () => creditAndReissueJobMilestoneInvoice({
         jobDir,
         meta: hydrated,
         config: {},
@@ -4768,7 +4787,7 @@ test("an issued milestone invoice's PDF is captured even when the persisting cal
     // stored bytes must remain retrievable and byte-identical.
     await applyApprovedVariation(jobDir, seeded.quote);
 
-    const revised = await reviseJobMilestoneInvoice({
+    const revised = await creditAndReissueJobMilestoneInvoice({
       jobDir,
       meta: updated.meta,
       config: {},
@@ -4985,7 +5004,7 @@ test("a stored legacy issued invoice with no issuedRevision keeps its stored tot
   }
 });
 
-// reviseJobMilestoneInvoice does not synchronize
+// creditAndReissueJobMilestoneInvoice does not synchronize
 // first, so on a never-synchronized legacy invoice the legacy synthesis
 // and the authorization happen in the SAME buildMilestoneInvoices call.
 // Before the fix, the post-hoc ADOPT_PENDING stamp landed on the freshly
@@ -5063,7 +5082,7 @@ test("the first revise of a never-synchronized legacy invoice emits no false rec
     await writeFile(join(jobDir, "quote.json"), JSON.stringify(variation, null, 2));
 
     const hydrated = await readJobMeta(jobDir);
-    const revised = await reviseJobMilestoneInvoice({
+    const revised = await creditAndReissueJobMilestoneInvoice({
       jobDir,
       meta: hydrated,
       config: {},
@@ -5088,7 +5107,7 @@ test("the first revise of a never-synchronized legacy invoice emits no false rec
     // No false reconstruction event — only the genuine revision event.
     const { activity } = await readJobState(jobDir);
     assert.ok(
-      activity.some((entry) => entry.kind === "invoice.revised"),
+      activity.some((entry) => entry.kind === "invoice.credited"),
       "the genuine revision event was recorded",
     );
     assert.ok(
@@ -5164,7 +5183,7 @@ test("the first revise of a never-synchronized legacy invoice with unchanged val
     // actually revise.
     const hydrated = await readJobMeta(jobDir);
     await assert.rejects(
-      () => reviseJobMilestoneInvoice({
+      () => creditAndReissueJobMilestoneInvoice({
         jobDir,
         meta: hydrated,
         config: {},
@@ -5624,7 +5643,7 @@ test("an ordinary reconstruction on an implicit (swept-in) target still succeeds
   }
 });
 
-// `reviseJobMilestoneInvoice` passes `writeAllArtifacts: true` — that used
+// `creditAndReissueJobMilestoneInvoice` passes `writeAllArtifacts: true` — that used
 // to reclassify EVERY milestone as an explicit (fail-loud)
 // target, so revising milestone 0 would 410 over milestone 1's unrelated,
 // unrecoverable artifact even though the operator never touched milestone
@@ -5671,7 +5690,7 @@ test("revising one milestone succeeds while an unrelated milestone's artifact is
     await applyApprovedVariation(jobDir, seeded.quote);
     const hydrated = await readJobMeta(jobDir);
 
-    const revised = await reviseJobMilestoneInvoice({
+    const revised = await creditAndReissueJobMilestoneInvoice({
       jobDir,
       meta: hydrated,
       config: {},
@@ -5699,7 +5718,7 @@ test("revising one milestone succeeds while an unrelated milestone's artifact is
     assert.ok(unrecoverableActivity, "milestone 1's degradation was recorded");
     assert.match(unrecoverableActivity.body, new RegExp(milestone1.invoiceNumber));
     assert.ok(
-      activity.some((entry) => entry.kind === "invoice.revised"),
+      activity.some((entry) => entry.kind === "invoice.credited"),
       "milestone 0's revision was recorded",
     );
   } finally {

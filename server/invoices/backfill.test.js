@@ -63,10 +63,10 @@ describe("invoice-row backfill", () => {
 
   test("checking the files: every issued invoice equals its revision and its PDF", async () => {
     const report = await backfillInvoiceRows({ dataDir });
-    assert.deepEqual([report.jobs, report.jobsWithMilestones, report.jobsRefused], [6, 6, 0]);
+    assert.deepEqual([report.jobs, report.jobsWithMilestones, report.jobsRefused], [7, 7, 0]);
     assert.deepEqual(report.mismatches, []);
     assert.deepEqual(report.errors, []);
-    assert.deepEqual(report.byStatus, { issued: 5, draft: 4, paid: 1, credited: 1 });
+    assert.deepEqual(report.byStatus, { issued: 6, draft: 5, paid: 1, credited: 2 });
     assert.deepEqual(report.warnings, [], "every issued invoice was read back from a PDF");
     for (const entry of report.entries) {
       for (const invoice of entry.invoices.filter((candidate) => candidate.status !== "draft")) {
@@ -83,15 +83,19 @@ describe("invoice-row backfill", () => {
       pdfBytes: pdf, issuedAt: "2026-05-02T00:00:00.000Z", source: "invoice-revision-backfill",
     });
     const dry = await backfillInvoiceRows({ dataDir, service, issuedDocuments: documents, dryRun: true });
-    assert.deepEqual(dry.actions, { "would-write": 6 });
+    assert.deepEqual(dry.actions, { "would-write": 7 });
     assert.deepEqual((await service.readJob("job-paid")).invoices, [], "a dry run writes nothing");
 
     const report = await backfillInvoiceRows({ dataDir, service, issuedDocuments: documents });
-    assert.deepEqual(report.actions, { written: 6 });
+    assert.deepEqual(report.actions, { written: 7 });
+    // The two revisions made in place get their credit notes, and the
+    // payment the credited deposit held moves to its replacement.
     assert.deepEqual(report.written, {
-      milestones: { created: 10 },
-      invoices: { created: 11 },
-      payments: { created: 2 },
+      milestones: { created: 12 },
+      invoices: { created: 14 },
+      creditNotes: { created: 2 },
+      payments: { created: 3 },
+      allocations: { created: 1 },
       receipts: { created: 1 },
     });
     const paid = await service.readJob("job-paid");
@@ -100,8 +104,8 @@ describe("invoice-row backfill", () => {
     assert.deepEqual(entry.invoices[0].issued.map((copy) => copy.source), ["issued-document"], "the same bytes are checked once");
 
     const again = await backfillInvoiceRows({ dataDir, service, issuedDocuments: documents });
-    assert.deepEqual(again.actions, { unchanged: 6 });
-    assert.deepEqual(again.written, { milestones: { unchanged: 10 }, invoices: { unchanged: 11 }, payments: { unchanged: 2 }, receipts: { unchanged: 1 } });
+    assert.deepEqual(again.actions, { unchanged: 7 });
+    assert.deepEqual(again.written, { milestones: { unchanged: 12 }, invoices: { unchanged: 14 }, creditNotes: { unchanged: 2 }, payments: { unchanged: 3 }, allocations: {}, receipts: { unchanged: 1 } });
   });
 
   test("a planted mismatch and an over-claim are refused with both numbers, and nothing is written for them", async () => {
@@ -120,7 +124,7 @@ describe("invoice-row backfill", () => {
       const freshService = createInvoiceRowService({ db: fresh.db, orgUid: DEFAULT_ORG_UID });
       const report = await backfillInvoiceRows({ dataDir, service: freshService });
       assert.equal(report.jobsRefused, 2);
-      assert.deepEqual(report.actions, { refused: 2, written: 4 });
+      assert.deepEqual(report.actions, { refused: 2, written: 5 });
       const deposit = report.mismatches.filter((entry) => entry.jobId === "job-deposit");
       assert.deepEqual(deposit.map((entry) => [entry.number, entry.against, entry.field, entry.rows, entry.shown]), [
         ["EI-2605-02-M1", "revision-pdf", "subtotal", "900.00", "925.50"],

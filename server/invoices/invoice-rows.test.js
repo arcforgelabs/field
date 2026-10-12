@@ -22,6 +22,7 @@ const ORG_A = DEFAULT_ORG_UID;
 const ORG_B = "org_01TESTSECONDORGANISATION0";
 const ROLLBACK_0013 = fileURLToPath(new URL("../db/rollback/0013_invoice_rows.down.sql", import.meta.url));
 const ROLLBACK_0014 = fileURLToPath(new URL("../db/rollback/0014_invoice_issue.down.sql", import.meta.url));
+const ROLLBACK_0015 = fileURLToPath(new URL("../db/rollback/0015_credit_notes.down.sql", import.meta.url));
 
 function rejects(promise, pattern) {
   return assert.rejects(promise, (error) => {
@@ -47,7 +48,7 @@ describe("invoice rows", () => {
     a = createInvoiceRowService({ db: t.db, orgUid: ORG_A });
     b = createInvoiceRowService({ db: t.db, orgUid: ORG_B });
     dataDir = mkdtempSync(join(tmpdir(), "field-invoice-rows-"));
-    for (const name of ["paid", "revised", "voidedPayment"]) jobs[name] = await collectJobInvoices(await scenarios[name](dataDir));
+    for (const name of ["paid", "revised", "revisedPaid", "voidedPayment"]) jobs[name] = await collectJobInvoices(await scenarios[name](dataDir));
   });
   after(async () => {
     await t.close();
@@ -95,10 +96,40 @@ describe("invoice rows", () => {
     const byNumber = Object.fromEntries(invoices.map((invoice) => [invoice.number, invoice]));
     assert.deepEqual(Object.keys(byNumber).sort(), ["EI-2605-04-M1", "EI-2605-04-M1-R2", "EI-2605-04-M2"]);
     assert.deepEqual([byNumber["EI-2605-04-M1"].status, byNumber["EI-2605-04-M1"].total, byNumber["EI-2605-04-M1"].revision], ["credited", "110.00", 1]);
-    assert.match(byNumber["EI-2605-04-M1"].note, /superseded by EI-2605-04-M1-R2.*credit note/);
+    assert.match(byNumber["EI-2605-04-M1"].note, /credited by CN-EI-2605-04-M1 .*replaced by EI-2605-04-M1-R2/);
     assert.ok(byNumber["EI-2605-04-M1"].supersededAt);
     const r2 = byNumber["EI-2605-04-M1-R2"];
     assert.deepEqual([r2.status, r2.total, r2.revision, r2.supersedesInvoiceUid, r2.revisionReason], ["issued", "165.00", 2, byNumber["EI-2605-04-M1"].uid, "Approved variation"]);
+    // The credit note recorded for it: in full, issued, naming the replacement.
+    const { creditNotes } = await a.readJob(jobId);
+    assert.deepEqual(creditNotes.map((note) => [note.number, note.status, note.origin, note.invoiceUid, note.replacementInvoiceUid, note.total, note.reason, note.issuedDocumentUid]), [
+      ["CN-EI-2605-04-M1", "issued", "revision-migration", byNumber["EI-2605-04-M1"].uid, r2.uid, "110.00", "Approved variation", null],
+    ]);
+    assert.equal(creditNotes[0].lines[0].invoiceLineUid, byNumber["EI-2605-04-M1"].lines[0].uid);
+    const again = await a.writeJob({ jobId, mapped });
+    assert.deepEqual(again.creditNotes, { created: 0, unchanged: 1 });
+    // An issued credit note never changes, and is never deleted.
+    await rejects(asOrg(t.db, ORG_A, sql`update credit_notes set total = 0, subtotal = 0, tax_total = 0`), /was issued: change refused/);
+    await rejects(asOrg(t.db, ORG_A, sql`delete from credit_notes`), /was issued: delete refused/);
+  });
+
+  test("a payment on a credited invoice moves to its replacement, as an allocation", async () => {
+    const { jobId, mapped } = jobs.revisedPaid;
+    const first = await a.writeJob({ jobId, mapped });
+    assert.equal(first.allocations.created, 1);
+    const { invoices, payments, allocations, creditNotes } = await a.readJob(jobId);
+    const byNumber = Object.fromEntries(invoices.map((invoice) => [invoice.number, invoice]));
+    const credited = byNumber["EI-2605-07-M1"];
+    const replacement = byNumber["EI-2605-07-M1-R2"];
+    assert.equal(payments[0].invoiceUid, credited.uid, "the payment keeps the invoice it was recorded against");
+    assert.deepEqual(allocations.map((allocation) => [allocation.paymentUid, allocation.fromInvoiceUid, allocation.toInvoiceUid, allocation.creditNoteUid, allocation.amount]), [
+      [payments[0].uid, credited.uid, replacement.uid, creditNotes[0].uid, payments[0].amount],
+    ]);
+    assert.deepEqual([credited.amountPaid, replacement.amountPaid], ["0.00", payments[0].amount]);
+    const again = await a.writeJob({ jobId, mapped });
+    assert.equal(again.allocations.created, 0, "a payment moves once");
+    await rejects(asOrg(t.db, ORG_A, sql`delete from payment_allocations`), /append-only: delete refused|permission denied for table payment_allocations/);
+    await rejects(asOrg(t.db, ORG_A, sql`update payment_allocations set amount = 1`), /append-only: update refused|permission denied for table payment_allocations/);
   });
 
   test("a voided payment keeps its row with voided_at; a payment the files drop is voided, never deleted", async () => {
@@ -177,7 +208,7 @@ describe("invoice rows", () => {
 
   test("another organisation sees none of it and cannot write into it", async () => {
     const { jobId, mapped } = jobs.paid;
-    assert.deepEqual(await b.readJob(jobId), { milestones: [], invoices: [], payments: [], receipts: [] });
+    assert.deepEqual(await b.readJob(jobId), { milestones: [], invoices: [], creditNotes: [], payments: [], allocations: [], receipts: [] });
     const [seen] = await asOrg(t.db, ORG_B, sql`select (select count(*) from invoices)::int as i, (select count(*) from payments)::int as p, (select count(*) from receipts)::int as r, (select count(*) from payment_milestones)::int as m`);
     assert.deepEqual(seen, { i: 0, p: 0, r: 0, m: 0 });
     // Organisation B writing the same job id gets its own rows, never A's.
@@ -234,6 +265,7 @@ describe("migration 0013 rolls back", () => {
       await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
       const { jobId, mapped } = await collectJobInvoices(await scenarios.paid(dataDir));
       await createInvoiceRowService({ db, orgUid: ORG_A }).writeJob({ jobId, mapped });
+      await client.exec(`begin; ${readFileSync(ROLLBACK_0015, "utf8")}; commit;`);
       await client.exec(`begin; ${readFileSync(ROLLBACK_0014, "utf8")}; commit;`);
       await client.exec(`begin; ${readFileSync(ROLLBACK_0013, "utf8")}; commit;`);
       await migrate(drizzle(reference, { schema }), { migrationsFolder: before });
@@ -244,6 +276,47 @@ describe("migration 0013 rolls back", () => {
     } finally {
       await client.close();
       await reference.close();
+      rmSync(before, { recursive: true, force: true });
+      rmSync(upTo, { recursive: true, force: true });
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("migration 0015 rolls back", () => {
+  test("the rollback returns the 0014 shape with recorded credit notes dropped, and refuses once a credit note was issued", async () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf8"));
+    const idx = journal.entries.find((entry) => entry.tag === "0015_credit_notes").idx;
+    const before = migrationsUpTo(idx - 1);
+    const upTo = migrationsUpTo(idx);
+    const client = new PGlite();
+    const reference = new PGlite();
+    const refusing = new PGlite();
+    const dataDir = mkdtempSync(join(tmpdir(), "field-invoice-rollback-0015-"));
+    try {
+      const db = drizzle(client, { schema });
+      await migrate(db, { migrationsFolder: upTo });
+      const { jobId, mapped } = await collectJobInvoices(await scenarios.revisedPaid(dataDir));
+      await createInvoiceRowService({ db, orgUid: ORG_A }).writeJob({ jobId, mapped });
+      await client.exec(`begin; ${readFileSync(ROLLBACK_0015, "utf8")}; commit;`);
+      await migrate(drizzle(reference, { schema }), { migrationsFolder: before });
+      assert.deepEqual(await schemaShape(db), await schemaShape(drizzle(reference, { schema })));
+      const [left] = await asOrg(db, ORG_A, sql`select (select count(*) from credit_notes)::int as notes, (select count(*) from invoices)::int as invoices`);
+      assert.deepEqual(left, { notes: 0, invoices: 3 }, "the recorded credit notes go; the invoices stay");
+
+      const issued = drizzle(refusing, { schema });
+      await migrate(issued, { migrationsFolder: upTo });
+      await withOrg(issued, ORG_A, async (tx) => {
+        await tx.execute(sql`insert into invoices (uid, job_id, number, kind, status, subtotal, tax_total, total, issued_at, created_at, updated_at)
+          values ('inv_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'job-x', 'EI-X-M1', 'deposit', 'issued', 1, 0, 1, now(), now(), now())`);
+        await tx.execute(sql`insert into credit_notes (uid, job_id, number, invoice_uid, status, reason, subtotal, tax_total, total, issued_at, issue_key, created_at, updated_at)
+          values ('crn_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'job-x', 'CN-2026-10-1', 'inv_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'issued', 'Wrong amount', 1, 0, 1, now(), 'k', now(), now())`);
+      });
+      await rejects(refusing.exec(`begin; ${readFileSync(ROLLBACK_0015, "utf8")}; commit;`), /credit notes were issued; 0015 cannot be rolled back/);
+    } finally {
+      await client.close();
+      await reference.close();
+      await refusing.close();
       rmSync(before, { recursive: true, force: true });
       rmSync(upTo, { recursive: true, force: true });
       rmSync(dataDir, { recursive: true, force: true });

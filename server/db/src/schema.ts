@@ -1256,6 +1256,9 @@ export const INVOICE_STATUSES = ["draft", "issued", "paid", "void", "credited"] 
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 export const CREDIT_NOTE_STATUSES = ["draft", "issued", "void"] as const;
 export type CreditNoteStatus = (typeof CREDIT_NOTE_STATUSES)[number];
+/** `issued`: issued by the issue service with its own PDF. `revision-migration`: recorded for an invoice revised in place before credit notes (no PDF was ever sent). */
+export const CREDIT_NOTE_ORIGINS = ["issued", "revision-migration"] as const;
+export type CreditNoteOrigin = (typeof CREDIT_NOTE_ORIGINS)[number];
 export const RECEIPT_STATUSES = ["issued", "void"] as const;
 export type ReceiptStatus = (typeof RECEIPT_STATUSES)[number];
 export const INVOICE_LINE_TYPES = ["claim", "item", "custom", "note"] as const;
@@ -1462,7 +1465,14 @@ export const invoiceLines = pgTable(
   ],
 );
 
-/** A credit (adjustment) note against one issued invoice (written from step 4b). */
+/**
+ * A credit (adjustment) note against one issued invoice (step 4b, #28). An
+ * issued invoice is never revised in place: it is credited in full by a
+ * credit note, and replaced by a new invoice (`replacement_invoice_uid`).
+ * Issued ones are numbered CN-YYYY-MM-N from document_number_counters with
+ * their own PDF; those recorded for revisions made before credit notes are
+ * `revision-migration` and have no PDF.
+ */
 export const creditNotes = pgTable(
   "credit_notes",
   {
@@ -1485,6 +1495,11 @@ export const creditNotes = pgTable(
     taxTotalReason: text("tax_total_reason"),
     issuedDocumentUid: text("issued_document_uid"),
     reference: text("reference"),
+    /** The invoice issued in place of the one credited. */
+    replacementInvoiceUid: text("replacement_invoice_uid"),
+    origin: text("origin").$type<CreditNoteOrigin>().notNull().default("issued"),
+    /** The issue service's idempotency key; null on a `revision-migration` note. */
+    issueKey: text("issue_key"),
     createdAt: createdAt(),
     createdBy: text("created_by"),
     updatedAt: updatedAt(),
@@ -1494,10 +1509,18 @@ export const creditNotes = pgTable(
   (t) => [
     uniqueIndex("credit_notes_org_uid_key").on(t.orgUid, t.uid),
     uniqueIndex("credit_notes_org_number_key").on(t.orgUid, t.number),
+    uniqueIndex("credit_notes_org_issue_key").on(t.orgUid, t.issueKey),
+    /** An invoice is credited once. */
+    uniqueIndex("credit_notes_org_invoice_key").on(t.orgUid, t.invoiceUid).where(sql`${t.status} = 'issued'`),
     index("credit_notes_invoice_idx").on(t.orgUid, t.invoiceUid),
     foreignKey({
       name: "credit_notes_invoice_fk",
       columns: [t.orgUid, t.invoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    foreignKey({
+      name: "credit_notes_replacement_invoice_fk",
+      columns: [t.orgUid, t.replacementInvoiceUid],
       foreignColumns: [invoices.orgUid, invoices.uid],
     }),
     foreignKey({
@@ -1513,6 +1536,8 @@ export const creditNotes = pgTable(
     check("credit_notes_total_check", sql`${t.total} = ${t.subtotal} + ${t.taxTotal} and ${t.total} >= 0`),
     check("credit_notes_tax_total_source_check", sql`${t.taxTotalSource} in ('computed','printed') and (${t.taxTotalSource} = 'computed' or ${t.taxTotalReason} is not null)`),
     check("credit_notes_version_check", sql`${t.version} > 0`),
+    check("credit_notes_origin_check", sql`${t.origin} in ('issued','revision-migration')`),
+    check("credit_notes_issue_check", sql`${t.issueKey} is null or (${t.origin} = 'issued' and ${t.issuedAt} is not null and ${t.number} ~ '^CN-[0-9]{4}-[0-9]{2}-[1-9][0-9]*$')`),
     tenantIsolation("credit_notes"),
   ],
 );
@@ -1669,6 +1694,63 @@ export const receipts = pgTable(
   ],
 );
 
+/**
+ * A payment moved to the invoice that replaced the one it was recorded
+ * against (step 4b): when a credit note credits an invoice, every active
+ * payment that invoice holds moves to the replacement. Append-only; the
+ * payment itself never changes. The invoice that holds a payment is the
+ * `to_invoice_uid` of its latest allocation, else the invoice it was
+ * recorded against.
+ */
+export const paymentAllocations = pgTable(
+  "payment_allocations",
+  {
+    /** `pal_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    jobId: text("job_id").notNull(),
+    paymentUid: text("payment_uid").notNull(),
+    fromInvoiceUid: text("from_invoice_uid").notNull(),
+    toInvoiceUid: text("to_invoice_uid").notNull(),
+    creditNoteUid: text("credit_note_uid").notNull(),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    allocatedAt: timestamp("allocated_at", { withTimezone: true, mode: "date" }).notNull(),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+  },
+  (t) => [
+    uniqueIndex("payment_allocations_org_uid_key").on(t.orgUid, t.uid),
+    uniqueIndex("payment_allocations_org_payment_credit_key").on(t.orgUid, t.paymentUid, t.creditNoteUid),
+    index("payment_allocations_payment_idx").on(t.orgUid, t.paymentUid, t.allocatedAt),
+    index("payment_allocations_job_idx").on(t.orgUid, t.jobId),
+    foreignKey({
+      name: "payment_allocations_payment_fk",
+      columns: [t.orgUid, t.paymentUid],
+      foreignColumns: [payments.orgUid, payments.uid],
+    }),
+    foreignKey({
+      name: "payment_allocations_from_invoice_fk",
+      columns: [t.orgUid, t.fromInvoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    foreignKey({
+      name: "payment_allocations_to_invoice_fk",
+      columns: [t.orgUid, t.toInvoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    foreignKey({
+      name: "payment_allocations_credit_note_fk",
+      columns: [t.orgUid, t.creditNoteUid],
+      foreignColumns: [creditNotes.orgUid, creditNotes.uid],
+    }),
+    check("payment_allocations_uid_check", sql`${t.uid} ~ '^pal_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("payment_allocations_amount_check", sql`${t.amount} > 0`),
+    check("payment_allocations_invoices_check", sql`${t.fromInvoiceUid} <> ${t.toInvoiceUid}`),
+    tenantIsolation("payment_allocations"),
+  ],
+);
+
+export type PaymentAllocation = typeof paymentAllocations.$inferSelect;
 export type PaymentMilestone = typeof paymentMilestones.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceLine = typeof invoiceLines.$inferSelect;

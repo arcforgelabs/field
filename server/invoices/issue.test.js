@@ -70,9 +70,9 @@ describe("invoice issue service", () => {
   const renders = [];
 
   function issue(service, overrides = {}) {
-    const { key = `key-${renders.length}-${Math.random()}`, issuedAt = "2026-10-12T02:00:00.000Z", ...rest } = overrides;
+    const { key = `key-${renders.length}-${Math.random()}`, issuedAt = "2026-10-12T02:00:00.000Z", jobId = "job-issue", ...rest } = overrides;
     return service.issueInvoice({
-      jobId: "job-issue",
+      jobId,
       idempotencyKey: key,
       reference: "2610-03",
       issuedAt,
@@ -85,6 +85,11 @@ describe("invoice issue service", () => {
       },
       ...rest,
     });
+  }
+
+  async function counterOf(documentType, period, orgUid = ORG_A) {
+    const [row] = await withOrg(t.db, orgUid, (tx) => queryRows(sql`select last_value from document_number_counters where document_type = ${documentType} and period = ${period}`, tx));
+    return row ? Number(row.last_value) : 0;
   }
 
   async function counter(orgUid, period) {
@@ -188,6 +193,70 @@ describe("invoice issue service", () => {
     // The month is not zero-padded (owner's decision, 2026-10-13).
     await rejects(withOrg(t.db, ORG_A, (tx) => tx.execute(sql`insert into invoices (uid, job_id, number, kind, status, subtotal, tax_total, total, issued_at, issue_key, reference, created_at, updated_at)
       values ('inv_01ARZ3NDEKTSV4RRFFQ69G5FAX', 'job-x', 'INV-2026-01-5', 'deposit', 'issued', 1, 0, 1, now(), 'padded', '2610-03', now(), now())`)), /invoices_issue_check/);
+  });
+
+  test("credit and reissue: a credit note from its own sequence credits the invoice in full, the replacement is issued, payments move, all in one go", async () => {
+    const period = invoicePeriod(new Date("2026-10-12T02:00:00.000Z"));
+    const original = await issue(a, { key: "to-credit", jobId: "job-credit" });
+    await withOrg(t.db, ORG_A, (tx) => tx.execute(sql`insert into payments (uid, job_id, invoice_uid, amount, paid_on, recorded_at, created_at, updated_at)
+      values ('pay_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'job-credit', ${original.invoiceUid}, 200, '2026-10-12', now(), now(), now())`));
+    const credit = (overrides = {}) => a.creditAndReissue({
+      jobId: "job-credit",
+      idempotencyKey: "credit-1",
+      reference: "2610-03",
+      issuedAt: "2026-10-13T02:00:00.000Z",
+      issuedBy: "user-2",
+      reason: "Approved variation: rock clause",
+      credited: { number: original.number, invoice: { ...claimInvoice(), key: original.number, number: original.number, issuedAt: original.issuedAt, reference: "2610-03" } },
+      creditNote: { ...claimInvoice(), lines: claimInvoice().lines.map((line) => ({ ...line, name: `Credit of ${original.number}: ${line.name}` })) },
+      renderCreditNote: async (number, { invoiceNumber }) => Buffer.from(`%PDF-1.4\nAdjustment note ${number} -> ${invoiceNumber}\n%%EOF\n`),
+      invoice: { ...claimInvoice({ subtotal: "500.00", gst: "50.00", total: "550.00" }), revision: 2 },
+      render: async (number, { creditNoteNumber }) => Buffer.from(`%PDF-1.4\nTax invoice ${number} after ${creditNoteNumber}\n%%EOF\n`),
+      ...overrides,
+    });
+    const result = await credit();
+    assert.match(result.creditNote.number, new RegExp(`^CN-${period}-\\d+$`));
+    assert.match(result.invoice.number, new RegExp(`^INV-${period}-\\d+$`));
+    assert.deepEqual(result.creditNote.pdfBytes, Buffer.from(`%PDF-1.4\nAdjustment note ${result.creditNote.number} -> ${result.invoice.number}\n%%EOF\n`), "each document names the other");
+
+    const read = await createInvoiceRowService({ db: t.db, orgUid: ORG_A }).readJob("job-credit");
+    const credited = read.invoices.find((invoice) => invoice.number === original.number);
+    const replacement = read.invoices.find((invoice) => invoice.number === result.invoice.number);
+    assert.deepEqual([credited.status, credited.amountPaid, replacement.status, replacement.amountPaid, replacement.supersedesInvoiceUid], ["credited", "0.00", "issued", "200.00", credited.uid]);
+    assert.deepEqual(read.creditNotes.map((note) => [note.number, note.origin, note.reason, note.createdBy, note.total, note.invoiceUid, note.replacementInvoiceUid, note.issuedDocumentUid]), [
+      [result.creditNote.number, "issued", "Approved variation: rock clause", "user-2", "440.00", credited.uid, replacement.uid, result.creditNote.issuedDocumentUid],
+    ]);
+    assert.deepEqual(read.allocations.map((allocation) => [allocation.fromInvoiceUid, allocation.toInvoiceUid, allocation.amount]), [[credited.uid, replacement.uid, "200.00"]]);
+    const documents = createIssuedDocumentService({ db: t.db, orgUid: ORG_A });
+    const listed = await documents.listJobDocuments("job-credit");
+    const creditedEvents = listed.documents.find((document) => document.number === original.number).events.map((event) => [event.event, event.by, event.data.reason || null]);
+    assert.deepEqual(creditedEvents, [["issued", "user-1", null], ["credited", "user-2", "Approved variation: rock clause"]]);
+    assert.equal(listed.documents.find((document) => document.number === result.creditNote.number).documentType, "credit_note");
+
+    // A retry returns the same documents; a second credit of the same invoice is refused.
+    const again = await credit();
+    assert.equal(again.replayed, true);
+    assert.deepEqual([again.creditNote.number, again.invoice.number], [result.creditNote.number, result.invoice.number]);
+    await rejects(credit({ idempotencyKey: "credit-2" }), /was already credited by CN-/);
+    // A failed credit rolls both numbers back.
+    const notesBefore = await counterOf("credit_note", period);
+    const invoicesBefore = await counter(ORG_A, period);
+    const second = await issue(a, { key: "to-credit-2", jobId: "job-credit-2" });
+    await rejects(a.creditAndReissue({
+      jobId: "job-credit-2",
+      idempotencyKey: "credit-fails",
+      reference: "2610-03",
+      issuedAt: "2026-10-13T02:00:00.000Z",
+      reason: "Wrong amount",
+      credited: { number: second.number, invoice: { ...claimInvoice(), key: second.number, number: second.number, issuedAt: second.issuedAt } },
+      creditNote: claimInvoice(),
+      renderCreditNote: async () => Buffer.from("%PDF-1.4\n%%EOF\n"),
+      invoice: claimInvoice(),
+      render: async () => { throw new Error("renderer crashed"); },
+    }), /renderer crashed/);
+    assert.equal(await counterOf("credit_note", period), notesBefore);
+    assert.equal(await counter(ORG_A, period), invoicesBefore + 1, "only the invoice issued before moved the invoice counter");
+    await rejects(credit({ idempotencyKey: "no-reason", reason: " " }), /needs its reason/);
   });
 
   test("the issue key names the job, milestone, revision and money", () => {

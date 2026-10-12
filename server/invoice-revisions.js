@@ -179,6 +179,32 @@ export function normalizeInvoiceRevision(entry = null) {
     supersededByRevisionNumber: entry.supersededByRevisionNumber != null
       ? normalizeRevisionNumber(entry.supersededByRevisionNumber)
       : null,
+    // Step 4b (#28): the credit note that credited this revision when it was
+    // replaced, and on the replacement the note that made way for it.
+    ...(normalizeCreditNote(entry.creditNote) ? { creditNote: normalizeCreditNote(entry.creditNote) } : {}),
+    ...(cleanText(entry.creditNoteNumber) ? { creditNoteNumber: cleanText(entry.creditNoteNumber) } : {}),
+  };
+}
+
+// A credit (adjustment) note as the job files record it on the revision it
+// credited: its number, why and by whom, the amounts credited (the revision's
+// own, in full), the invoice issued in its place, and its stored PDF.
+export function normalizeCreditNote(note = null) {
+  if (!note || typeof note !== "object") return null;
+  const number = cleanText(note.number);
+  if (!number) return null;
+  return {
+    number,
+    reason: cleanText(note.reason),
+    issuedAt: normalizeIsoTimestamp(note.issuedAt),
+    issuedBy: normalizeActorLabel(note.issuedBy),
+    subtotal: roundMoney(note.subtotal),
+    gst: roundMoney(note.gst),
+    total: roundMoney(note.total),
+    currency: cleanText(note.currency) || "AUD",
+    replacementInvoiceNumber: cleanText(note.replacementInvoiceNumber),
+    pdfPath: cleanText(note.pdfPath),
+    pdfSha256: cleanText(note.pdfSha256),
   };
 }
 
