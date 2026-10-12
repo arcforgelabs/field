@@ -563,3 +563,24 @@ test("real PostgreSQL: migrations apply once, concurrently safe, with the same v
     await pg.stop();
   }
 });
+
+test("real PostgreSQL: databases on one server migrating at once all succeed (field_app is cluster-wide)", { skip: realPostgres ? false : "set FIELD_DB_TEST_DATABASE_URL or FIELD_DB_TEST_DOCKER=1" }, async () => {
+  // The migration lock is an advisory lock, which is per database, but the
+  // field_app role 0005 creates, alters and grants is shared by every
+  // database on the server. Several fresh databases migrating together used
+  // to fail one of them with "tuple concurrently updated".
+  const moduleUrl = new URL("./index.js", import.meta.url).href;
+  const source = `const rt = await import(${JSON.stringify(moduleUrl)});
+    console.log(JSON.stringify(await rt.runMigrations()));
+    await rt.closeDb();`;
+  for (let round = 0; round < 3; round += 1) {
+    const databases = await Promise.all(Array.from({ length: 6 }, () => startTestPostgres()));
+    try {
+      const runs = await Promise.all(databases.map((pg) => runChild(source, { FIELD_DB_URL: pg.url }).exited));
+      for (const run of runs) assert.equal(run.code, 0, run.output);
+      for (const run of runs) assert.equal(JSON.parse(run.output.trim().split("\n").at(-1)).applied, journal.length);
+    } finally {
+      await Promise.all(databases.map((pg) => pg.stop()));
+    }
+  }
+});
