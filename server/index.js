@@ -202,7 +202,7 @@ import {
   readQuoteIssuanceLedger,
 } from "./quote-issuance.js";
 import { resolveQuoteCatalogIdFromMeta } from "./quote-catalog-ids.js";
-import { getFieldDb, getFieldDbHandle, rebaseJobDirs, syncExistingJobs, upsertJob, findJobInDb, listJobsFromDb, insertNote, getNotesForJob, getJobLog, deleteNote, deleteJob } from "./field-db.js";
+import { getFieldDb, getFieldDbHandle, rebaseJobDirs, reconcileJobIndex, upsertJob, findJobInDb, listJobsFromDb, insertNote, getNotesForJob, getJobLog, deleteNote, deleteJob } from "./field-db.js";
 import { JOB_NOT_DELETABLE_ERROR, assessJobDeletion } from "./job-deletion.js";
 import {
   buildQuoteEditPolicy,
@@ -529,13 +529,10 @@ try {
   fieldDb = getFieldDb(DATA_DIR);
   const rebase = rebaseJobDirs(fieldDb, DATA_DIR);
   if (rebase.rebased > 0) console.log(`[field-db] Pointed ${rebase.rebased} of ${rebase.total} jobs at ${DATA_DIR}`);
-  const result = await syncExistingJobs(fieldDb, DATA_DIR);
-  if (result.synced > 0) {
-    console.log(`[field-db] Synced ${result.synced} existing jobs into database`);
-  } else {
-    const count = fieldDb.prepare("SELECT COUNT(*) AS c FROM jobs").get().c;
-    console.log(`[field-db] ${count} jobs indexed`);
-  }
+  // Every boot, after durable storage has restored the data directory, so a
+  // restored or older field.db never hides a job that is on disk (#32).
+  const result = await reconcileJobIndex(fieldDb, DATA_DIR);
+  console.log(`[field-db] ${result.total} jobs indexed${describeJobIndexRepair(result)}`);
 } catch (err) {
   console.error(`[field-db] Init failed: ${err.message}`);
 }
@@ -1265,12 +1262,47 @@ app.post("/api/jobs/manual", requireAuth, async (req, res) => {
   }
 });
 
+function describeJobIndexRepair({ added = 0, moved = 0 } = {}) {
+  const parts = [];
+  if (added) parts.push(`added ${added} job(s) missing from the index`);
+  if (moved) parts.push(`repointed ${moved} job(s) whose folder moved`);
+  return parts.length ? ` (${parts.join(", ")})` : "";
+}
+
+// The job list reads field.db. Boot reconciles it with the data directory;
+// while running, a row whose folder is gone means the index and the data
+// directory disagree, so the list reconciles again (once per disagreement,
+// one reconcile at a time) before it answers (#32).
+let jobIndexReconcile = null;
+let unresolvedMissingJobDirs = new Set();
+
+function reconcileJobIndexOnce(reason) {
+  jobIndexReconcile ||= reconcileJobIndex(fieldDb, DATA_DIR)
+    .then((result) => {
+      if (result.added || result.moved) console.log(`[field-db] ${reason}: ${result.total} jobs indexed${describeJobIndexRepair(result)}`);
+      return result;
+    })
+    .finally(() => { jobIndexReconcile = null; });
+  return jobIndexReconcile;
+}
+
+async function listIndexedJobRows(reason) {
+  let rows = listJobsFromDb(fieldDb);
+  const missing = rows.filter((row) => !existsSync(row.dir)).map((row) => row.dir);
+  if (missing.some((dir) => !unresolvedMissingJobDirs.has(dir))) {
+    await reconcileJobIndexOnce(reason);
+    rows = listJobsFromDb(fieldDb);
+    unresolvedMissingJobDirs = new Set(rows.filter((row) => !existsSync(row.dir)).map((row) => row.dir));
+  }
+  return rows;
+}
+
 // List jobs
 app.get("/api/jobs", requireAuth, async (_req, res) => {
   // Fast path: read from DB
   if (fieldDb) {
     try {
-      const rows = listJobsFromDb(fieldDb);
+      const rows = await listIndexedJobRows("job list");
       const deletionDeps = await buildJobListDeletionDeps();
       const jobs = [];
       for (const row of rows) {
@@ -5368,7 +5400,7 @@ const remoteMcpRuntime = resolveRemoteMcpRuntimeConfig({ config });
 if (remoteMcpRuntime.enabled) {
   const { publicOrigin } = remoteMcpRuntime;
   const listQuotesForMcp = async ({ search, status, limit = 50 } = {}) => {
-    const rows = fieldDb ? listJobsFromDb(fieldDb) : [];
+    const rows = fieldDb ? await listIndexedJobRows("MCP quote list") : [];
     let jobs = [];
     for (const row of rows) {
       const meta = await readNormalizedJobMeta(row.dir);

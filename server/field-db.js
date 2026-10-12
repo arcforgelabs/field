@@ -1,8 +1,9 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "./storage/fs.js";
-import { readdir, readFile, stat } from "./storage/fs-promises.js";
+import { readdir, readFile } from "./storage/fs-promises.js";
 import { basename, join } from "node:path";
+import { readJobMeta } from "./job-meta-store.js";
 
 let _db = null;
 
@@ -163,6 +164,8 @@ export function upsertJob(db, { id, dateDir, dir, title, siteAddress, status, qu
     INSERT INTO jobs (id, date_dir, dir, title, site_address, status, quote_number, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
+      date_dir = excluded.date_dir,
+      dir = excluded.dir,
       title = excluded.title,
       site_address = excluded.site_address,
       status = COALESCE(excluded.status, jobs.status),
@@ -294,7 +297,7 @@ export function deleteNote(db, noteId, jobId) {
   return db.prepare("DELETE FROM notes_ledger WHERE id = ? AND job_id = ?").run(noteId, jobId);
 }
 
-// ─── Startup sync — populate DB from existing job directories ──
+// ─── Keeping the job index in step with the data directory ────
 
 // Job rows store an absolute folder path. A data folder that moved (the old
 // server's /opt/apps/field/data restored onto Replit) leaves every row pointing
@@ -316,66 +319,98 @@ export function rebaseJobDirs(db, dataDir) {
   return { rebased, total: rows.length };
 }
 
-export async function syncExistingJobs(db, dataDir) {
-  const jobCount = db.prepare("SELECT COUNT(*) as c FROM jobs").get().c;
-  if (jobCount > 0) return { synced: 0, skipped: jobCount };
-
-  // Phase 1: Read all job data from disk (async)
-  const jobRecords = [];
-  let dateDirs;
-  try { dateDirs = await readdir(dataDir); } catch { return { synced: 0, skipped: 0 }; }
-
-  for (const dateDir of dateDirs) {
-    const datePath = join(dataDir, dateDir);
-    const s = await stat(datePath).catch(() => null);
-    if (!s?.isDirectory()) continue;
-
-    let jobDirNames;
-    try { jobDirNames = await readdir(datePath); } catch { continue; }
-
-    for (const jobDirName of jobDirNames) {
-      const jobDir = join(datePath, jobDirName);
-      const metaPath = join(jobDir, "meta.json");
-      if (!existsSync(metaPath)) continue;
-
-      try {
-        const meta = JSON.parse(await readFile(metaPath, "utf8"));
-        const id = meta.id || jobDirName;
-        const now = new Date().toISOString();
-
-        const record = { id, dateDir, jobDir, meta, now, files: [] };
-
-        const ledgerPath = join(jobDir, "ingestion-ledger.json");
-        if (existsSync(ledgerPath)) {
-          const ledger = JSON.parse(await readFile(ledgerPath, "utf8"));
-          record.files = ledger.files || [];
-        }
-        jobRecords.push(record);
-      } catch { /* skip broken directories */ }
+// Every job folder: <dataDir>/<day>/<folder>. Dot entries are never jobs: a
+// generation stage (.field-generation-stage-*) holds a copy of a job's
+// meta.json under the job's id, and durable storage's .quarantine-* folders
+// hold files it set aside.
+async function listJobFolders(dataDir) {
+  const folders = [];
+  let dayEntries;
+  try { dayEntries = await readdir(dataDir, { withFileTypes: true }); } catch { return folders; }
+  for (const dayEntry of dayEntries) {
+    if (!dayEntry.isDirectory() || dayEntry.name.startsWith(".")) continue;
+    let entries;
+    try { entries = await readdir(join(dataDir, dayEntry.name), { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      folders.push({ dateDir: dayEntry.name, name: entry.name, dir: join(dataDir, dayEntry.name, entry.name) });
     }
   }
+  return folders;
+}
 
-  // Phase 2: Insert all records in a synchronous transaction
+// Make the job index agree with the data directory. The job list reads this
+// index, so a job folder it does not point at never appears on the board,
+// although the job still opens by its link (#32).
+//
+// A folder the index already points at is not read, so on a healthy index this
+// costs one directory listing per day folder. Any other folder is read through
+// readJobMeta, the reader the API uses: it resolves the job's active
+// generation, which is where a job's meta.json lives. A job with no row is
+// added. A row whose folder no longer holds its job, while another folder
+// does (a job folder renamed after it was indexed), is pointed at that folder.
+//
+// Rows are never removed here. Deleting a job removes its folder and then its
+// row (deleteJob), and a job is added only while its folder still exists, so a
+// deleted job never comes back.
+export async function reconcileJobIndex(db, dataDir, { readMeta = readJobMeta } = {}) {
+  const rows = db.prepare("SELECT id, dir FROM jobs").all();
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+  const indexedDirs = new Set(rows.map((row) => row.dir));
+
+  // Phase 1: read the folders the index does not point at (async).
+  const additions = [];
+  const moves = [];
+  for (const folder of await listJobFolders(dataDir)) {
+    if (indexedDirs.has(folder.dir)) continue;
+    const meta = await readMeta(folder.dir).catch(() => null);
+    if (!meta || typeof meta !== "object") continue;
+    const id = String(meta.id || folder.name);
+    const row = rowById.get(id);
+    if (row) {
+      const current = await readMeta(row.dir).catch(() => null);
+      if (current && String(current.id || basename(row.dir)) === id) continue;
+      moves.push({ id, ...folder });
+      rowById.set(id, { id, dir: folder.dir });
+      continue;
+    }
+    let files = [];
+    try {
+      const ledger = JSON.parse(await readFile(join(folder.dir, "ingestion-ledger.json"), "utf8"));
+      if (Array.isArray(ledger?.files)) files = ledger.files;
+    } catch { /* no ingestion ledger */ }
+    additions.push({ id, ...folder, meta, files });
+    rowById.set(id, { id, dir: folder.dir });
+  }
+
+  // Phase 2: write them in one synchronous transaction. A folder deleted since
+  // phase 1 read it is skipped, so a job being deleted is never re-added.
   const insertJob = db.prepare(`
     INSERT OR IGNORE INTO jobs (id, date_dir, dir, title, site_address, status, quote_number, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
+  const moveJob = db.prepare("UPDATE jobs SET dir = ?, date_dir = ? WHERE id = ?");
   const insertFile = db.prepare(`
     INSERT OR IGNORE INTO evidence_files (id, job_id, file_path, file_name, mime_type, size_bytes, category, uploaded_by, uploaded_at, ingested)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-
-  const runInserts = db.transaction((records) => {
-    for (const r of records) {
-      insertJob.run(
-        r.id, r.dateDir, r.jobDir,
+  const now = new Date().toISOString();
+  return db.transaction(() => {
+    let added = 0;
+    let moved = 0;
+    for (const r of additions) {
+      if (!existsSync(r.dir)) continue;
+      const { changes } = insertJob.run(
+        r.id, r.dateDir, r.dir,
         r.meta.title || r.meta.siteAddress || null,
         r.meta.siteAddress || null,
-        r.meta.archived ? "archived" : "active",
+        r.meta.archived || r.meta.archivedAt ? "archived" : "active",
         r.meta.quoteNumber || null,
-        r.meta.createdAt || r.now,
-        r.meta.updatedAt || r.now,
+        r.meta.createdAt || now,
+        r.meta.updatedAt || r.meta.createdAt || now,
       );
+      if (!changes) continue;
+      added += 1;
       for (const f of r.files) {
         const fileId = f.fileId || `f-${Date.now().toString(36)}`;
         const category = detectCategory(f.filePath || f.fileName || "");
@@ -384,15 +419,16 @@ export async function syncExistingJobs(db, dataDir) {
           f.filePath || "", f.fileName || "",
           f.mimeType || null, f.sizeBytes || null,
           category, f.uploadedBy || null,
-          f.uploadedAt || r.now,
+          f.uploadedAt || now,
           f.ingested ? 1 : 0,
         );
       }
     }
-  });
-
-  runInserts(jobRecords);
-  return { synced: jobRecords.length, skipped: 0 };
+    for (const m of moves) {
+      if (existsSync(m.dir)) moved += moveJob.run(m.dir, m.dateDir, m.id).changes;
+    }
+    return { added, moved, total: db.prepare("SELECT COUNT(*) AS c FROM jobs").get().c };
+  })();
 }
 
 function detectCategory(filePath) {
