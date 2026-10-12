@@ -55,6 +55,18 @@ export type ScheduledEmail = {
   failedAt?: string | null;
   attemptCount: number;
   lastError?: string | null;
+  /** A failed send: "rejected" before Gmail took it, or "unknown" (Gmail may have sent it). */
+  deliveryOutcome?: "rejected" | "unknown" | null;
+  /** A failed send: can it go again, and does Field check Sent Mail first. */
+  resend?: "allowed" | "checks-sent-mail" | "blocked" | null;
+  /** Field checks Sent Mail for an earlier attempt before this one goes. */
+  checksSentMail?: boolean;
+  /** An unknown earlier attempt: not sent again before this time (Gmail's search can lag). */
+  resendAfter?: string | null;
+  /** An unknown earlier attempt's mailbox: Sent Mail is searched there, and a resend goes only from there. */
+  deliveryMailbox?: string | null;
+  /** Sent: found in Sent Mail, so nothing (and no later edit) was sent again. */
+  reconciled?: boolean;
   documentType: string;
   to: string[];
   cc: string[];
@@ -71,7 +83,13 @@ export type ScheduledEmail = {
     themeFontFamily?: string | null;
     attachmentFilename?: string | null;
     invoicePaidAmount?: number | null;
+    attachCreditNote?: boolean;
   } | null;
+  /** A held send (Undo send), due in seconds. */
+  held?: boolean;
+  createdBy?: { id?: string | null; email?: string | null; name?: string | null } | null;
+  /** Uploads kept with a draft or a scheduled send. */
+  attachments?: Array<{ filename: string; size: number; contentType: string | null }>;
   /** Field documents attached by uid (their references, never their bytes). */
   documents?: EmailDocumentRef[];
 };
@@ -165,7 +183,53 @@ export type GoogleContact = {
 type EmailSendResponse = {
   ok: boolean;
   scheduled?: boolean;
+  /** A held send (Undo send): Cancel send within the hold undoes it. */
+  held?: boolean;
+  /** A test copy went to the signed-in person only. */
+  test?: boolean;
+  result?: { to?: string[]; subject?: string };
   scheduledEmail?: ScheduledEmail;
+};
+
+/** One email as it went out (GET /api/jobs/:id/sent-emails). */
+export type SentEmail = {
+  id: string;
+  ts: string;
+  kind: string;
+  /** Found in Sent Mail after a send of unknown outcome: what went the first time. */
+  reconciled?: boolean;
+  documentType: string | null;
+  messageId: string | null;
+  from: string | null;
+  fromName: string | null;
+  to: string[];
+  cc: string[];
+  bcc?: string[];
+  subject: string | null;
+  bodyText: string;
+  htmlBody: string;
+  attachments: Array<{ filename: string; contentType?: string; source?: "document" | "upload"; uid?: string; documentType?: string | null; number?: string | null; byteLength?: number; sha256?: string }>;
+  mainDocument?: { documentType: string; number: string } | null;
+  scheduledAt?: string | null;
+  sentBy?: { id?: string | null; email?: string | null; name?: string | null } | null;
+};
+
+/** The parts of an email the composer keeps on the server as a draft. */
+export type EmailDraftInput = {
+  draftId?: string | null;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  customBody: string;
+  documentType?: string | null;
+  milestoneIndex?: number | null;
+  version?: string | null;
+  invoicePaidAmount?: number | null;
+  attachmentFilename?: string | null;
+  attachCreditNote?: boolean;
+  documents?: Array<{ uid: string }>;
+  keepAttachments?: string[];
 };
 
 type CacheSlot<T> = {
@@ -286,10 +350,11 @@ async function request<T>(
       throw new Error("unauthorized");
     }
     const err = new Error(body.error || res.statusText);
-    const errWithCode = err as Error & { code?: unknown; conflict?: unknown; status?: number; reasons?: string[] };
+    const errWithCode = err as Error & { code?: unknown; conflict?: unknown; status?: number; reasons?: string[]; deliveryOutcome?: unknown };
     errWithCode.code = body.code;
     errWithCode.conflict = body.conflict;
     errWithCode.status = res.status;
+    errWithCode.deliveryOutcome = body.deliveryOutcome;
     if (Array.isArray(body.reasons)) errWithCode.reasons = body.reasons;
     throw err;
   }
@@ -317,9 +382,10 @@ async function requestForm<T>(path: string, options: RequestInit & { body: FormD
       throw new Error("unauthorized");
     }
     const err = new Error(body.error || res.statusText);
-    const errWithCode = err as Error & { code?: unknown; status?: number };
+    const errWithCode = err as Error & { code?: unknown; status?: number; deliveryOutcome?: unknown };
     errWithCode.code = body.code;
     errWithCode.status = res.status;
+    errWithCode.deliveryOutcome = body.deliveryOutcome;
     throw err;
   }
 
@@ -549,8 +615,19 @@ export const api = {
       attachCreditNote?: boolean;
       /** Other issued documents of the job, attached by uid. */
       documents?: Array<{ uid: string }>;
+      /** Undo send: hold the send this many seconds (0 to 30). */
+      holdSeconds?: number | null;
+      /** Send a test copy to the signed-in person only. */
+      test?: boolean;
+      /** A draft's stored uploads to keep, by name. */
+      keepAttachments?: string[] | null;
     }
   ) {
+    const extra = {
+      ...(options?.holdSeconds != null ? { holdSeconds: options.holdSeconds } : {}),
+      ...(options?.test ? { test: true } : {}),
+      ...(options?.keepAttachments ? { keepAttachments: options.keepAttachments } : {}),
+    };
     const documents = options?.documents?.length ? { documents: options.documents.map(({ uid }) => ({ uid })) } : {};
     if (options?.attachments?.length) {
       const payload = {
@@ -569,6 +646,7 @@ export const api = {
         ...(options?.draftId ? { draftId: options.draftId } : {}),
         ...(options?.attachCreditNote ? { attachCreditNote: true } : {}),
         ...documents,
+        ...extra,
       };
       const formData = new FormData();
       formData.append("payload", JSON.stringify(payload));
@@ -598,8 +676,22 @@ export const api = {
         ...(options?.draftId ? { draftId: options.draftId } : {}),
         ...(options?.attachCreditNote ? { attachCreditNote: true } : {}),
         ...documents,
+        ...extra,
       }),
     });
+  },
+  /** Save the composer's email as a draft on the server, with new uploads. */
+  saveEmailDraft(id: string, draft: EmailDraftInput, files: File[] = []) {
+    if (files.length) {
+      const formData = new FormData();
+      formData.append("payload", JSON.stringify(draft));
+      files.forEach((file) => formData.append("attachments", file, file.name || "attachment"));
+      return requestForm<{ ok: true; scheduledEmail: ScheduledEmail }>(`/api/jobs/${id}/email-drafts`, { method: "POST", body: formData });
+    }
+    return request<{ ok: true; scheduledEmail: ScheduledEmail }>(`/api/jobs/${id}/email-drafts`, { method: "POST", body: JSON.stringify(draft) });
+  },
+  discardEmailDraft(id: string, draftId: string) {
+    return request<{ ok: true; scheduledEmail: ScheduledEmail }>(`/api/jobs/${id}/email-drafts/${draftId}`, { method: "DELETE" });
   },
   emailContext(id: string, params: { documentType?: string | null; milestoneIndex?: number | null; version?: string | null }) {
     const search = new URLSearchParams();
@@ -660,10 +752,16 @@ export const api = {
       scheduledAt?: string | null;
       draftId?: string | null;
       documents?: Array<{ uid: string }>;
+      holdSeconds?: number | null;
+      test?: boolean;
+      keepAttachments?: string[] | null;
     },
   ) {
     const payload = {
       ...(options?.documents?.length ? { documents: options.documents.map(({ uid }) => ({ uid })) } : {}),
+      ...(options?.holdSeconds != null ? { holdSeconds: options.holdSeconds } : {}),
+      ...(options?.test ? { test: true } : {}),
+      ...(options?.keepAttachments ? { keepAttachments: options.keepAttachments } : {}),
       to,
       subject,
       cc: options?.cc || [],
@@ -884,7 +982,7 @@ export const api = {
     return request<{ ok: boolean; contacts: GoogleContact[] }>("/api/google/contacts");
   },
   sentEmails(id: string) {
-    return request<{ ok: boolean; sentEmails: unknown[] }>(`/api/jobs/${id}/sent-emails`);
+    return request<{ ok: boolean; sentEmails: SentEmail[] }>(`/api/jobs/${id}/sent-emails`);
   },
   markLanded(id: string) {
     return request<{ ok: boolean; detail: import("./types.ts").RecordingDetail }>(`/api/jobs/${id}/landed`, {

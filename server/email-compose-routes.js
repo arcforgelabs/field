@@ -34,12 +34,12 @@ const DOCUMENT_TYPES = new Set(["quote", "invoice", "receipt"]);
 export const PENDING_NUMBER_TEXT = "[number when issued]";
 
 /** A draft invoice gets its number when the send issues it. */
-function isDraftInvoice(view) {
+export function isDraftInvoice(view) {
   return view.documentType === "invoice" && Boolean(view.milestoneInvoice) && String(view.milestoneInvoice.status || "draft") === "draft";
 }
 
 /** The view with a draft invoice's number shown as `number` (a merge field, or the pending text). */
-function withPendingNumber(view, number) {
+export function withPendingNumber(view, number) {
   if (!isDraftInvoice(view)) return view;
   const milestoneInvoice = { ...view.milestoneInvoice, invoiceNumber: number };
   return { ...view, milestoneInvoice, meta: { ...view.meta, milestoneInvoice } };

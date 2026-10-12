@@ -82,6 +82,7 @@ export function AttachmentTray({
   documents,
   uploads,
   retainedNames = [],
+  onRemoveRetained,
   pickerAvailable,
   onAdd,
   onRemoveDocument,
@@ -91,6 +92,8 @@ export function AttachmentTray({
   documents: JobDocument[];
   uploads: File[];
   retainedNames?: string[];
+  /** Uploads kept with a saved draft can be removed too. */
+  onRemoveRetained?: (name: string) => void;
   pickerAvailable: boolean;
   onAdd: () => void;
   onRemoveDocument: (uid: string) => void;
@@ -158,6 +161,11 @@ export function AttachmentTray({
               <small>Upload · kept with this draft</small>
             </span>
             <span className="fx-att__size" />
+            {onRemoveRetained ? (
+              <button type="button" className="fx-btn fx-btn--ghost fx-btn--sm fx-btn--icon" aria-label={`Remove ${name}`} onClick={() => onRemoveRetained(name)}>
+                <X aria-hidden />
+              </button>
+            ) : null}
           </li>
         ))}
       </ul>

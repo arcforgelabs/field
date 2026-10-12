@@ -169,9 +169,42 @@ the sender and the delivery policy.
   `composeJobEmail`). It calls no Gmail and issues nothing. A draft invoice's
   number shows as "[number when issued]" until the send issues it.
 
+## Undo send, drafts and test sends
+
+- **Undo send.** Send in the composer holds the email for 10 seconds in the
+  schedule queue (`holdSeconds` on both send routes, 0 to 30; the only
+  schedule allowed sooner than 30 seconds) and wakes the scheduler when the
+  hold ends. Undo is the existing Cancel send
+  (`DELETE /api/jobs/:id/scheduled-emails/:id`), which returns the email to
+  Draft. The email's document is issued only when the send is dispatched, so
+  Undo leaves no Gmail message, no issued document and no event. The hold is
+  on the server: closing the tab or locking the phone does not stop the send.
+- **Drafts** are saved on the server as the operator writes
+  (`POST /api/jobs/:id/email-drafts`, multipart with the uploads;
+  `keepAttachments` names the stored uploads to keep;
+  `DELETE /api/jobs/:id/email-drafts/:id` discards one and deletes its
+  uploads). Before a Gmail sign-in redirect the composer saves the draft and
+  comes back to it (`?draft=<id>`), uploads included.
+- **Send a test to me** (`test: true` on either send route) goes only to the
+  signed-in person's own address, with "[Test]" in front of the subject. The
+  email's document attaches as stored when it is issued, else as a preview
+  copy named `PREVIEW-…pdf`. It issues nothing, queues nothing, writes no
+  event and no sent record.
+- **Failures** say what happened and what to do: an expired Gmail sign-in
+  (`gmail_auth_expired`), a send whose outcome Gmail never confirmed
+  (`DELIVERY_OUTCOME_UNKNOWN`: Field checks Sent Mail by the stable
+  Message-ID before it allows another send), a refused address, an email over
+  the limits.
+- **The sent record** (`sent-emails.jsonl`, `GET /api/jobs/:id/sent-emails`)
+  keeps To, Cc and Bcc (#51), the HTML as sent, every attachment (Field
+  documents by uid, uploads by name, size and SHA-256) and the document the
+  email was for (`mainDocument`). The job's Email tab opens each one exactly
+  as it went out.
+
 ## Message-ID
 
-Every document send carries a stable `Message-ID: <field-<attempt>@<host>>`,
+Every document send, and every job email sent from the queue, carries a
+stable `Message-ID: <field-<attempt>@<host>>`,
 stored with the delivery attempt when it is prepared, so an interrupted send
 can be found in Sent Mail before any retry. The host is `mail.messageIdHost`
 (or `FIELD_MAIL_MESSAGE_ID_HOST`) when set, else the domain of the address
@@ -205,6 +238,54 @@ automatically: Gmail's send-only API has no idempotency key, so an uncertain
 delivery must be checked in Sent Mail before anyone schedules it again. Only
 failures explicitly known to have happened before dispatch are eligible for
 bounded retry.
+
+Every failed record keeps its `deliveryOutcome`:
+
+- `rejected`: provably before Gmail took the message. Field refused it first
+  (`deliveryOutcome: "rejected_before_dispatch"` on the error), or Gmail
+  answered with a 4xx. The email shows as **Not sent** and can be sent again.
+- `unknown`: everything else: the 45-second send ceiling, a network reset, a
+  5xx, a restart while sending, and any record that failed before outcomes
+  were kept. Gmail may have sent it, so the email shows as **Not confirmed:
+  check Sent Mail**, never as Not sent.
+
+An unknown email goes again only after Sent Mail is checked:
+
+- **Identity.** A job email claims a delivery attempt id when it is first
+  sent. Just before Gmail is called, the queue durably stores the attempt's
+  full `Message-ID`, the mailbox it goes from (`deliveryMailbox`), the person
+  it goes as (`deliverySender`) and what it sends (`firstSent`: To, Cc, Bcc,
+  subject and body). While the outcome is unknown, these stay as they were,
+  even when someone else edits the email. The identity is stored only while
+  the attempt's claim is open and the record is still that claim's send: the
+  45-second ceiling aborts the send it gives up on, and a late stamp from it
+  is refused, so a stale send never reaches Gmail or rewrites the record.
+- **Five minutes.** Gmail's search can lag behind a message it accepted
+  moments ago, so a resend is refused until 5 minutes after the failed
+  attempt (`resendAfter`): "Gmail may still be delivering this email. Try
+  again in a few minutes." A schedule for later than that is allowed.
+- **The check.** Sending it again (or saving it as a draft and then sending
+  it) sets `reconcileBeforeSend`. At dispatch Field searches the Sent Mail of
+  the first mailbox, as the person who first sent it, for the stored
+  Message-ID. If that mailbox cannot be searched (its Gmail is not connected),
+  the resend is refused and the email stays unknown.
+- **Found.** Field records the first attempt as sent (`reconciled: true`),
+  with the To, Cc, Bcc, subject and body that went then, and sends nothing.
+  The operator is told that later edits were not sent.
+- **Not found.** Field sends it once, from the first mailbox, with the same
+  Message-ID.
+- Any failure while the outcome is unknown (a refusal, or a 4xx from the
+  search) leaves it unknown.
+
+A document email has the delivery outbox's own check (see Message-ID above),
+made as the person who first sent it. An unknown job email with no stored
+attempt id (an older record) cannot be sent again: check Sent Mail, and write
+it again as a new email if it is not there.
+
+Undo send waits out the scheduler's brief lock on a record while it scans the
+queue (up to 3 seconds), and is refused at once when the email is already
+sending. The composer's Undo lasts until the server's hold ends, counted from
+the send request.
 
 ## Google Contacts autocomplete
 
