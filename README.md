@@ -36,6 +36,7 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `docs/concepts/surveyor.md` | Surveyor, Field's before/after proof lane |
 | `docs/lessons-learned.md` | Persistent production bugs and the fixes that resolved them |
 | `docs/public-repo-checklist.md` | What was removed or changed to publish this repository |
+| `docs/review/` | Before and after renders of customer documents a change alters, from synthetic data, for the owner's review |
 | `server/catalog/README.md` | The PostgreSQL price catalogue |
 | `server/db/README.md` | The database runtime, migrations and tenancy |
 | `skills/using-field/SKILL.md` | Operator and agent runbook for the API, CLI and quote lifecycle |

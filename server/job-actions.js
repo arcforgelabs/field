@@ -5,6 +5,7 @@ import { canTransitionPipelineStage, isPipelineSent, normalizePipelineStage, PIP
 import {
   applyMilestoneInvoiceCompatFields,
   assertMilestoneScheduleWithinQuoteTotal,
+  buildMilestoneInvoicePdfPath,
   buildMilestoneInvoices,
   findMilestoneInvoice,
   getJobDocumentLabel,
@@ -13,6 +14,7 @@ import {
   markMilestoneInvoiceUnpaid,
   normalizePaymentSchedule,
   normalizeStoredMilestoneInvoices,
+  prepareMilestoneInvoiceDocument,
   prepareRequestedJobDocument,
   recordMilestoneInvoicePayment,
   resolveJobDocumentType,
@@ -34,6 +36,7 @@ import {
   listQuoteVersions,
   parseQuoteVersion,
   readQuoteArtifacts,
+  writeIssuedInvoicePdf,
   writeMilestoneInvoiceArtifact,
   writeMilestoneReceiptArtifact,
   writeQuoteArtifacts,
@@ -52,6 +55,9 @@ import { quoteRowRecorder } from "./quotes/recorder.js";
 import { invoiceRowRecorder } from "./invoices/recorder.js";
 import { quoteRowsFromArtifact } from "./quotes/read-model.js";
 import { issuedDocumentRecorder } from "./documents/recorder.js";
+import { invoiceRevisionDetails, partiesDetails } from "./documents/job-sources.js";
+import { invoiceIssueKey, invoiceIssuer, mapInvoiceForIssue } from "./invoices/issue.js";
+import { quoteTaxRatePercent } from "./quotes/from-artifact.js";
 import { applyQuoteCatalogChanges, computeQuoteCatalogChanges, upgradeOrganizerCatalogLinks } from "./quote-catalog-sync.js";
 import {
   buildQuoteDeliveryAttempt,
@@ -915,6 +921,112 @@ async function writePersistedMeta(jobDir, meta) {
   return await writeJobMeta(jobDir, meta);
 }
 
+function actorLabel(actor) {
+  if (!actor) return null;
+  if (typeof actor === "string") return actor.trim() || null;
+  return actor.id || actor.email || actor.name || actor.label || null;
+}
+
+// The job number an invoice carries as its reference, the way the invoice
+// rows read it (server/invoices/sync.js), else the job part of the quote
+// number (EQ-2601-03 is job 2601-03), as quote numbering derives it.
+function invoiceJobReference({ meta = null, quote = null } = {}) {
+  const direct = String(quote?.jobNumber || meta?.jobNumber || "").trim();
+  if (direct) return direct;
+  const fromQuote = String(quote?.quoteNumber || meta?.quoteNumber || "").match(/(\d{4}-\d+)/);
+  return fromQuote ? fromQuote[1] : null;
+}
+
+// An invoice revision that is being issued by this call: frozen (it has an
+// issued revision) but with no document yet, and no earlier revision issued
+// at its path. Restoring a retired revision, or adopting a legacy invoice's
+// stored PDF, is not an issue.
+function isNewlyIssuedRevision(entry) {
+  const revision = entry?.issuedRevision;
+  if (!revision || deriveArtifactState(revision) !== ARTIFACT_STATE.UNWRITTEN) return false;
+  return !(entry.revisionHistory || []).some((historical) => (
+    deriveArtifactState(historical) !== ARTIFACT_STATE.UNWRITTEN && historical?.pdfPath === revision.pdfPath
+  ));
+}
+
+function withIssuedNumber(entry, { number, reference, issuedAt }) {
+  const pdfPath = buildMilestoneInvoicePdfPath({ invoiceNumber: number, milestoneIndex: entry.milestoneIndex });
+  const at = issuedAt || entry.issuedRevision.issuedAt || entry.issuedAt;
+  return {
+    ...entry,
+    invoiceNumber: number,
+    issuedAt: at,
+    pdfPath,
+    issuedRevision: { ...entry.issuedRevision, invoiceNumber: number, jobReference: reference, issuedAt: at, pdfPath },
+  };
+}
+
+// Issue every invoice this call issues (an authorise, a send, a revision),
+// through the invoice issue service (server/invoices/issue.js): it allocates
+// the INV-YYYY-MM-N number, renders the PDF once with it, stores the bytes
+// and the issued invoice row, in one PostgreSQL transaction. The milestone
+// then carries that number, and the exact stored bytes are written at its
+// PDF path, so the artifact write below adopts them instead of rendering
+// again. A server that cannot issue (no database) refuses the action: an
+// invoice is never issued outside the issue service.
+async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule = null, milestoneInvoices = [], actor = null }) {
+  if (!milestoneInvoices.some(isNewlyIssuedRevision)) return milestoneInvoices;
+  const jobId = String(meta?.id || "").trim();
+  const reference = invoiceJobReference({ meta, quote });
+  const schedule = paymentSchedule || meta?.paymentSchedule || null;
+  const basis = {
+    version: Number(quote?.version) || Number(meta?.quoteVersion) || null,
+    number: String(quote?.quoteNumber || meta?.quoteNumber || "").trim() || null,
+    taxRate: quoteTaxRatePercent(quote),
+  };
+  let current = milestoneInvoices;
+  for (const entry of milestoneInvoices.filter(isNewlyIssuedRevision)) {
+    const revision = entry.issuedRevision;
+    const invoice = mapInvoiceForIssue({
+      milestoneInvoices: normalizeStoredMilestoneInvoices(current),
+      paymentSchedule: schedule,
+      milestoneIndex: entry.milestoneIndex,
+      basis,
+      reference,
+    });
+    const result = await invoiceIssuer().issueInvoice({
+      jobId,
+      idempotencyKey: invoiceIssueKey({
+        jobId,
+        milestoneIndex: entry.milestoneIndex,
+        revisionNumber: revision.revisionNumber,
+        fingerprint: buildInvoiceRevisionFingerprint(revision),
+      }),
+      reference,
+      issuedAt: revision.issuedAt || entry.issuedAt || new Date().toISOString(),
+      issuedBy: actorLabel(actor),
+      invoice,
+      details: { ...invoiceRevisionDetails(entry, revision), ...partiesDetails({ meta, quote }) },
+      render: async (number) => {
+        const issuing = withIssuedNumber(entry, { number, reference, issuedAt: revision.issuedAt });
+        const prepared = prepareMilestoneInvoiceDocument({
+          meta: { ...meta, ...(schedule ? { paymentSchedule: schedule } : {}), milestoneInvoices: current.map((other) => (other.milestoneIndex === entry.milestoneIndex ? issuing : other)) },
+          quote,
+          milestoneInvoice: issuing,
+        });
+        return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "invoice" });
+      },
+    });
+    const issued = withIssuedNumber(entry, result);
+    await writeIssuedInvoicePdf({ jobDir, relativePdfPath: issued.pdfPath, pdfBuffer: result.pdfBytes });
+    const stored = {
+      ...issued,
+      issuedRevision: transitionArtifactState(issued.issuedRevision, {
+        toState: ARTIFACT_STATE.STORED,
+        pdfSha256: result.pdfSha256,
+        pdfIssuedAt: result.issuedAt,
+      }),
+    };
+    current = current.map((other) => (other.milestoneIndex === entry.milestoneIndex ? stored : other));
+  }
+  return current;
+}
+
 async function persistMilestoneInvoiceState({
   jobDir,
   meta,
@@ -922,6 +1034,8 @@ async function persistMilestoneInvoiceState({
   paymentSchedule = null,
   milestoneInvoices = [],
   artifactMilestoneIndex = null,
+  // Who is acting, for the record of an invoice this call issues.
+  actor = null,
   // Requests every milestone's artifact captured this pass, including a
   // draft's preview render — a sweep convenience, e.g. previewing every
   // milestone up front right after generating a schedule. It used to ALSO
@@ -931,6 +1045,7 @@ async function persistMilestoneInvoiceState({
   // regardless, same as the unconditional not-yet-stored sweep below.
   writeAllArtifacts = false,
 } = {}) {
+  milestoneInvoices = await issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule, milestoneInvoices, actor });
   let nextMeta = applyMilestoneInvoiceCompatFields({
     ...meta,
     ...(paymentSchedule ? { paymentSchedule } : {}),
@@ -1590,6 +1705,7 @@ async function prepareQuoteDeliveryAttempt({
         paymentSchedule: preparedMeta.paymentSchedule || null,
         milestoneInvoices,
         artifactMilestoneIndex: preparedMilestoneInvoice.milestoneIndex,
+        actor: user,
       });
       preparedMeta = persisted.meta;
       preparedMilestoneInvoice = persisted.milestoneInvoice;
@@ -2751,6 +2867,7 @@ export async function migrateJobMilestoneInvoices({
     paymentSchedule: nextPaymentSchedule,
     milestoneInvoices: migrated.milestoneInvoices,
     writeAllArtifacts: true,
+    actor,
   });
   const quoteLifecycle = await recordQuoteCustomerVersionAccepted({
     jobDir,
@@ -2897,10 +3014,6 @@ export async function reviseJobMilestoneInvoice({
     throw createJobActionError("the revised invoice could not be issued", 500);
   }
 
-  const change = describeInvoiceRevisionChange({
-    previous: currentInvoice.issuedRevision,
-    next: nextInvoice.issuedRevision,
-  });
   // (Removed: a
   // `nextInvoice.revisionNumber === currentInvoice.revisionNumber` guard
   // used to sit here. It can never fire — an authorization always retires
@@ -2979,6 +3092,13 @@ export async function reviseJobMilestoneInvoice({
     milestoneInvoices: generated.milestoneInvoices,
     artifactMilestoneIndex: currentInvoice.milestoneIndex,
     writeAllArtifacts: true,
+    actor,
+  });
+  // Described from the revision as issued: its number comes from the
+  // sequence when it is issued (persistMilestoneInvoiceState).
+  const change = describeInvoiceRevisionChange({
+    previous: currentInvoice.issuedRevision,
+    next: persisted.milestoneInvoice?.issuedRevision || nextInvoice.issuedRevision,
   });
   const quoteLifecycle = await recordQuoteCustomerVersionAccepted({
     jobDir,
@@ -3056,6 +3176,7 @@ export async function updateJobMilestone({
     paymentSchedule: synchronized.paymentSchedule,
     milestoneInvoices: updated.milestoneInvoices,
     artifactMilestoneIndex: updated.milestoneInvoice.milestoneIndex,
+    actor,
   });
 
   await appendJobActivity({
@@ -3112,6 +3233,7 @@ export async function recordJobMilestonePayment({
     paymentSchedule: synchronized.paymentSchedule,
     milestoneInvoices: recorded.milestoneInvoices,
     artifactMilestoneIndex: recorded.milestoneInvoice.milestoneIndex,
+    actor,
   });
 
   await appendJobActivity({
@@ -3172,6 +3294,7 @@ export async function voidJobMilestonePayment({
     paymentSchedule: synchronized.paymentSchedule,
     milestoneInvoices: voided.milestoneInvoices,
     artifactMilestoneIndex: voided.milestoneInvoice.milestoneIndex,
+    actor,
   });
 
   await appendJobActivity({
@@ -3227,6 +3350,7 @@ export async function markJobMilestoneUnpaid({
     paymentSchedule: synchronized.paymentSchedule,
     milestoneInvoices: updated.milestoneInvoices,
     artifactMilestoneIndex: updated.milestoneInvoice.milestoneIndex,
+    actor,
   });
 
   await appendJobActivity({
@@ -3281,6 +3405,7 @@ export async function markJobMilestoneUnsent({
     paymentSchedule: synchronized.paymentSchedule,
     milestoneInvoices: updated.milestoneInvoices,
     artifactMilestoneIndex: updated.milestoneInvoice.milestoneIndex,
+    actor,
   });
 
   await appendJobActivity({

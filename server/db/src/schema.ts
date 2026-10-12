@@ -915,8 +915,9 @@ export const documentEvents = pgTable(
 
 /**
  * The last number allocated per organisation, document type and period
- * (EQ-2501-NN has period 2501). Created now for phase 3, when numbering moves
- * into the database; nothing reads or writes it yet.
+ * (INV-2026-10-N has period 2026-10). The invoice issue service (step 4b,
+ * server/invoices/issue.js) advances the `invoice` counter inside the issue
+ * transaction, so a number is used only by an invoice that was issued.
  */
 export const documentNumberCounters = pgTable(
   "document_number_counters",
@@ -1311,7 +1312,7 @@ export const invoices = pgTable(
     uid: text("uid").primaryKey(),
     orgUid: orgUid(),
     jobId: text("job_id").notNull(),
-    /** As printed: EI-2501-01-M1, EI-2501-01-M1-R2 (INV-YYYY-MM-N from step 4b). */
+    /** As printed: INV-2026-10-1 from step 4b; EI-2501-01-M1 and EI-2501-01-M1-R2 before it. */
     number: text("number").notNull(),
     kind: text("kind").$type<InvoiceKind>().notNull(),
     status: text("status").$type<InvoiceStatus>().notNull().default("draft"),
@@ -1337,8 +1338,15 @@ export const invoices = pgTable(
     /** Sum of the active payments recorded against this invoice. */
     amountPaid: numeric("amount_paid", { precision: 12, scale: 2 }).notNull().default("0"),
     issuedDocumentUid: text("issued_document_uid"),
-    /** The job reference (required from step 4b). */
+    /** The job reference: the job number. Required on an invoice issued through the issue service (`issue_key` set). */
     reference: text("reference"),
+    /**
+     * The issue service's idempotency key (step 4b, server/invoices/issue.js):
+     * set on an invoice issued with an INV-YYYY-MM-N number from
+     * document_number_counters, null on one issued before (EI-…). A retried
+     * issue with the same key finds this row and returns it.
+     */
+    issueKey: text("issue_key"),
     supersededAt: timestamp("superseded_at", { withTimezone: true, mode: "date" }),
     revisionReason: text("revision_reason"),
     revisedBy: text("revised_by"),
@@ -1353,6 +1361,9 @@ export const invoices = pgTable(
   (t) => [
     uniqueIndex("invoices_org_uid_key").on(t.orgUid, t.uid),
     uniqueIndex("invoices_org_job_number_key").on(t.orgUid, t.jobId, t.number),
+    uniqueIndex("invoices_org_issue_key").on(t.orgUid, t.issueKey),
+    /** A sequence number is unique in the organisation, not only in its job. */
+    uniqueIndex("invoices_org_sequence_number_key").on(t.orgUid, t.number).where(sql`${t.issueKey} is not null`),
     index("invoices_org_number_idx").on(t.orgUid, t.number),
     index("invoices_milestone_idx").on(t.orgUid, t.milestoneUid),
     foreignKey({
@@ -1387,6 +1398,7 @@ export const invoices = pgTable(
     check("invoices_revision_check", sql`${t.revision} > 0`),
     check("invoices_quote_version_check", sql`${t.quoteVersion} is null or ${t.quoteVersion} > 0`),
     check("invoices_version_check", sql`${t.version} > 0`),
+    check("invoices_issue_check", sql`${t.issueKey} is null or (${t.issuedAt} is not null and ${t.number} ~ '^INV-[0-9]{4}-[0-9]{2}-[1-9][0-9]*$' and ${t.reference} is not null and btrim(${t.reference}) <> '')`),
     tenantIsolation("invoices"),
   ],
 );

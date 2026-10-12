@@ -18,6 +18,7 @@ import { createIssuedDocumentService } from "../documents/issued-documents.js";
 import { createIssuedDocumentRecorder, installIssuedDocumentRecorder } from "../documents/recorder.js";
 import { createInvoiceRowService } from "./invoice-rows.js";
 import { createInvoiceRowRecorder, createUnavailableInvoiceRowRecorder, installInvoiceRowRecorder, invoiceRowRecorder } from "./recorder.js";
+import { createInvoiceIssueService, installInvoiceIssuer } from "./issue.js";
 import { actions, applyVariation, createLandedJob } from "./test-fixtures.js";
 
 const quiet = { error: () => {}, warn: () => {} };
@@ -161,6 +162,60 @@ describe("invoice-row dual-write", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  test("invoices issued from the sequence: the issue writes the row, and every later sync finds it as issued", async () => {
+    const issuer = installInvoiceIssuer(createInvoiceIssueService({ db: catalog.db, orgUid: DEFAULT_ORG_UID }));
+    const root = await mkdtemp(join(tmpdir(), "field-invoice-rows-issue-"));
+    const before = recorder.status();
+    try {
+      const { jobDir } = await createLandedJob(join(root, "job-issue"), { id: "job-issue", number: "2610-02", rows: [["Retaining wall", 1000]] });
+      await actions.generate(jobDir, [{ label: "Deposit", percentage: 50 }, { label: "Completion", percentage: 50 }]);
+      await actions.issue(jobDir, 0);
+      const deposit = (await readJobMeta(jobDir)).milestoneInvoices[0];
+      assert.match(deposit.invoiceNumber, /^INV-\d{4}-\d{2}-[1-9]\d*$/);
+      let state = await summary("job-issue");
+      assert.deepEqual(state.invoices.map(([number, status]) => [number, status]), [["EI-2610-02-M2", "draft"], [deposit.invoiceNumber, "issued"]]);
+      const row = state.read.invoices.find((invoice) => invoice.number === deposit.invoiceNumber);
+      assert.equal(row.reference, "JOB-2610-02", "the job number is the invoice's reference");
+      assert.deepEqual(row.lines.map((line) => line.name), ["Deposit, 50 % of EQ-2610-02 v1"]);
+      const issuedDocument = await documents.findIssuedDocument({ documentType: "invoice", number: deposit.invoiceNumber });
+      assert.equal(row.issuedDocumentUid, issuedDocument.uid);
+      assert.equal(issuedDocument.pdfSha256, deposit.issuedRevision.pdfSha256);
+
+      // Email it, pay it, send the receipt (still ER-…): one issued invoice.
+      await send(jobDir, "invoice", 0, "msg-issue-invoice");
+      await actions.pay(jobDir, 0, 550);
+      await send(jobDir, "receipt", 0, "msg-issue-receipt");
+      state = await summary("job-issue");
+      assert.deepEqual(state.invoices.find(([number]) => number === deposit.invoiceNumber), [deposit.invoiceNumber, "paid", "550.00", "550.00"]);
+      assert.deepEqual(state.receipts, [["ER-2610-02-M1", "550.00", "issued"]]);
+      const listed = await documents.listJobDocuments("job-issue");
+      const emailed = listed.documents.find((document) => document.number === deposit.invoiceNumber).events.find((event) => event.event === "emailed");
+      assert.equal(emailed.data.pdfSha256, deposit.issuedRevision.pdfSha256, "the email carried the issued bytes");
+
+      // Issue the completion, unsend it, issue it again unchanged: the same
+      // number comes back; nothing new is issued.
+      await actions.issue(jobDir, 1);
+      const completion = (await readJobMeta(jobDir)).milestoneInvoices[1];
+      await actions.unsent(jobDir, 1);
+      state = await summary("job-issue");
+      assert.deepEqual(state.invoices.find(([number]) => number === completion.invoiceNumber).slice(0, 2), [completion.invoiceNumber, "void"]);
+      await actions.issue(jobDir, 1);
+      assert.equal((await readJobMeta(jobDir)).milestoneInvoices[1].invoiceNumber, completion.invoiceNumber);
+      state = await summary("job-issue");
+      assert.deepEqual(state.invoices.find(([number]) => number === completion.invoiceNumber).slice(0, 2), [completion.invoiceNumber, "issued"]);
+      assert.equal(state.read.invoices.filter((invoice) => /^INV-/.test(invoice.number)).length, 2);
+
+      const status = recorder.status();
+      assert.equal(status.failures, before.failures, warnings.join("\n"));
+      assert.equal(status.mismatches, before.mismatches, JSON.stringify(status.lastMismatch));
+      assert.equal(status.conflicts, before.conflicts, JSON.stringify(status.lastMismatch));
+    } finally {
+      installInvoiceIssuer(null);
+      await rm(root, { recursive: true, force: true });
+    }
+    assert.ok(issuer.enabled);
   });
 
   test("a job that fails its checks is counted with both numbers, once, and not written; nothing throws", async () => {

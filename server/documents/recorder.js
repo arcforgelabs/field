@@ -19,6 +19,7 @@
 //                                 it commits
 import { readJobMeta } from "../job-meta-store.js";
 import { readQuoteArtifacts } from "../quote-artifacts.js";
+import { sha256Hex } from "./blob-store.js";
 import { IssuedDocumentConflictError } from "./issued-documents.js";
 import {
   invoiceDocumentNumber,
@@ -59,13 +60,16 @@ function addresses(value) {
   return [];
 }
 
-function emailedEvent(email) {
+function emailedEvent(email, pdfBytes = null) {
   const messageId = email?.messageId || null;
   return {
     event: "emailed",
     at: email?.sentAt,
     by: actorLabel(email?.by),
     data: {
+      // The bytes that went out, by hash: the issued document's own bytes
+      // unless a resend rendered it again (see recordRedelivery).
+      ...(pdfBytes && pdfBytes.length ? { pdfSha256: sha256Hex(pdfBytes) } : {}),
       messageId,
       threadId: email?.threadId || null,
       attemptId: email?.attemptId || null,
@@ -124,7 +128,7 @@ export function createIssuedDocumentRecorder({ service, logger = console }) {
     email = null,
   }) {
     try {
-      const event = email ? emailedEvent({ sentAt: issuedAt, ...email }) : null;
+      const event = email ? emailedEvent({ sentAt: issuedAt, ...email }, pdfBytes) : null;
       try {
         const result = await service.recordIssuedDocument({
           jobId,

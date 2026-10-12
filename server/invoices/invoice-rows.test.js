@@ -21,6 +21,7 @@ import { scenarios } from "./test-fixtures.js";
 const ORG_A = DEFAULT_ORG_UID;
 const ORG_B = "org_01TESTSECONDORGANISATION0";
 const ROLLBACK_0013 = fileURLToPath(new URL("../db/rollback/0013_invoice_rows.down.sql", import.meta.url));
+const ROLLBACK_0014 = fileURLToPath(new URL("../db/rollback/0014_invoice_issue.down.sql", import.meta.url));
 
 function rejects(promise, pattern) {
   return assert.rejects(promise, (error) => {
@@ -228,9 +229,12 @@ describe("migration 0013 rolls back", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "field-invoice-rollback-"));
     try {
       const db = drizzle(client, { schema });
-      await migrate(db, { migrationsFolder: upTo });
+      // Written by today's service, on today's schema; the later migrations
+      // are rolled back first, newest first, as the rollback files say.
+      await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
       const { jobId, mapped } = await collectJobInvoices(await scenarios.paid(dataDir));
       await createInvoiceRowService({ db, orgUid: ORG_A }).writeJob({ jobId, mapped });
+      await client.exec(`begin; ${readFileSync(ROLLBACK_0014, "utf8")}; commit;`);
       await client.exec(`begin; ${readFileSync(ROLLBACK_0013, "utf8")}; commit;`);
       await migrate(drizzle(reference, { schema }), { migrationsFolder: before });
       assert.deepEqual(await schemaShape(db), await schemaShape(drizzle(reference, { schema })));
@@ -243,6 +247,37 @@ describe("migration 0013 rolls back", () => {
       rmSync(before, { recursive: true, force: true });
       rmSync(upTo, { recursive: true, force: true });
       rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("migration 0014 rolls back", () => {
+  test("the rollback returns the 0013 shape, and refuses once an invoice was issued from the sequence", async () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf8"));
+    const idx = journal.entries.find((entry) => entry.tag === "0014_invoice_issue").idx;
+    const before = migrationsUpTo(idx - 1);
+    const upTo = migrationsUpTo(idx);
+    const client = new PGlite();
+    const reference = new PGlite();
+    const refusing = new PGlite();
+    try {
+      const db = drizzle(client, { schema });
+      await migrate(db, { migrationsFolder: upTo });
+      await client.exec(`begin; ${readFileSync(ROLLBACK_0014, "utf8")}; commit;`);
+      await migrate(drizzle(reference, { schema }), { migrationsFolder: before });
+      assert.deepEqual(await schemaShape(db), await schemaShape(drizzle(reference, { schema })));
+
+      const issued = drizzle(refusing, { schema });
+      await migrate(issued, { migrationsFolder: upTo });
+      await withOrg(issued, ORG_A, (tx) => tx.execute(sql`insert into invoices (uid, job_id, number, kind, status, subtotal, tax_total, total, issued_at, issue_key, reference, created_at, updated_at)
+        values ('inv_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'job-x', 'INV-2026-10-1', 'deposit', 'issued', 1, 0, 1, now(), 'k', '2610-01', now(), now())`));
+      await rejects(refusing.exec(`begin; ${readFileSync(ROLLBACK_0014, "utf8")}; commit;`), /issued with INV numbers; 0014 cannot be rolled back/);
+    } finally {
+      await client.close();
+      await reference.close();
+      await refusing.close();
+      rmSync(before, { recursive: true, force: true });
+      rmSync(upTo, { recursive: true, force: true });
     }
   });
 });

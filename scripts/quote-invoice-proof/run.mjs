@@ -85,6 +85,8 @@ const HAS_QUOTE_ROWS = existsSync(join(repoRoot, "server/quotes/backfill.js"));
 let quoteRowStatus = null;
 // Checkouts with invoice rows (#27, server/invoices/).
 const HAS_INVOICE_ROWS = existsSync(join(repoRoot, "server/invoices/backfill.js"));
+// Checkouts that issue invoices from the sequence (#28, step 4b).
+const HAS_INVOICE_ISSUE = existsSync(join(repoRoot, "server/invoices/issue.js"));
 let invoiceRowStatus = null;
 // Checkouts that backfill quote and invoice rows as boot data migrations (#36).
 const HAS_BOOT_BACKFILLS = existsSync(join(repoRoot, "server/data-migrations/row-backfills.js"));
@@ -680,9 +682,16 @@ async function invoiceRowsProof({ aid }) {
   const detail = JSON.parse(readFileSync(join(outDir, "a15-detail-final.json"), "utf8"));
   const [m0, m1] = detail.meta.milestoneInvoices;
   const printed = extractInvoicePdfTotals(readFileSync(join(outDir, "a08-invoice-0.pdf")));
-  const [i0, i1] = rows.invoices;
+  // By number: an invoice issued from the sequence is written when it is
+  // issued, after the drafts' rows.
+  const i0 = rows.invoices.find((invoice) => invoice.number === m0.invoiceNumber);
+  const i1 = rows.invoices.find((invoice) => invoice.number === m1.invoiceNumber);
   check("job A: two milestones, two invoices under their numbers as issued", rows.milestones.length === 2 && rows.invoices.length === 2
-    && i0?.number === m0.invoiceNumber && i1?.number === m1.invoiceNumber, { numbers: rows.invoices.map((invoice) => invoice.number) });
+    && i0 && i1, { numbers: rows.invoices.map((invoice) => invoice.number) });
+  if (HAS_INVOICE_ISSUE) {
+    check("job A: invoice 0 was issued from the sequence (INV-YYYY-MM-N), with the job number as its reference", /^INV-\d{4}-\d{2}-[1-9]\d*$/.test(i0?.number || "")
+      && Boolean(i0?.reference) && i0.reference === detail.meta.jobNumber, { number: i0?.number, reference: i0?.reference, jobNumber: detail.meta.jobNumber });
+  }
   check("job A: invoice 0 is paid, with the exact subtotal, GST and total printed on a08-invoice-0.pdf", i0 && printed
     && i0.status === "paid" && i0.subtotal === printed.subtotal && i0.taxTotal === printed.taxTotal && i0.total === printed.total && i0.amountPaid === printed.total,
   { rows: i0 ? { status: i0.status, subtotal: i0.subtotal, taxTotal: i0.taxTotal, total: i0.total, amountPaid: i0.amountPaid } : null, printed });

@@ -502,6 +502,18 @@ export async function writeMilestoneInvoiceArtifact({
   };
 }
 
+// The bytes of an invoice the issue service just issued (server/invoices/
+// issue.js), written once at the path its revision records. They are the
+// exact bytes stored in document_blobs; the next artifact write adopts them
+// as the stored revision rather than rendering again.
+export async function writeIssuedInvoicePdf({ jobDir, relativePdfPath, pdfBuffer }) {
+  jobDir = await resolveWritableJobGeneration(jobDir);
+  const pdfPath = join(jobDir, relativePdfPath);
+  await mkdir(dirname(pdfPath), { recursive: true });
+  await writeFile(pdfPath, pdfBuffer);
+  return { pdfPath, relativePdfPath };
+}
+
 export async function readMilestoneInvoiceRevisionArtifact({
   jobDir,
   revision = null,
@@ -922,7 +934,7 @@ async function renderQuotePdfBuffer({
   const documentLabel = getJobDocumentLabel(resolvedDocumentType);
   const milestoneInvoice = meta?.milestoneInvoice || null;
   const documentRef = resolvedDocumentType === "invoice"
-    ? buildInvoiceDocumentNumber({ meta, quote, milestoneInvoice })
+    ? invoiceDocumentRef({ meta, quote, milestoneInvoice })
     : resolvedDocumentType === "receipt"
       ? buildReceiptDocumentNumber({ meta, quote, milestoneInvoice })
       : (quote.quoteNumber || meta.id);
@@ -1007,7 +1019,7 @@ function renderQuotePdf(doc, {
   const documentLabel = getJobDocumentLabel(documentType);
   const isDraft = !isPaymentDocument && delivery.status !== "final";
   const quoteRef = isInvoice
-    ? buildInvoiceDocumentNumber({ meta, quote, milestoneInvoice })
+    ? invoiceDocumentRef({ meta, quote, milestoneInvoice })
     : isReceipt
       ? buildReceiptDocumentNumber({ meta, quote, milestoneInvoice })
     : (quote.quoteNumber || meta.quoteNumber || meta.id);
@@ -1123,7 +1135,7 @@ function renderQuotePdf(doc, {
     deliveryDefaults,
     biz,
     bank,
-    quoteRef,
+    quoteRef: quoteRef === DRAFT_INVOICE_REF ? null : quoteRef,
     documentType,
     milestoneInvoice,
   });
@@ -1222,8 +1234,10 @@ function renderParties(doc, {
     : null;
   const items = isPaymentDocument
     ? [
-        `${isReceipt ? "Received" : "Issued"}: ${formatDate(issuedAt)}`,
+        isDraftInvoice(milestoneInvoice) && !isReceipt ? null : `${isReceipt ? "Received" : "Issued"}: ${formatDate(issuedAt)}`,
         !isReceipt && milestoneInvoice?.dueDate ? `Due: ${formatDate(milestoneInvoice.dueDate)}` : null,
+        // An invoice issued from the sequence (INV-…) carries the job number.
+        !isReceipt && milestoneInvoice?.issuedRevision?.jobReference ? `Job reference: ${milestoneInvoice.issuedRevision.jobReference}` : null,
         milestoneInvoice?.milestoneLabel
           ? `Milestone: ${milestoneInvoice.milestoneLabel}${milestoneInvoice?.milestoneCount ? ` (${Number(milestoneInvoice.milestoneIndex || 0) + 1} of ${milestoneInvoice.milestoneCount})` : ""}`
           : null,
@@ -1983,6 +1997,21 @@ function formatDate(value) {
     month: "long",
     day: "numeric",
   });
+}
+
+// What an invoice prints as its number. A milestone invoice that has not
+// been issued has no number yet: the issue service allocates INV-YYYY-MM-N
+// when it is issued (server/invoices/issue.js), so its preview says so
+// rather than printing the provisional EI-… number it is tracked under.
+const DRAFT_INVOICE_REF = "Draft, not yet issued";
+
+function isDraftInvoice(milestoneInvoice) {
+  return Boolean(milestoneInvoice) && !milestoneInvoice.issuedRevision && String(milestoneInvoice.status || "draft") === "draft";
+}
+
+function invoiceDocumentRef({ meta, quote, milestoneInvoice }) {
+  if (isDraftInvoice(milestoneInvoice)) return DRAFT_INVOICE_REF;
+  return buildInvoiceDocumentNumber({ meta, quote, milestoneInvoice });
 }
 
 function formatInvoiceStatusLabel({ milestoneInvoice = null, invoicePaymentSummary = null } = {}) {

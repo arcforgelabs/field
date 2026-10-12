@@ -217,7 +217,9 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
         supersededAt: iso(revision.supersededAt),
         revisionReason: text(revision.revisionReason),
         revisedBy: text(revision.revisedBy),
-        reference,
+        // An invoice issued from the sequence (step 4b) printed the job
+        // reference it was issued with.
+        reference: text(revision.jobReference) || reference,
         note,
         snapshot: { subtotal: money(revision.subtotal), taxTotal: money(revision.gst), total: money(revision.total) },
         pdfPath: text(revision.pdfPath),

@@ -1,7 +1,13 @@
-// Milestone invoice jobs for the invoice-row tests (#27), built by today's
-// real milestone actions (server/job-actions.js), each run as a committed job
+// Milestone invoice jobs for the invoice-row tests (#27), built by the real
+// milestone actions (server/job-actions.js), each run as a committed job
 // generation the way the routes run them, so an installed commit listener
 // (the dual-write) sees every change. Synthetic data only.
+//
+// They are the jobs production holds from before step 4b (#28): invoices
+// numbered EI-…-M<n>, revised in place to -R<k>. Unless a test installs an
+// invoice issuer of its own, the actions here issue the way Field did then
+// (`PRE_4B_ISSUER`): under the milestone's provisional number, rendered once,
+// with no sequence and no database.
 import { mkdir, readFile, writeFile } from "../storage/fs-promises.js";
 import { dirname, join } from "node:path";
 import {
@@ -17,6 +23,19 @@ import { prepareMilestoneInvoiceDocument } from "../job-documents.js";
 import { runAtomicJobGeneration } from "../job-generation.js";
 import { readJobMeta } from "../job-meta-store.js";
 import { generateQuotePdfBuffer } from "../quote-artifacts.js";
+import { sha256Hex } from "../documents/blob-store.js";
+import { installInvoiceIssuer, invoiceIssuer } from "./issue.js";
+
+// Issues as Field did before step 4b: the invoice keeps the provisional
+// number it was built under (EI-…-M<n>, -R<k>) and carries no job reference.
+export const PRE_4B_ISSUER = Object.freeze({
+  enabled: true,
+  pre4b: true,
+  async issueInvoice({ invoice, issuedAt, render }) {
+    const pdfBytes = Buffer.from(await render(invoice.number));
+    return { replayed: false, number: invoice.number, reference: null, invoiceUid: null, issuedDocumentUid: null, pdfSha256: sha256Hex(pdfBytes), pdfBytes, issuedAt: new Date(issuedAt).toISOString() };
+  },
+});
 
 const ACTOR = { kind: "user", label: "Test Operator" };
 
@@ -70,7 +89,14 @@ async function write(path, content) {
 
 /** Run one milestone action as a committed job generation (as the routes do). */
 export async function act(jobDir, action, input) {
-  return runAtomicJobGeneration(jobDir, async (stagedJobDir) => action({ jobDir: stagedJobDir, meta: await readJobMeta(stagedJobDir), config: {}, actor: ACTOR, ...input }));
+  const run = () => runAtomicJobGeneration(jobDir, async (stagedJobDir) => action({ jobDir: stagedJobDir, meta: await readJobMeta(stagedJobDir), config: {}, actor: ACTOR, ...input }));
+  if (invoiceIssuer().enabled) return run();
+  installInvoiceIssuer(PRE_4B_ISSUER);
+  try {
+    return await run();
+  } finally {
+    installInvoiceIssuer(null);
+  }
 }
 
 export const actions = {

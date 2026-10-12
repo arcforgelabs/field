@@ -39,10 +39,16 @@ import { readPendingQuoteDelivery } from "./quote-delivery-outbox.js";
 import { assertQuotePricingDisplayable, attachQuotePricingAttestation, buildQuotePricingAttestation, isIssuedQuoteVersion, isQuotePricingSendable, validateQuoteCommercialArtifact, withCurrentPricingVerdict } from "./quote-pricing-attestation.js";
 import { buildQuoteEditPolicy } from "./quote-edit-policy.js";
 import { readQuoteLifecycle, recordQuoteLanded } from "./quote-lifecycle.js";
+import { installTestInvoiceIssuer } from "./invoices/test-issuer.js";
 
 const TEST_PRICE_CATALOG = await createTestPriceCatalog({ track: false });
 const TEST_PRICE_CATALOG_DB = TEST_PRICE_CATALOG.store;
 test.after(() => TEST_PRICE_CATALOG.close());
+// Invoices are issued through the issue service (server/invoices/issue.js),
+// as on a server with a database: INV-YYYY-MM-N numbers, stored PDFs.
+const TEST_INVOICE_ISSUER = await installTestInvoiceIssuer();
+test.after(() => TEST_INVOICE_ISSUER.close());
+const SEQUENCE_NUMBER = /^INV-\d{4}-\d{2}-[1-9]\d*$/;
 
 function createQuoteFixture(meta, overrides = {}) {
   return {
@@ -1093,10 +1099,20 @@ test("sendJobQuote sends an invoice for landed jobs and preserves landed status"
     assert.equal(result.meta.deliveryStatus, "landed");
     assert.ok(result.meta.invoiceSentAt);
     assert.equal(result.meta.invoicePaidAmount, 80);
-    assert.equal(result.milestoneInvoice.invoiceNumber, "EI-INV-01-M1");
+    // Issued when finalised, through the issue service: a number from the
+    // sequence, the job number as its reference, its PDF stored once.
+    const issuedNumber = result.milestoneInvoice.invoiceNumber;
+    assert.match(issuedNumber, SEQUENCE_NUMBER);
+    assert.equal(result.milestoneInvoice.issuedRevision.jobReference, "JOB-INV-01");
+    assert.equal(result.milestoneInvoice.pdfPath, `milestone-invoices/${issuedNumber}.pdf`);
     assert.equal(result.milestoneInvoice.status, "authorised");
     assert.equal(result.milestoneInvoice.amountPaid, 80);
     assert.equal(result.milestoneInvoice.amountDue, 140);
+    const issuedDocument = await TEST_INVOICE_ISSUER.documents.findIssuedDocument({ documentType: "invoice", number: issuedNumber });
+    assert.equal(issuedDocument.jobId, "job-invoice-send-1");
+    assert.equal(issuedDocument.pdfSha256, result.milestoneInvoice.issuedRevision.pdfSha256);
+    const storedBytes = (await TEST_INVOICE_ISSUER.documents.readIssuedDocument(issuedDocument.uid)).bytes;
+    assert.deepEqual(await readFile(join(jobDir, result.milestoneInvoice.pdfPath)), storedBytes, "the job's PDF is the stored issued document, byte for byte");
 
     const savedMeta = JSON.parse(await readFile(join(jobDir, "meta.json"), "utf8"));
     assert.equal(savedMeta.pipelineStage, "landed");
@@ -1177,9 +1193,13 @@ test("a failed email send leaves the pre-send persisted invoice state intact and
     const hydrated = await readJobMeta(jobDir);
     const milestone = hydrated.milestoneInvoices[0];
     assert.equal(milestone.status, "authorised");
-    assert.equal(milestone.invoiceNumber, "EI-INV-FAIL-01-M1");
+    assert.match(milestone.invoiceNumber, SEQUENCE_NUMBER);
     assert.ok(milestone.issuedRevision?.pdfSha256);
     assert.ok(existsSync(join(jobDir, milestone.pdfPath)));
+    // A failed email never undoes the issue: the invoice stays issued in
+    // PostgreSQL under its number, with its stored bytes.
+    const issuedDocument = await TEST_INVOICE_ISSUER.documents.findIssuedDocument({ documentType: "invoice", number: milestone.invoiceNumber });
+    assert.equal(issuedDocument.pdfSha256, milestone.issuedRevision.pdfSha256);
 
     // None of the POST-send steps ran: no "invoice.sent" activity was
     // recorded — that only happens after sendEmail resolves successfully.
@@ -1203,7 +1223,8 @@ test("a failed email send leaves the pre-send persisted invoice state intact and
         to: "test@example.com",
       }),
     });
-    assert.equal(retried.milestoneInvoice.invoiceNumber, "EI-INV-FAIL-01-M1");
+    assert.equal(retried.milestoneInvoice.invoiceNumber, milestone.invoiceNumber, "the retry sends the invoice already issued, under its number");
+    assert.equal(retried.milestoneInvoice.issuedRevision.pdfSha256, milestone.issuedRevision.pdfSha256, "the same bytes");
     assert.equal(retried.milestoneInvoice.revisionNumber, 1);
     assert.ok(retried.meta.invoiceSentAt);
 
@@ -4252,7 +4273,9 @@ test("a sent invoice and its PDF survive an approved quote change untouched", as
 
   try {
     const seeded = await seedLandedJobWithSentInvoice(jobDir, { id: "job-invoice-freeze-1" });
-    const sentPdfPath = join(jobDir, "milestone-invoices", "EI-REV-01-M1.pdf");
+    const sentNumber = seeded.meta.milestoneInvoices[0].invoiceNumber;
+    assert.match(sentNumber, SEQUENCE_NUMBER);
+    const sentPdfPath = join(jobDir, "milestone-invoices", `${sentNumber}.pdf`);
     assert.ok(existsSync(sentPdfPath));
     const sentPdfBytes = await readFile(sentPdfPath);
 
@@ -4270,7 +4293,7 @@ test("a sent invoice and its PDF survive an approved quote change untouched", as
 
     const hydrated = await readJobMeta(jobDir);
     const sentInvoice = hydrated.milestoneInvoices[0];
-    assert.equal(sentInvoice.invoiceNumber, "EI-REV-01-M1");
+    assert.equal(sentInvoice.invoiceNumber, sentNumber);
     assert.equal(sentInvoice.revisionNumber, 1);
     assert.equal(sentInvoice.total, 110);
     assert.equal(sentInvoice.issuedRevision.quoteVersion, 2);
@@ -4288,7 +4311,9 @@ test("reviseJobMilestoneInvoice issues an attributable new invoice without distu
 
   try {
     const seeded = await seedLandedJobWithSentInvoice(jobDir, { id: "job-invoice-revise-1" });
-    const originalPdfPath = join(jobDir, "milestone-invoices", "EI-REV-01-M1.pdf");
+    const originalNumber = seeded.meta.milestoneInvoices[0].invoiceNumber;
+    assert.match(originalNumber, SEQUENCE_NUMBER);
+    const originalPdfPath = join(jobDir, "milestone-invoices", `${originalNumber}.pdf`);
     const originalPdfBytes = await readFile(originalPdfPath);
     await applyApprovedVariation(jobDir, seeded.quote);
 
@@ -4302,9 +4327,13 @@ test("reviseJobMilestoneInvoice issues an attributable new invoice without distu
       actor: { kind: "user", label: "Alex" },
     });
 
-    assert.equal(revised.revision.invoiceNumber, "EI-REV-01-M1-R2");
+    // The revision is issued like any invoice: its own number from the
+    // sequence, never a -R2 suffix on the original's.
+    const revisedNumber = revised.revision.invoiceNumber;
+    assert.match(revisedNumber, SEQUENCE_NUMBER);
+    assert.notEqual(revisedNumber, originalNumber);
     assert.equal(revised.revision.revisionNumber, 2);
-    assert.equal(revised.revision.supersedesInvoiceNumber, "EI-REV-01-M1");
+    assert.equal(revised.revision.supersedesInvoiceNumber, originalNumber);
     assert.equal(revised.revision.supersededTotal, 110);
     assert.equal(revised.revision.total, 165);
     assert.equal(revised.revision.totalDelta, 55);
@@ -4317,20 +4346,20 @@ test("reviseJobMilestoneInvoice issues an attributable new invoice without distu
     assert.ok(existsSync(originalPdfPath));
     assert.deepEqual(await readFile(originalPdfPath), originalPdfBytes);
 
-    const revisedPdfPath = join(jobDir, "milestone-invoices", "EI-REV-01-M1-R2.pdf");
+    const revisedPdfPath = join(jobDir, "milestone-invoices", `${revisedNumber}.pdf`);
     assert.ok(existsSync(revisedPdfPath));
     assert.notDeepEqual(await readFile(revisedPdfPath), originalPdfBytes);
 
     const hydrated = await readJobMeta(jobDir);
     const current = hydrated.milestoneInvoices[0];
-    assert.equal(current.invoiceNumber, "EI-REV-01-M1-R2");
+    assert.equal(current.invoiceNumber, revisedNumber);
     assert.equal(current.revisionNumber, 2);
     assert.equal(current.total, 165);
     assert.equal(current.status, "authorised");
     assert.equal(current.revisionHistory.length, 1);
-    assert.equal(current.revisionHistory[0].invoiceNumber, "EI-REV-01-M1");
+    assert.equal(current.revisionHistory[0].invoiceNumber, originalNumber);
     assert.equal(current.revisionHistory[0].total, 110);
-    assert.equal(current.revisionHistory[0].pdfPath, "milestone-invoices/EI-REV-01-M1.pdf");
+    assert.equal(current.revisionHistory[0].pdfPath, `milestone-invoices/${originalNumber}.pdf`);
     assert.equal(current.revisionHistory[0].supersededByRevisionNumber, 2);
     assert.ok(current.revisionHistory[0].pdfSha256);
 
@@ -4353,7 +4382,7 @@ test("reviseJobMilestoneInvoice issues an attributable new invoice without distu
       .map((line) => JSON.parse(line))
       .find((entry) => entry.kind === "invoice.revised");
     assert.ok(revisionEvent, "a revision activity entry is recorded");
-    assert.match(revisionEvent.body, /EI-REV-01-M1-R2 \(revision 2\) supersedes EI-REV-01-M1/);
+    assert.ok(revisionEvent.body.includes(`${revisedNumber} (revision 2) supersedes ${originalNumber}`), revisionEvent.body);
     assert.match(revisionEvent.body, /Reason: Approved rock clause variation on the north bench/);
     assert.equal(revisionEvent.actor.label, "Alex");
     assert.equal(revised.quoteLifecycle.lastSentQuoteVersion, 3);
@@ -5726,9 +5755,26 @@ test("unsending an issued invoice leaves the previously stored PDF byte-identica
     const draftInvoice = unsent.meta.milestoneInvoices[0];
     assert.equal(draftInvoice.status, "draft");
     assert.equal(draftInvoice.issuedRevision, null);
-    // The draft reused the same invoice number/path as the retired revision.
-    assert.equal(join(jobDir, draftInvoice.pdfPath), pdfPath);
+    // The issued number belongs to the issued document: the draft is back
+    // under its provisional number, and the retired revision keeps its own.
+    assert.match(issuedInvoice.invoiceNumber, SEQUENCE_NUMBER);
+    assert.equal(draftInvoice.invoiceNumber, "EI-UNSEND-ARTIFACT-M1");
+    assert.equal(draftInvoice.revisionHistory[0].invoiceNumber, issuedInvoice.invoiceNumber);
+    assert.equal(join(jobDir, draftInvoice.revisionHistory[0].pdfPath), pdfPath);
 
+    assert.deepEqual(await readFile(pdfPath), issuedBytes);
+
+    // Issuing the same content again restores that invoice, under its
+    // number and with its bytes, rather than issuing another.
+    const reissued = await updateJobMilestone({
+      jobDir,
+      meta: unsent.meta,
+      config: {},
+      milestoneIndex: 0,
+      patch: { status: "authorised" },
+    });
+    assert.equal(reissued.meta.milestoneInvoices[0].invoiceNumber, issuedInvoice.invoiceNumber);
+    assert.equal(reissued.meta.milestoneInvoices[0].issuedRevision.pdfSha256, issuedInvoice.issuedRevision.pdfSha256);
     assert.deepEqual(await readFile(pdfPath), issuedBytes);
   } finally {
     await rm(jobDir, { recursive: true, force: true });
