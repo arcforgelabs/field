@@ -7,6 +7,8 @@ import {
   assertMilestoneScheduleWithinQuoteTotal,
   buildMilestoneInvoicePdfPath,
   buildMilestoneInvoices,
+  buildMilestoneReceiptNumber,
+  buildMilestoneReceiptPdfPath,
   findMilestoneInvoice,
   getJobDocumentLabel,
   isMilestoneInvoiceIssued,
@@ -57,7 +59,7 @@ import { invoiceRowRecorder } from "./invoices/recorder.js";
 import { quoteRowsFromArtifact } from "./quotes/read-model.js";
 import { issuedDocumentRecorder } from "./documents/recorder.js";
 import { invoiceRevisionDetails, partiesDetails } from "./documents/job-sources.js";
-import { creditIssueKey, invoiceIssueKey, invoiceIssuer, mapCreditNoteForIssue, mapInvoiceForIssue } from "./invoices/issue.js";
+import { creditIssueKey, invoiceIssueKey, invoiceIssuer, mapCreditNoteForIssue, mapInvoiceForIssue, receiptIssueKey } from "./invoices/issue.js";
 import { quoteTaxRatePercent } from "./quotes/from-artifact.js";
 import { claimDescription, customerQuoteReference, quoteReferenceLine } from "./invoices/customer-wording.js";
 import { applyQuoteCatalogChanges, computeQuoteCatalogChanges, upgradeOrganizerCatalogLinks } from "./quote-catalog-sync.js";
@@ -1022,7 +1024,7 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
       quote,
       milestoneInvoice: issuing,
     });
-    return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "invoice" });
+    return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "invoice", jobDir });
   };
   const stored = (issued, result) => ({
     ...issued,
@@ -1155,6 +1157,99 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
   return current;
 }
 
+function isMilestonePaid(entry) {
+  return Boolean(entry) && Number(entry.amountPaid || 0) > 0 && (entry.status === "paid" || Number(entry.amountDue || 0) <= 0);
+}
+
+// Issue the receipt of every milestone this call pays (owner's decision,
+// 2026-10-13): when a milestone that was not paid becomes paid, the issue
+// service allocates RCT-YYYY-M-N, renders the receipt once with that number
+// and the invoice it pays, and stores it; the milestone then carries the
+// number and the exact stored bytes are written at its receipt path. A
+// milestone paid before (its receipt keeps its ER-… number) or with no
+// earlier state (a legacy job being migrated) is left as it is. A milestone
+// that stops being paid (marked unpaid, a payment voided) keeps its issued
+// receipt in its receipt history, marked voided, and goes back to its
+// provisional ER-… number; paying it again issues a new receipt.
+async function issueNewMilestoneReceipts({ jobDir, meta, quote, paymentSchedule = null, milestoneInvoices = [], actor = null }) {
+  const prior = new Map(normalizeStoredMilestoneInvoices(meta?.milestoneInvoices || []).map((entry) => [entry.milestoneIndex, entry]));
+  const normalized = normalizeStoredMilestoneInvoices(milestoneInvoices);
+  const toIssue = normalized.filter((entry) => isMilestonePaid(entry) && !entry.issuedReceipt && prior.has(entry.milestoneIndex) && !isMilestonePaid(prior.get(entry.milestoneIndex)));
+  const toVoid = normalized.filter((entry) => !isMilestonePaid(entry) && entry.issuedReceipt);
+  if (!toIssue.length && !toVoid.length) return milestoneInvoices;
+  const jobId = String(meta?.id || "").trim();
+  const schedule = paymentSchedule || meta?.paymentSchedule || null;
+  const issuedBy = actorLabel(actor);
+  let current = milestoneInvoices;
+  const replace = (index, next) => {
+    current = current.map((other) => (other.milestoneIndex === index ? next : other));
+  };
+  const raw = (entry) => current.find((other) => other.milestoneIndex === entry.milestoneIndex) || entry;
+  const provisional = (entry) => {
+    const receiptNumber = buildMilestoneReceiptNumber({ meta, quote, milestoneIndex: entry.milestoneIndex, milestoneInvoice: { ...entry, receiptNumber: null } });
+    return { receiptNumber, receiptPdfPath: buildMilestoneReceiptPdfPath({ receiptNumber, milestoneIndex: entry.milestoneIndex }) };
+  };
+
+  for (const entry of toVoid) {
+    const voidedAt = new Date().toISOString();
+    replace(entry.milestoneIndex, {
+      ...raw(entry),
+      ...provisional(entry),
+      issuedReceipt: null,
+      receiptHistory: [...(entry.receiptHistory || []), { ...entry.issuedReceipt, voidedAt }],
+    });
+  }
+
+  for (const entry of toIssue) {
+    const payment = (entry.payments || []).filter((candidate) => !candidate?.voidedAt).at(-1) || null;
+    const invoiceNumber = entry.issuedRevision?.invoiceNumber || entry.invoiceNumber;
+    const issuedAt = new Date().toISOString();
+    const withNumber = (number) => ({
+      ...raw(entry),
+      receiptNumber: number,
+      receiptPdfPath: buildMilestoneReceiptPdfPath({ receiptNumber: number, milestoneIndex: entry.milestoneIndex }),
+    });
+    const result = await invoiceIssuer().issueReceipt({
+      jobId,
+      idempotencyKey: receiptIssueKey({ jobId, milestoneIndex: entry.milestoneIndex, paymentId: payment?.id, invoiceNumber }),
+      issuedAt,
+      issuedBy,
+      invoiceNumber,
+      quoteVersion: entry.issuedRevision?.quoteVersion || null,
+      details: { milestoneIndex: entry.milestoneIndex, milestoneLabel: entry.milestoneLabel, paymentId: payment?.id || null, amount: entry.amountPaid, ...partiesDetails({ meta, quote }) },
+      render: (number) => {
+        const issuing = withNumber(number);
+        const prepared = prepareMilestoneInvoiceDocument({
+          meta: { ...meta, ...(schedule ? { paymentSchedule: schedule } : {}), milestoneInvoices: current.map((other) => (other.milestoneIndex === entry.milestoneIndex ? issuing : other)) },
+          quote,
+          milestoneInvoice: issuing,
+          documentType: "receipt",
+        });
+        return generateQuotePdfBuffer({ meta: prepared.meta, quote: prepared.quote, documentType: "receipt", jobDir });
+      },
+    });
+    // An issuer standing in for a release before the RCT series issues none:
+    // the receipt keeps its ER-… number, as it did then.
+    if (!result) continue;
+    const issued = withNumber(result.number);
+    await writeIssuedInvoicePdf({ jobDir, relativePdfPath: issued.receiptPdfPath, pdfBuffer: result.pdfBytes });
+    replace(entry.milestoneIndex, {
+      ...issued,
+      issuedReceipt: {
+        number: result.number,
+        issuedAt: result.issuedAt,
+        invoiceNumber,
+        paymentId: payment?.id || null,
+        amount: entry.amountPaid,
+        pdfPath: issued.receiptPdfPath,
+        pdfSha256: result.pdfSha256,
+        issuedDocumentUid: result.issuedDocumentUid || null,
+      },
+    });
+  }
+  return current;
+}
+
 async function persistMilestoneInvoiceState({
   jobDir,
   meta,
@@ -1174,6 +1269,7 @@ async function persistMilestoneInvoiceState({
   writeAllArtifacts = false,
 } = {}) {
   milestoneInvoices = await issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule, milestoneInvoices, actor });
+  milestoneInvoices = await issueNewMilestoneReceipts({ jobDir, meta, quote, paymentSchedule, milestoneInvoices, actor });
   let nextMeta = applyMilestoneInvoiceCompatFields({
     ...meta,
     ...(paymentSchedule ? { paymentSchedule } : {}),
@@ -3499,7 +3595,7 @@ export async function markJobMilestoneUnpaid({
       ts: new Date().toISOString(),
       actor: actor || { kind: "system", label: "Field" },
       title: "Milestone reset to unpaid",
-      body: `${updated.milestoneInvoice.invoiceNumber} reset to unpaid. Receipt artifact removed.`,
+      body: `${updated.milestoneInvoice.invoiceNumber} reset to unpaid. ${updated.milestoneInvoice.issuedReceipt ? `Receipt ${updated.milestoneInvoice.issuedReceipt.number} voided.` : "Receipt artifact removed."}`,
     },
   });
 

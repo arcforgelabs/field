@@ -40,6 +40,9 @@ import { assertQuotePricingDisplayable, attachQuotePricingAttestation, buildQuot
 import { buildQuoteEditPolicy } from "./quote-edit-policy.js";
 import { readQuoteLifecycle, recordQuoteLanded } from "./quote-lifecycle.js";
 import { installTestInvoiceIssuer } from "./invoices/test-issuer.js";
+import { installInvoiceIssuer } from "./invoices/issue.js";
+import { PRE_4B_ISSUER } from "./invoices/test-fixtures.js";
+import { pdfTextRuns } from "./quotes/issued-totals.js";
 import { createBusinessSettingsService } from "./invoices/business-settings.js";
 import { creditNoteAttachment } from "./invoices/credit-note-attachment.js";
 import { createIssuedDocumentRecorder, installIssuedDocumentRecorder } from "./documents/recorder.js";
@@ -52,6 +55,7 @@ test.after(() => TEST_PRICE_CATALOG.close());
 const TEST_INVOICE_ISSUER = await installTestInvoiceIssuer();
 test.after(() => TEST_INVOICE_ISSUER.close());
 const SEQUENCE_NUMBER = /^INV-\d{4}-([1-9]|1[0-2])-[1-9]\d*$/;
+const RECEIPT_NUMBER = /^RCT-\d{4}-([1-9]|1[0-2])-[1-9]\d*$/;
 
 function createQuoteFixture(meta, overrides = {}) {
   return {
@@ -1437,8 +1441,15 @@ test("sendJobQuote can send a receipt for a paid landed milestone", async () => 
 
     assert.equal(result.meta.pipelineStage, "landed");
     assert.equal(result.milestoneInvoice.status, "paid");
-    assert.equal(result.milestoneInvoice.receiptNumber, "ER-REC-01-M1");
-    assert.equal(existsSync(join(jobDir, result.milestoneInvoice.receiptPdfPath)), true);
+    // Issued when the milestone was paid, from the RCT series; the receipt
+    // sent is the stored one.
+    assert.match(result.milestoneInvoice.receiptNumber, RECEIPT_NUMBER);
+    assert.equal(result.milestoneInvoice.issuedReceipt.number, result.milestoneInvoice.receiptNumber);
+    const receiptBytes = await readFile(join(jobDir, result.milestoneInvoice.receiptPdfPath));
+    assert.equal(createHash("sha256").update(receiptBytes).digest("hex"), result.milestoneInvoice.issuedReceipt.pdfSha256);
+    const runs = pdfTextRuns(receiptBytes);
+    assert.ok(runs.includes(result.milestoneInvoice.receiptNumber), runs.join(" | "));
+    assert.ok(runs.includes(`For invoice: ${result.milestoneInvoice.invoiceNumber}`), "the receipt names the invoice it pays");
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }
@@ -3982,7 +3993,67 @@ test("paid milestone invoices write receipt artifacts and markJobMilestoneUnpaid
     assert.equal(unpaidMilestone.amountDue, unpaidMilestone.total);
     assert.equal(unpaidMilestone.issuedAt, null);
     assert.deepEqual(unpaidMilestone.payments, []);
-    assert.equal(existsSync(receiptPath), false);
+    // The receipt was issued (RCT-…): it stays, voided in the milestone's
+    // receipt history, and the milestone goes back to its provisional number.
+    assert.match(paidMilestone.receiptNumber, RECEIPT_NUMBER);
+    assert.ok(existsSync(receiptPath), "an issued receipt's PDF is kept");
+    assert.equal(unpaidMilestone.issuedReceipt, undefined);
+    assert.equal(unpaidMilestone.receiptNumber, "ER-TEST-RECEIPT-M1");
+    assert.equal(existsSync(join(jobDir, unpaidMilestone.receiptPdfPath)), false);
+    assert.deepEqual(unpaidMilestone.receiptHistory.map((receipt) => [receipt.number, Boolean(receipt.voidedAt)]), [[paidMilestone.receiptNumber, true]]);
+
+    // Paying it again issues a new receipt.
+    const reauthorised = await updateJobMilestone({ jobDir, meta: unpaid.meta, config: {}, milestoneIndex: 0, patch: { status: "authorised" } });
+    const repaid = await recordJobMilestonePayment({
+      jobDir,
+      meta: reauthorised.meta,
+      config: {},
+      milestoneIndex: 0,
+      payment: { amount: firstMilestone.total, date: "2026-03-29", reference: "EFT-RECEIPT-2", method: "manual" },
+    });
+    const repaidMilestone = repaid.meta.milestoneInvoices[0];
+    assert.match(repaidMilestone.receiptNumber, RECEIPT_NUMBER);
+    assert.notEqual(repaidMilestone.receiptNumber, paidMilestone.receiptNumber);
+  } finally {
+    await rm(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("a milestone paid before the RCT series keeps its ER receipt number", async () => {
+  const jobDir = await mkdtemp(join(tmpdir(), "field-job-receipt-legacy-"));
+  try {
+    const meta = {
+      id: "job-receipt-legacy-1",
+      title: "Legacy receipt test",
+      label: "Legacy receipt test",
+      outputMode: "quote",
+      pipelineStage: "landed",
+      deliveryStatus: "landed",
+      quoteVersion: 1,
+      quoteSentAt: "2026-03-27T00:00:00.000Z",
+      quoteNumber: "EQ-TEST-LEGACY",
+      jobNumber: "JOB-TEST-LEGACY",
+    };
+    const quote = createQuoteFixture(meta, { version: 1, quoteNumber: "EQ-TEST-LEGACY", totals: { subtotal: 200, gst: 20, total: 220, currency: "AUD" } });
+    await writeFile(join(jobDir, "meta.json"), JSON.stringify(meta, null, 2));
+    await writeFile(join(jobDir, "quote.json"), JSON.stringify(quote, null, 2));
+    const generated = await generateJobMilestones({ jobDir, meta, config: {}, paymentSchedule: { milestones: [{ label: "Deposit", percentage: 50 }, { label: "Completion", percentage: 50 }] } });
+    const authorised = await updateJobMilestone({ jobDir, meta: generated.meta, config: {}, milestoneIndex: 0, patch: { status: "authorised" } });
+    // Paid under a release before the RCT series.
+    installInvoiceIssuer(PRE_4B_ISSUER);
+    let paid;
+    try {
+      paid = await recordJobMilestonePayment({ jobDir, meta: authorised.meta, config: {}, milestoneIndex: 0, payment: { amount: authorised.meta.milestoneInvoices[0].total, date: "2026-03-28", reference: "EFT-LEGACY-1", method: "manual" } });
+    } finally {
+      installInvoiceIssuer(TEST_INVOICE_ISSUER.service);
+    }
+    assert.equal(paid.meta.milestoneInvoices[0].receiptNumber, "ER-TEST-LEGACY-M1");
+    // After the release, work on the job leaves that receipt as it was.
+    const later = await updateJobMilestone({ jobDir, meta: paid.meta, config: {}, milestoneIndex: 1, patch: { status: "authorised" } });
+    const deposit = later.meta.milestoneInvoices[0];
+    assert.equal(deposit.status, "paid");
+    assert.equal(deposit.receiptNumber, "ER-TEST-LEGACY-M1");
+    assert.equal(deposit.issuedReceipt, undefined);
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }

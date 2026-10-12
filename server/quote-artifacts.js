@@ -32,6 +32,8 @@ import { countFieldMetric } from "./observability/sentry.js";
 import { findAnyIssuedDocument, readQuoteIssuanceLedger } from "./quote-issuance.js";
 import { applyBusinessProfileOverride, businessDisplayName, configuresBusinessName } from "./business-profile.js";
 import { loadQuoteRows } from "./quotes/read-model.js";
+import { claimDescription, customerQuoteReference, quoteReferenceFromMeta, quoteReferenceLine } from "./invoices/customer-wording.js";
+import { isSequenceInvoiceNumber } from "./invoices/numbers.js";
 
 const QUOTE_VERSIONS_DIR = "quote-versions";
 
@@ -444,6 +446,8 @@ export async function writeMilestoneInvoiceArtifact({
       meta: reconstructedPrepared.meta,
       quote: reconstructedPrepared.quote,
       documentType: "invoice",
+      jobDir,
+      reconstructed: true,
     });
     await writeFile(pdfPath, reconstructedBuffer);
     const pdfSha256 = createHash("sha256").update(reconstructedBuffer).digest("hex");
@@ -482,6 +486,7 @@ export async function writeMilestoneInvoiceArtifact({
     meta: prepared.meta,
     quote: prepared.quote,
     documentType: "invoice",
+    jobDir,
   });
   await writeFile(pdfPath, pdfBuffer);
   const pdfSha256 = createHash("sha256").update(pdfBuffer).digest("hex");
@@ -549,12 +554,21 @@ export async function writeMilestoneReceiptArtifact({
   });
   const relativePdfPath = milestoneInvoice.receiptPdfPath || buildMilestoneReceiptPdfPath(milestoneInvoice);
   const pdfPath = join(jobDir, relativePdfPath);
+  // An issued receipt (RCT-…) is a money document: its stored bytes are the
+  // receipt, sent as they are. If they were lost it is drawn again with its
+  // number, marked "Reconstructed copy".
+  const issuedReceipt = milestoneInvoice.issuedReceipt?.pdfPath === relativePdfPath ? milestoneInvoice.issuedReceipt : null;
+  if (issuedReceipt && existsSync(pdfPath)) {
+    return { pdfBuffer: await readFile(pdfPath), pdfPath, relativePdfPath, alreadyIssued: true };
+  }
   await mkdir(dirname(pdfPath), { recursive: true });
 
   const pdfBuffer = await generateQuotePdfBuffer({
     meta: prepared.meta,
     quote: prepared.quote,
     documentType: "receipt",
+    jobDir,
+    reconstructed: Boolean(issuedReceipt),
   });
   await writeFile(pdfPath, pdfBuffer);
 
@@ -920,6 +934,14 @@ async function renderQuotePdfBuffer({
   sitePlanPng,
   documentType = null,
   invoicePaidAmount = null,
+  // The job's directory, so a milestone invoice can say which revision of
+  // the quote it claims against (only when the customer was sent more than
+  // one; server/invoices/customer-wording.js). Without it, no revision.
+  jobDir = null,
+  // A copy of an issued invoice drawn again because its stored PDF was
+  // lost: marked "Reconstructed copy". One issued before step 4b (an EI-
+  // number) is drawn in the layout it was issued with (owner, 2026-10-13).
+  reconstructed = false,
   // Fixes the PDF's creation date (and so its file id), which otherwise is
   // the moment of rendering. Only for comparing two renderings byte for byte.
   creationDate = null,
@@ -939,8 +961,18 @@ async function renderQuotePdfBuffer({
       ? buildReceiptDocumentNumber({ meta, quote, milestoneInvoice })
       : (quote.quoteNumber || meta.id);
   const pdfBusiness = resolveBusiness(quote);
+  const milestoneLayout = resolvedDocumentType === "invoice" && milestoneInvoice
+    ? {
+        legacy: Boolean(reconstructed) && !isSequenceInvoiceNumber(milestoneInvoice.issuedRevision?.invoiceNumber || milestoneInvoice.invoiceNumber),
+        reconstructed: Boolean(reconstructed),
+        quoteReference: meta?.customerQuoteReference || (jobDir
+          ? await customerQuoteReference({ jobDir, meta, milestone: milestoneInvoice, quote, quoteVersion: milestoneInvoice.issuedRevision?.quoteVersion || quote?.version || null })
+          : quoteReferenceFromMeta({ meta, milestone: milestoneInvoice, quote })),
+      }
+    : null;
   // A quote prints its schedule and totals from its rows (#10); invoices and
-  // receipts still print the quote's schedule from the files until they are
+  // receipts (milestone invoices print claim lines, step 4b) still print the
+  // quote's schedule from the files until they are
   // rows themselves.
   const scheduleView = resolvedDocumentType === "quote" ? await loadQuoteRows({ quote, meta }) : null;
   return await new Promise((resolve, reject) => {
@@ -948,7 +980,7 @@ async function renderQuotePdfBuffer({
       size: "A4",
       margins: { top: 50, bottom: 60, left: 50, right: 50 },
       info: {
-        Title: `${documentLabel} ${documentRef}`,
+        Title: `${invoiceTitle({ documentLabel, isInvoice: resolvedDocumentType === "invoice", milestoneInvoice, legacy: milestoneLayout?.legacy })} ${documentRef}`,
         Author: businessDisplayName(pdfBusiness),
         Subject: `${documentLabel} for ${meta.title || "Earthworks"}`,
         ...(creationDate ? { CreationDate: creationDate } : {}),
@@ -968,6 +1000,8 @@ async function renderQuotePdfBuffer({
       documentType: resolvedDocumentType,
       invoicePaidAmount,
       scheduleView,
+      milestoneLayout,
+      reconstructed: Boolean(reconstructed),
     });
     doc.end();
   });
@@ -1189,6 +1223,8 @@ function renderQuotePdf(doc, {
   documentType = "quote",
   invoicePaidAmount = null,
   scheduleView = null,
+  milestoneLayout = null,
+  reconstructed = false,
 }) {
   const delivery = quote.delivery || { status: "draft" };
   const quoteCatalog = quote.quoteCatalog || quote.profile || {};
@@ -1250,8 +1286,9 @@ function renderQuotePdf(doc, {
     deliveryDefaults,
     biz,
     documentType,
-    documentLabel,
+    documentLabel: invoiceTitle({ documentLabel, isInvoice, milestoneInvoice, legacy: milestoneLayout?.legacy }),
     issuedAt,
+    reconstructed: Boolean(reconstructed),
   });
 
   // ─── CLIENT + BUSINESS DETAILS ───
@@ -1279,40 +1316,62 @@ function renderQuotePdf(doc, {
     renderHeader(doc, { isDraft, vLabel, quoteRef, quote, deliveryDefaults, biz });
   }
 
-  // ─── LINE ITEMS TABLE ───
-  addSpace(doc, 20);
-  renderLineItemsTable(doc, customerScheduleItems, currency, {
-    heading: isInvoice ? "CONTRACT SCHEDULE" : "PRICING SCHEDULE",
-    subheading: isInvoice
-      ? "Full scope from the approved quote. This invoice claims a portion shown below."
-      : null,
-  });
-
-  // ─── TOTALS / CLAIM ───
-  addSpace(doc, 14);
-  if (isInvoice && milestoneInvoice) {
-    renderProgressClaimBox(doc, {
+  if (isInvoice && milestoneInvoice && !milestoneLayout?.legacy) {
+    // ─── CLAIM LINES (step 4b, #28) ───
+    // A milestone invoice claims a share of the quote: one claim line per
+    // milestone it bills, against the quote it references, with its
+    // subtotal, GST and total. The quote's schedule is the quote's
+    // document; only a small summary of the contract is printed here.
+    addSpace(doc, 20);
+    renderClaimLines(doc, { milestoneInvoice, quoteReference: milestoneLayout?.quoteReference, currency });
+    addSpace(doc, 14);
+    renderClaimTotalsBox(doc, { milestoneInvoice, currency });
+    addSpace(doc, 14);
+    renderQuoteSummary(doc, {
       quote: pdfQuote,
       milestoneInvoice,
       priorClaimsTotal: sumPriorMilestoneClaims({ meta, milestoneInvoice }),
+      quoteReference: milestoneLayout?.quoteReference,
       currency,
     });
   } else {
-    renderTotalsBox(doc, pdfQuote, currency);
-    if (invoicePaymentSummary) {
-      addSpace(doc, 12);
-      renderInvoicePaymentSummary(doc, invoicePaymentSummary);
-    }
-  }
-
-  // ─── VARIETY PROFILES (after totals, before payment) ───
-  const varietyProfiles = quote.varietyProfiles || [];
-  if (varietyProfiles.length) {
+    // A quote, a receipt, an invoice without milestones, and a pre-4b
+    // milestone invoice drawn again in the layout it was issued with.
+    // ─── LINE ITEMS TABLE ───
     addSpace(doc, 20);
-    renderVarietyProfiles(doc, varietyProfiles);
-  } else if (images?.length) {
-    addSpace(doc, 12);
-    renderVarietyImages(doc, images);
+    renderLineItemsTable(doc, customerScheduleItems, currency, {
+      heading: isInvoice ? "CONTRACT SCHEDULE" : "PRICING SCHEDULE",
+      subheading: isInvoice
+        ? "Full scope from the approved quote. This invoice claims a portion shown below."
+        : null,
+    });
+
+    // ─── TOTALS / CLAIM ───
+    addSpace(doc, 14);
+    if (isInvoice && milestoneInvoice) {
+      renderProgressClaimBox(doc, {
+        quote: pdfQuote,
+        milestoneInvoice,
+        priorClaimsTotal: sumPriorMilestoneClaims({ meta, milestoneInvoice }),
+        currency,
+      });
+    } else {
+      renderTotalsBox(doc, pdfQuote, currency);
+      if (invoicePaymentSummary) {
+        addSpace(doc, 12);
+        renderInvoicePaymentSummary(doc, invoicePaymentSummary);
+      }
+    }
+
+    // ─── VARIETY PROFILES (after totals, before payment) ───
+    const varietyProfiles = quote.varietyProfiles || [];
+    if (varietyProfiles.length) {
+      addSpace(doc, 20);
+      renderVarietyProfiles(doc, varietyProfiles);
+    } else if (images?.length) {
+      addSpace(doc, 12);
+      renderVarietyImages(doc, images);
+    }
   }
 
   // ─── PAYMENT (stays with pricing) ───
@@ -1326,6 +1385,10 @@ function renderQuotePdf(doc, {
     quoteRef: quoteRef === DRAFT_INVOICE_REF ? null : quoteRef,
     documentType,
     milestoneInvoice,
+    // A step 4b invoice names its quote the way the claim line does.
+    milestoneReference: isInvoice && milestoneInvoice && milestoneLayout && !milestoneLayout.legacy
+      ? milestoneReferenceLine(milestoneInvoice, milestoneLayout.quoteReference)
+      : null,
   });
 
   // ─── Footer on pricing page ───
@@ -1351,6 +1414,7 @@ function renderHeader(doc, {
   biz,
   documentLabel,
   issuedAt,
+  reconstructed = false,
 }) {
   // Top accent bar
   doc.save();
@@ -1375,6 +1439,12 @@ function renderHeader(doc, {
   doc.font("Helvetica").fontSize(9).fillColor(C.muted);
   doc.text(quoteRef, 300, 60, { width: CW - 250, align: "right" });
   doc.text(formatDate(issuedAt), 300, 72, { width: CW - 250, align: "right" });
+  if (reconstructed) {
+    // Drawn again because the stored PDF was lost: never passed off as the
+    // copy that was sent.
+    doc.font("Helvetica-Bold").fontSize(9).fillColor(C.brand);
+    doc.text("Reconstructed copy", 300, 86, { width: CW - 250, align: "right" });
+  }
 
   // Separator
   doc.moveTo(M, 104).lineTo(W - M, 104).strokeColor(C.rule).lineWidth(0.5).stroke();
@@ -1424,6 +1494,10 @@ function renderParties(doc, {
   const items = isPaymentDocument
     ? [
         isDraftInvoice(milestoneInvoice) && !isReceipt ? null : `${isReceipt ? "Received" : "Issued"}: ${formatDate(issuedAt)}`,
+        // A receipt names the invoice it pays.
+        isReceipt && (milestoneInvoice?.issuedReceipt?.invoiceNumber || milestoneInvoice?.issuedRevision?.invoiceNumber || milestoneInvoice?.invoiceNumber)
+          ? `For invoice: ${milestoneInvoice.issuedReceipt?.invoiceNumber || milestoneInvoice.issuedRevision?.invoiceNumber || milestoneInvoice.invoiceNumber}`
+          : null,
         !isReceipt && milestoneInvoice?.dueDate ? `Due: ${formatDate(milestoneInvoice.dueDate)}` : null,
         // An invoice issued from the sequence (INV-…) carries the job number.
         !isReceipt && milestoneInvoice?.issuedRevision?.jobReference ? `Job reference: ${milestoneInvoice.issuedRevision.jobReference}` : null,
@@ -1743,18 +1817,142 @@ function renderTotalsBox(doc, quote, currency) {
   doc.y = boxTop + 86;
 }
 
-function sumPriorMilestoneClaims({ meta, milestoneInvoice }) {
-  if (!milestoneInvoice || !Array.isArray(meta?.milestoneInvoices)) return 0;
-  const currentIndex = Number(milestoneInvoice.milestoneIndex || 0);
-  let sum = 0;
-  for (const other of meta.milestoneInvoices) {
-    if (!other) continue;
-    if (Number(other.milestoneIndex || 0) >= currentIndex) continue;
-    sum += Number(other.total || 0);
-  }
-  return Math.round(sum * 100) / 100;
+// An issued milestone invoice is a tax invoice, and says so (step 4b). A
+// draft has no number yet and is not one; a pre-4b invoice drawn again keeps
+// the title it was issued with.
+function invoiceTitle({ documentLabel, isInvoice, milestoneInvoice, legacy = false }) {
+  return isInvoice && milestoneInvoice && !legacy && !isDraftInvoice(milestoneInvoice) ? "Tax invoice" : documentLabel;
 }
 
+// One claim line per milestone the invoice bills: the claim in plain words
+// ("Deposit: 50% of the quoted price"), the quote on a quieter second line
+// ("Quote EQ-2610-03, accepted 14 September 2026"), and its subtotal, GST
+// and total (server/invoices/customer-wording.js).
+function renderClaimLines(doc, { milestoneInvoice, quoteReference = null, currency }) {
+  const cols = { item: M, exGst: M + 270, gst: M + 345, incGst: M + 410 };
+  const rowEnd = W - M;
+  ensurePageSpace(doc, 80);
+  doc.font("Helvetica-Bold").fontSize(9).fillColor(C.light);
+  doc.text("CLAIM", M, doc.y);
+  doc.moveDown(0.4);
+  const headY = doc.y;
+  doc.rect(M, headY, CW, 18).fill(C.surfaceCool);
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(C.muted);
+  doc.text("Description", cols.item + 6, headY + 5, { lineBreak: false });
+  doc.text("Ex GST", cols.exGst, headY + 5, { width: cols.gst - cols.exGst - 8, align: "right", lineBreak: false });
+  doc.text("GST", cols.gst, headY + 5, { width: cols.incGst - cols.gst - 8, align: "right", lineBreak: false });
+  doc.text("Inc GST", cols.incGst, headY + 5, { width: rowEnd - cols.incGst, align: "right", lineBreak: false });
+  doc.y = headY + 24;
+  const rowY = doc.y;
+  doc.save();
+  doc.rect(M, rowY - 2, 3, 30).fill(C.brand);
+  doc.restore();
+  doc.font("Helvetica-Bold").fontSize(9.5).fillColor(C.dark);
+  doc.text(claimDescription(milestoneInvoice), cols.item + 10, rowY, { width: cols.exGst - cols.item - 20 });
+  const nameBottom = doc.y;
+  const quoteLine = quoteReferenceLine(quoteReference);
+  if (quoteLine) {
+    doc.font("Helvetica").fontSize(8.5).fillColor(C.muted);
+    doc.text(quoteLine, cols.item + 10, nameBottom + 1, { width: cols.exGst - cols.item - 20 });
+  }
+  const rowBottom = doc.y;
+  doc.font("Helvetica").fontSize(9.5).fillColor(C.body);
+  doc.text(formatMoney(milestoneInvoice.subtotal, currency), cols.exGst, rowY, { width: cols.gst - cols.exGst - 8, align: "right", lineBreak: false });
+  doc.text(formatMoney(milestoneInvoice.gst, currency), cols.gst, rowY, { width: cols.incGst - cols.gst - 8, align: "right", lineBreak: false });
+  doc.text(formatMoney(milestoneInvoice.total, currency), cols.incGst, rowY, { width: rowEnd - cols.incGst, align: "right", lineBreak: false });
+  doc.y = Math.max(rowBottom, rowY + 28) + 6;
+  doc.moveTo(M, doc.y).lineTo(rowEnd, doc.y).strokeColor(C.ruleLight).lineWidth(0.5).stroke();
+  doc.y += 4;
+}
+
+// The invoice's totals. The labels and their order are what
+// server/invoices/issued-totals.js reads back from an issued invoice.
+function renderClaimTotalsBox(doc, { milestoneInvoice, currency }) {
+  const round2 = (value) => Math.round(Number(value || 0) * 100) / 100;
+  const boxW = 260;
+  const boxX = W - M - boxW;
+  const height = 84;
+  ensurePageSpace(doc, height + 10);
+  const boxTop = doc.y;
+  doc.save();
+  doc.roundedRect(boxX, boxTop, boxW, height, 4).fill(C.surfaceWarm);
+  doc.restore();
+  doc.save();
+  doc.rect(boxX, boxTop, 3, height).fill(C.brand);
+  doc.restore();
+  const labelX = boxX + 16;
+  const innerW = boxW - 32;
+  let y = boxTop + 12;
+  doc.font("Helvetica").fillColor(C.body).fontSize(9.5);
+  doc.text("This claim (ex GST)", labelX, y, { lineBreak: false });
+  doc.text(formatMoney(round2(milestoneInvoice.subtotal), currency), labelX, y, { width: innerW, align: "right", lineBreak: false });
+  y += 15;
+  doc.text("GST (10%)", labelX, y, { lineBreak: false });
+  doc.text(formatMoney(round2(milestoneInvoice.gst), currency), labelX, y, { width: innerW, align: "right", lineBreak: false });
+  y += 13;
+  doc.moveTo(labelX, y + 4).lineTo(labelX + innerW, y + 4).strokeColor(C.brandBorder).lineWidth(0.5).stroke();
+  y += 13;
+  doc.font("Helvetica-Bold").fillColor(C.dark).fontSize(13);
+  doc.text("Amount Due", labelX, y, { lineBreak: false });
+  doc.text(formatMoney(round2(milestoneInvoice.total), currency), labelX, y, { width: innerW, align: "right", lineBreak: false });
+  doc.font("Helvetica").fillColor(C.muted).fontSize(8);
+  doc.text("Total including GST", labelX, y + 17, { lineBreak: false });
+  doc.y = boxTop + height + 10;
+}
+
+// "Milestone 1 of 2 for Quote EQ-2610-03, accepted 14 September 2026.": the
+// payment terms' milestone reference, in the claim line's words.
+function milestoneReferenceLine(milestoneInvoice, quoteReference) {
+  const quoteLine = quoteReferenceLine(quoteReference);
+  if (!quoteLine) return null;
+  const position = Number(milestoneInvoice.milestoneIndex || 0) + 1;
+  const count = Number(milestoneInvoice.milestoneCount) > 0 ? Number(milestoneInvoice.milestoneCount) : position;
+  return `Milestone ${position} of ${count} for ${quoteLine}.`;
+}
+
+// The contract this invoice claims against, as a two-column summary the
+// width of the claim table: labels left, amounts right-aligned (Helvetica's
+// figures are all one width, so the amounts line up as tabular figures),
+// then a hairline and what remains after this claim, emphasised.
+function renderQuoteSummary(doc, { quote, milestoneInvoice, priorClaimsTotal, quoteReference = null, currency }) {
+  const round2 = (value) => Math.round(Number(value || 0) * 100) / 100;
+  const contractTotal = round2(quote?.totals?.total);
+  const previous = round2(priorClaimsTotal);
+  const thisClaim = round2(milestoneInvoice.total);
+  const remaining = round2(contractTotal - previous - thisClaim);
+  const left = M + 6;
+  const right = W - M;
+  ensurePageSpace(doc, 110);
+  const headY = doc.y;
+  doc.font("Helvetica-Bold").fontSize(9).fillColor(C.light);
+  doc.text("QUOTE SUMMARY", M, headY, { lineBreak: false });
+  doc.font("Helvetica").fontSize(8).fillColor(C.muted);
+  doc.text("All amounts include GST", M, headY + 1, { width: CW, align: "right", lineBreak: false });
+  doc.y = headY + 15;
+  const quoteLine = quoteReferenceLine(quoteReference);
+  if (quoteLine) {
+    doc.font("Helvetica").fontSize(8.5).fillColor(C.muted);
+    doc.text(quoteLine, left, doc.y, { width: CW - 6 });
+    doc.y += 5;
+  }
+  const row = (label, value, { bold = false } = {}) => {
+    const y = doc.y;
+    doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(9.5).fillColor(bold ? C.dark : C.body);
+    doc.text(label, left, y, { lineBreak: false });
+    doc.text(formatMoney(value, currency), M, y, { width: CW, align: "right", lineBreak: false });
+    doc.y = y + 15;
+  };
+  row("Contract value", contractTotal);
+  row("Previously claimed", previous);
+  row("This claim", thisClaim);
+  doc.moveTo(M, doc.y).lineTo(right, doc.y).strokeColor(C.rule).lineWidth(0.5).stroke();
+  doc.y += 5;
+  row("Remaining after this claim", remaining, { bold: true });
+  doc.y += 2;
+}
+
+// The claim box of a milestone invoice issued before step 4b, for drawing
+// one again in the layout it was issued with (unchanged from then).
 function renderProgressClaimBox(doc, {
   quote,
   milestoneInvoice,
@@ -1829,6 +2027,18 @@ function renderProgressClaimBox(doc, {
   doc.y = boxTop + height + 10;
 }
 
+function sumPriorMilestoneClaims({ meta, milestoneInvoice }) {
+  if (!milestoneInvoice || !Array.isArray(meta?.milestoneInvoices)) return 0;
+  const currentIndex = Number(milestoneInvoice.milestoneIndex || 0);
+  let sum = 0;
+  for (const other of meta.milestoneInvoices) {
+    if (!other) continue;
+    if (Number(other.milestoneIndex || 0) >= currentIndex) continue;
+    sum += Number(other.total || 0);
+  }
+  return Math.round(sum * 100) / 100;
+}
+
 function renderInvoicePaymentSummary(doc, paymentSummary) {
   ensurePageSpace(doc, 104);
 
@@ -1885,6 +2095,7 @@ function renderPaymentDetails(doc, {
   quoteRef,
   documentType,
   milestoneInvoice = null,
+  milestoneReference = null,
 }) {
   const isReceipt = documentType === "receipt";
   const paymentSchedule = !isReceipt
@@ -1975,11 +2186,11 @@ function renderPaymentDetails(doc, {
     leftEndY = doc.y;
   }
 
-  if (milestoneInvoice?.contextNote) {
+  if (milestoneReference || milestoneInvoice?.contextNote) {
     doc.font("Helvetica-Bold").fontSize(9).fillColor(C.dark);
     doc.text("Milestone Reference", M, leftEndY + 8);
     doc.font("Helvetica").fontSize(9).fillColor(C.body);
-    doc.text(milestoneInvoice.contextNote, M, leftEndY + 22, { width: termsWidth, lineGap: 2 });
+    doc.text(milestoneReference || milestoneInvoice.contextNote, M, leftEndY + 22, { width: termsWidth, lineGap: 2 });
     leftEndY = doc.y;
   }
 

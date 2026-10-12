@@ -21,8 +21,9 @@
 //                             that cleared it
 //
 // An invoice's lines are what its PDF claims: one claim line, the milestone's
-// share of the quote ex GST. (Its PDF also prints the quote's schedule, which
-// is the quote's rows.) Totals are as issued and never recomputed: where the
+// share of the quote ex GST, which is what its PDF prints since step 4b
+// (earlier PDFs also printed the quote's schedule, which is the quote's
+// rows). Totals are as issued and never recomputed: where the
 // milestone's GST (its share of the quote's GST) differs from GST worked out
 // on its own subtotal, the GST is kept as printed, with the reason.
 //
