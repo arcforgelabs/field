@@ -296,13 +296,19 @@ there. Tests use a local MinIO server with a locked bucket
 Set these as your deployment's secrets on the **published app only**:
 Publishing > Adjust settings.
 
-| Name | Kind | Value |
-| --- | --- | --- |
-| `FIELD_DOCUMENT_REPLICA` | Configuration | `r2`. Unset: no replica, Field behaves as before |
-| `FIELD_R2_ENDPOINT` | Configuration | `https://<account-id>.r2.cloudflarestorage.com` (the account ID is in the R2 overview) |
-| `FIELD_R2_BUCKET` | Configuration | Your bucket's name, for example `<your-bucket>` |
-| `FIELD_R2_ACCESS_KEY_ID` | Secret | The token's S3 Access Key ID |
-| `FIELD_R2_SECRET_ACCESS_KEY` | Secret | The token's S3 Secret Access Key |
+| Name | Value |
+| --- | --- |
+| `FIELD_DOCUMENT_REPLICA` | `r2`. Unset: no replica, Field behaves as before |
+| `FIELD_R2_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` (the account ID is in the R2 overview) |
+| `FIELD_R2_BUCKET` | Your bucket's name, for example `<your-bucket>` |
+| `FIELD_R2_ACCESS_KEY_ID` | The token's S3 Access Key ID |
+| `FIELD_R2_SECRET_ACCESS_KEY` | The token's S3 Secret Access Key |
+
+Set all five as **Secrets**, including the three that are not secret. Replit
+writes a deployment **Configuration** into `.replit` under `[userenv.shared]`
+on the next publish. That commits your account ID and bucket name to git,
+gives them to the workspace, and loses them when the workspace is reset to
+GitHub's `main`, which switches the replica off at the following publish.
 
 Create an account API token with Object Read & Write on this bucket only.
 Field never prints either credential.
