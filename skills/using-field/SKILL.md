@@ -135,7 +135,7 @@ field get-job <jobId> [--version latest|customer|v003]
 field get-quote <jobId> [--version latest|customer|v003]
 field get-quote-markdown <jobId> [out.md] [--version ...]
 field get-pdf <jobId> [out.pdf] [--version ...] [--document quote|invoice|receipt] [--milestone 2]
-field send-document <jobId> client@example.com [--document quote|invoice|receipt] [--version ...] [--milestone 2] [--paid 100]
+field send-document <jobId> client@example.com [--document quote|invoice|receipt] [--version ...] [--milestone 2] [--paid 100] [--attach doc_… ...]
 field set-details <jobId> key=value [key=value ...]
 field set-quote-inputs <jobId> <file-or-inline-json>
 field update-quote <jobId> [--lock final|draft] [--json '{...}']

@@ -28,7 +28,7 @@ import {
   voidMilestoneInvoicePayment,
 } from "./job-documents.js";
 import { buildAndPersistQuote, buildQuoteInStagedGeneration, readQuoteOverrides } from "./quote-workflow.js";
-import { findSentMessageByDeliveryAttempt, sendQuoteEmail } from "./send-quote-email.js";
+import { findSentMessageByDeliveryAttempt, resolveMessageIdHost, sendQuoteEmail } from "./send-quote-email.js";
 import { appendSentEmailArchive } from "./sent-email-archive.js";
 import { appendJobActivity, listOpenSendBlockingGaps, readJobState } from "./job-state.js";
 import { generateEvidenceQuoteMarkdown } from "./generate-evidence-quote.js";
@@ -54,7 +54,13 @@ import { buildQuoteEditPolicy, shouldForkQuoteMutation } from "./quote-edit-poli
 import { queueStagedPostCommit, runAtomicJobGeneration } from "./job-generation.js";
 import { recordIssuedQuoteDocuments } from "./quote-issuance.js";
 import { buildQuoteSnapshotRecord } from "./quote-snapshots.js";
-import { recordDeliveredDocument, recordFailedDelivery } from "./documents/delivery.js";
+import { describeDeliveredDocument, recordAttachedDocumentsEmailed, recordDeliveredDocument, recordFailedDelivery } from "./documents/delivery.js";
+import {
+  assertEmailAttachmentLimits,
+  documentAttachmentRecord,
+  documentMimeAttachments,
+  loadDocumentAttachments,
+} from "./documents/email-attachments.js";
 import { quoteRowRecorder } from "./quotes/recorder.js";
 import { invoiceRowRecorder } from "./invoices/recorder.js";
 import { quoteRowsFromArtifact } from "./quotes/read-model.js";
@@ -1909,6 +1915,8 @@ async function prepareQuoteDeliveryAttempt({
   sendPolicy,
   scheduledEmailId,
   scheduledAt,
+  attachedDocuments = [],
+  messageIdHost,
 }) {
   let preparedMeta = resolvedMeta;
   let preparedQuote = deliveryQuote;
@@ -2066,8 +2074,12 @@ async function prepareQuoteDeliveryAttempt({
     quotePdf: quotePdfBuffer,
     preparedQuote,
     preparedMeta,
+    messageIdHost,
   });
   Object.assign(pendingAttempt, {
+    // Field documents attached by uid: the reference and hash, never the
+    // bytes. A dispatch reads them again from the issued-document store.
+    documents: attachedDocuments.map(documentAttachmentRecord),
     bcc: Array.isArray(bcc) ? bcc : [],
     customBody: customBody || null,
     validatedInvoicePaidAmount,
@@ -2118,7 +2130,13 @@ export async function sendJobQuote({
   scheduledAt = null,
   sendEmail = sendQuoteEmail,
   reconcileSentDelivery = null,
+  // Field documents to attach by uid ([{ uid }], or the records a queued send
+  // kept), read from `documentService` (the issue service; the installed
+  // recorder's when not given).
+  documents = [],
+  documentService = undefined,
 }) {
+  const documentStore = documentService === undefined ? issuedDocumentRecorder().service || null : documentService;
   // Reconcile an existing attempt before reading mutable current quote state.
   // The outbox embeds the exact prepared quote/meta/bytes; retrying from the
   // current draft could deliver a different document under the old Message-ID.
@@ -2134,6 +2152,7 @@ export async function sendJobQuote({
         sendEmail,
         themeFontFamily,
         additionalAttachments,
+        documentStore,
       });
     }
     let reconciled = null;
@@ -2187,6 +2206,7 @@ export async function sendJobQuote({
       pendingArtifacts,
       scheduledEmailId: pendingDelivery.scheduledEmailId || null,
       scheduledAt: pendingDelivery.scheduledAt || null,
+      attachedDocuments: pendingDelivery.documents || [],
       expectedPreparedVersion: pendingDocumentType === "quote"
         && pendingDelivery.resendLockedQuoteVersion !== true
         && Number(pendingDelivery.quoteVersion || pendingDelivery.preparedQuote.version)
@@ -2272,6 +2292,17 @@ export async function sendJobQuote({
     && !sendPolicy.selectedIsLatest
   );
 
+  // Field documents attached by uid are read (and refused: another job's, a
+  // missing one, bytes that fail their hash, too much in total) before
+  // anything is prepared or issued.
+  const attachedDocuments = await loadDocumentAttachments({
+    service: documentStore,
+    jobId: resolvedMeta?.id || meta?.id,
+    refs: documents,
+    meta: resolvedMeta,
+  });
+  assertEmailAttachmentLimits({ documents: attachedDocuments, uploads: additionalAttachments });
+
   const prepared = await runAtomicJobGeneration(jobDir, async (stagedJobDir) => (
     prepareQuoteDeliveryAttempt({
       jobDir: stagedJobDir,
@@ -2295,6 +2326,8 @@ export async function sendJobQuote({
       sendPolicy,
       scheduledEmailId,
       scheduledAt,
+      attachedDocuments,
+      messageIdHost: resolveMessageIdHost({ config, user }),
     })
   ));
   let {
@@ -2307,6 +2340,34 @@ export async function sendJobQuote({
     preparedReportMarkdown,
     pendingAttempt,
   } = prepared;
+  // Now the email's own document is known: it cannot also be attached, and
+  // with it the email must still fit. A refusal here retires the prepared
+  // attempt, which was provably never dispatched.
+  try {
+    const mainDocument = describeDeliveredDocument({
+      documentType: resolvedDocumentType,
+      preparedMeta,
+      preparedQuote,
+      preparedMilestoneInvoice,
+      version: selectedVersion || preparedQuote?.version || preparedMeta?.quoteVersion || null,
+    });
+    if (attachedDocuments.length) {
+      await loadDocumentAttachments({
+        service: documentStore,
+        jobId: resolvedMeta?.id || meta?.id,
+        refs: attachedDocuments.map(documentAttachmentRecord),
+        mainDocument: { documentType: resolvedDocumentType, number: mainDocument.number },
+        meta: resolvedMeta,
+      });
+    }
+    assertEmailAttachmentLimits({ mainBytes: quotePdfBuffer?.length || 0, documents: attachedDocuments, uploads: additionalAttachments });
+  } catch (error) {
+    await updatePendingQuoteDelivery(jobDir, pendingAttempt.attemptId, {
+      status: "failed",
+      error: String(error?.message || error),
+    }).catch(() => {});
+    throw error;
+  }
   await recordPreparedDeliverySnapshot({ jobDir, config, attempt: pendingAttempt, user });
   const claim = await claimPendingQuoteDelivery(jobDir, {
     attemptId: pendingAttempt.attemptId,
@@ -2339,8 +2400,9 @@ export async function sendJobQuote({
     invoicePaidAmount: validatedInvoicePaidAmount,
     themeFontFamily,
     subjectOverride,
-    additionalAttachments,
+    additionalAttachments: [...documentMimeAttachments(attachedDocuments), ...additionalAttachments],
       deliveryAttemptId: pendingAttempt.attemptId,
+      deliveryMessageId: pendingAttempt.messageId || null,
     });
   } catch (error) {
     // A timeout or process interruption may have happened after Gmail accepted
@@ -2379,6 +2441,7 @@ export async function sendJobQuote({
     pendingAttemptId: pendingAttempt.attemptId,
     scheduledEmailId,
     scheduledAt,
+    attachedDocuments: pendingAttempt.documents || [],
     expectedPreparedVersion: resolvedDocumentType === "quote" && !resendLockedQuoteVersion
       ? expectedPreparedVersion
       : null,
@@ -2415,11 +2478,30 @@ async function dispatchPendingQuoteDelivery({
   sendEmail,
   themeFontFamily,
   additionalAttachments,
+  documentStore = null,
 }) {
   if (!pendingDelivery.preparedQuote || !pendingDelivery.preparedMeta) {
     const pendingError = new Error("pending quote delivery is missing its immutable prepared state");
     pendingError.statusCode = 409;
     throw pendingError;
+  }
+  // The attempt's Field documents, read again by uid: still the bytes that
+  // were recorded, and not credited or voided since. Otherwise the attempt
+  // is retired (never dispatched) and the send is refused for review.
+  let attachedDocuments = [];
+  try {
+    attachedDocuments = await loadDocumentAttachments({
+      service: documentStore,
+      jobId: pendingDelivery.preparedMeta?.id,
+      refs: pendingDelivery.documents || [],
+      meta: pendingDelivery.preparedMeta,
+    });
+  } catch (error) {
+    await updatePendingQuoteDelivery(jobDir, pendingDelivery.attemptId, {
+      status: "failed",
+      error: String(error?.message || error),
+    }, { expectedStatus: "pending" }).catch(() => {});
+    throw error;
   }
   await recordPreparedDeliverySnapshot({ jobDir, config, attempt: pendingDelivery, user });
   const claim = await claimPendingQuoteDelivery(jobDir, {
@@ -2455,8 +2537,9 @@ async function dispatchPendingQuoteDelivery({
       invoicePaidAmount: attempt.validatedInvoicePaidAmount ?? null,
       themeFontFamily,
       subjectOverride: attempt.subject || null,
-      additionalAttachments,
+      additionalAttachments: [...documentMimeAttachments(attachedDocuments), ...(additionalAttachments || [])],
       deliveryAttemptId: attempt.attemptId,
+      deliveryMessageId: attempt.messageId || null,
     });
   } catch (error) {
     const outcomeUnknown = !isProvablyRejectedDeliveryError(error);
@@ -2499,6 +2582,7 @@ async function dispatchPendingQuoteDelivery({
       pendingArtifacts: artifacts,
       scheduledEmailId: attempt.scheduledEmailId || null,
       scheduledAt: attempt.scheduledAt || null,
+      attachedDocuments: attempt.documents || [],
       expectedPreparedVersion: documentType === "quote"
         && attempt.resendLockedQuoteVersion !== true
         && Number(attempt.quoteVersion || attempt.preparedQuote.version)
@@ -2518,6 +2602,25 @@ async function finalizeAndProjectDelivery({ jobDir, finalization, config = null 
   ));
   await recordSentDeliverySnapshot({ config, finalization, issuance: finalized?.issuance || null });
   await recordDeliveredDocument({ finalization, issuance: finalized?.issuance || null });
+  if (finalization.attachedDocuments?.length) {
+    const documentType = finalization.resolvedDocumentType || "quote";
+    const main = describeDeliveredDocument({
+      documentType,
+      preparedMeta: finalization.preparedMeta,
+      preparedQuote: finalization.preparedQuote,
+      preparedMilestoneInvoice: finalization.preparedMilestoneInvoice,
+      version: finalization.selectedVersion || finalization.preparedQuote?.version || finalization.preparedMeta?.quoteVersion || null,
+    });
+    await recordAttachedDocumentsEmailed({
+      jobId: finalization.preparedMeta?.id,
+      attachments: finalization.attachedDocuments,
+      result: { to: finalization.to, ...(finalization.result || {}) },
+      user: finalization.user || null,
+      sentAt: finalized?.issuance?.issuedAt || finalization.quoteSentAt,
+      attemptId: finalization.pendingAttemptId || null,
+      withDocument: main.number ? { documentType, number: main.number } : null,
+    });
+  }
   // Quote rows (#6): the commit above already marked the version sent; now
   // that its issued document exists, link it. Never throws.
   if ((finalization.resolvedDocumentType || "quote") === "quote") {

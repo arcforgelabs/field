@@ -77,6 +77,13 @@ function publicRecord(record) {
     bcc: record.payload?.bcc || [],
     subject: record.payload?.subject || null,
     attachmentNames: (record.attachments || []).map((attachment) => attachment.filename),
+    // Field documents attached by uid: their references, never their bytes.
+    documents: (record.payload?.documents || []).map((document) => ({
+      uid: document.uid,
+      documentType: document.documentType || null,
+      number: document.number || null,
+      byteLength: document.byteLength ?? null,
+    })),
     quoteVersion: record.snapshot?.quoteVersion ?? null,
     milestoneIndex: record.snapshot?.milestoneIndex ?? null,
     invoiceNumber: record.snapshot?.invoiceNumber ?? null,

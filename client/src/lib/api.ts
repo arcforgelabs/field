@@ -72,7 +72,57 @@ export type ScheduledEmail = {
     attachmentFilename?: string | null;
     invoicePaidAmount?: number | null;
   } | null;
+  /** Field documents attached by uid (their references, never their bytes). */
+  documents?: EmailDocumentRef[];
 };
+
+export type EmailDocumentRef = {
+  uid: string;
+  documentType: string | null;
+  number: string | null;
+  byteLength?: number | null;
+};
+
+export type JobDocumentStatus = "issued" | "accepted" | "paid" | "credited" | "superseded" | "void";
+
+/** An issued document of a job, from GET /api/jobs/:id/documents. */
+export type JobDocument = {
+  uid: string;
+  documentType: "quote" | "invoice" | "receipt" | "credit_note";
+  number: string;
+  quoteVersion: number | null;
+  revision: number | null;
+  issuedAt: string;
+  pdfSha256: string;
+  pdfUrl: string;
+  byteLength: number | null;
+  status: JobDocumentStatus;
+  emailed: Array<{ event: string; at: string; messageId: string | null; to: string[] }>;
+  details?: Record<string, unknown>;
+};
+
+/** A document the job will have but that is not issued yet (a draft milestone invoice). */
+export type NotIssuedDocument = {
+  documentType: "invoice";
+  milestoneIndex: number;
+  label: string;
+  total: number | null;
+  reason: string;
+};
+
+export type JobDocumentsResponse = {
+  ok: true;
+  jobId: string;
+  documents: JobDocument[];
+  notIssued?: NotIssuedDocument[];
+};
+
+/** The email limits the server holds (server/documents/email-attachments.js). */
+export const EMAIL_ATTACHMENT_LIMITS = {
+  maxAttachments: 10,
+  maxUploadBytes: 10 * 1024 * 1024,
+  maxTotalBytes: 18 * 1024 * 1024,
+} as const;
 
 export type GoogleContact = {
   name: string;
@@ -234,8 +284,9 @@ async function requestForm<T>(path: string, options: RequestInit & { body: FormD
       throw new Error("unauthorized");
     }
     const err = new Error(body.error || res.statusText);
-    const errWithCode = err as Error & { code?: unknown };
+    const errWithCode = err as Error & { code?: unknown; status?: number };
     errWithCode.code = body.code;
+    errWithCode.status = res.status;
     throw err;
   }
 
@@ -463,8 +514,11 @@ export const api = {
       draftId?: string | null;
       /** Also attach the adjustment note the invoice was issued with (#28). */
       attachCreditNote?: boolean;
+      /** Other issued documents of the job, attached by uid. */
+      documents?: Array<{ uid: string }>;
     }
   ) {
+    const documents = options?.documents?.length ? { documents: options.documents.map(({ uid }) => ({ uid })) } : {};
     if (options?.attachments?.length) {
       const payload = {
         to,
@@ -481,6 +535,7 @@ export const api = {
         ...(options?.scheduledAt ? { scheduledAt: options.scheduledAt } : {}),
         ...(options?.draftId ? { draftId: options.draftId } : {}),
         ...(options?.attachCreditNote ? { attachCreditNote: true } : {}),
+        ...documents,
       };
       const formData = new FormData();
       formData.append("payload", JSON.stringify(payload));
@@ -509,8 +564,13 @@ export const api = {
         ...(options?.scheduledAt ? { scheduledAt: options.scheduledAt } : {}),
         ...(options?.draftId ? { draftId: options.draftId } : {}),
         ...(options?.attachCreditNote ? { attachCreditNote: true } : {}),
+        ...documents,
       }),
     });
+  },
+  /** The job's issued documents (503 without a database: no picker then). */
+  jobDocuments(id: string) {
+    return request<JobDocumentsResponse>(`/api/jobs/${id}/documents`);
   },
   emailTemplates() {
     return request<{
@@ -538,9 +598,11 @@ export const api = {
       attachments?: File[];
       scheduledAt?: string | null;
       draftId?: string | null;
+      documents?: Array<{ uid: string }>;
     },
   ) {
     const payload = {
+      ...(options?.documents?.length ? { documents: options.documents.map(({ uid }) => ({ uid })) } : {}),
       to,
       subject,
       cc: options?.cc || [],

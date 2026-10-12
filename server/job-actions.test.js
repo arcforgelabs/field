@@ -35,7 +35,7 @@ import { GMAIL_SEND_TIMEOUT_MS } from "./send-quote-email.js";
 import { closeTestPriceCatalogs, createTestPriceCatalog, seedCatalogFromPriceMaps } from "./test-price-catalog.js";
 import { createQuoteSnapshotStore } from "./quote-snapshots.js";
 import { readQuoteIssuanceLedger } from "./quote-issuance.js";
-import { readPendingQuoteDelivery } from "./quote-delivery-outbox.js";
+import { readPendingQuoteDelivery, updatePendingQuoteDelivery } from "./quote-delivery-outbox.js";
 import { assertQuotePricingDisplayable, attachQuotePricingAttestation, buildQuotePricingAttestation, isIssuedQuoteVersion, isQuotePricingSendable, validateQuoteCommercialArtifact, withCurrentPricingVerdict } from "./quote-pricing-attestation.js";
 import { buildQuoteEditPolicy } from "./quote-edit-policy.js";
 import { readQuoteLifecycle, recordQuoteLanded } from "./quote-lifecycle.js";
@@ -3064,7 +3064,9 @@ test("sendJobQuote keeps a timeout outcome unknown and reconciles the stable del
     const outboxPath = join(jobDir, "quote-delivery-outbox.json");
     const pending = JSON.parse(await readFile(outboxPath, "utf8"));
     assert.equal(pending.status, "unknown");
-    assert.equal(pending.messageId, `<field-${remoteAcceptedMessageId}@arcforge.local>`);
+    // The installation's own host (#50): the sender's domain here.
+    assert.match(pending.messageId, new RegExp(`^<field-${remoteAcceptedMessageId}@[a-z0-9.-]+>$`));
+    assert.doesNotMatch(pending.messageId, /arcforge/);
 
     await assert.rejects(
       () => sendJobQuote({
@@ -3104,6 +3106,110 @@ test("sendJobQuote keeps a timeout outcome unknown and reconciles the stable del
     assert.equal(issuanceLedger.records[0].quoteVersion, 1);
     assert.equal(issuanceLedger.records[0].artifacts.quotePdf.sha256.length, 64);
   } finally {
+    await rm(jobDir, { recursive: true, force: true });
+  }
+});
+
+// A stand-in for the issue service: the two reads the send path makes.
+function fakeDocumentStore(documents) {
+  return {
+    async listJobDocuments(jobId) {
+      return {
+        documents: documents.filter((entry) => entry.jobId === jobId).map(({ bytes, ...document }) => ({ ...document, events: document.events || [] })),
+        unattachedEvents: [],
+      };
+    },
+    async readIssuedDocument(uid) {
+      const found = documents.find((entry) => entry.uid === uid);
+      if (!found) return null;
+      const { bytes, events, ...document } = found;
+      return { document, bytes };
+    },
+  };
+}
+
+test("sendJobQuote attaches Field documents by uid, keeps only their references in the outbox, and reads them again for a pending attempt", async () => {
+  const jobDir = await mkdtemp(join(tmpdir(), "field-job-send-documents-"));
+  const attachmentEmails = [];
+  installIssuedDocumentRecorder({
+    enabled: true,
+    async recordDelivery() { return null; },
+    async recordEmailFailure() { return null; },
+    async recordInvoiceRevisions() { return null; },
+    async recordAttachmentEmails(input) { attachmentEmails.push(input); return []; },
+    status() { return { enabled: true }; },
+  });
+  try {
+    const meta = {
+      id: "job-send-documents-1",
+      title: "Documents test",
+      label: "Documents test",
+      outputMode: "quote",
+      pipelineStage: "draft",
+      quoteVersion: 1,
+      quoteNumber: "EQ-TEST-DOCS",
+      jobNumber: "JOB-TEST-DOCS",
+    };
+    await writeFile(join(jobDir, "meta.json"), JSON.stringify(meta, null, 2));
+    await writeFile(join(jobDir, "quote.json"), JSON.stringify(buildSendableQuoteFixture(meta, { version: 1 }), null, 2));
+    const plan = { uid: "doc_01JB8Z0000000000000000PLAN", jobId: meta.id, documentType: "receipt", number: "ER-TEST-M1", bytes: Buffer.from("%PDF-1.4 receipt\n") };
+    const otherJob = { uid: "doc_01JB8Z00000000000000000OTH", jobId: "job-other", documentType: "quote", number: "EQ-OTHER v1", bytes: Buffer.from("%PDF other") };
+    const store = fakeDocumentStore([plan, otherJob]);
+    const upload = { filename: "site-photo.jpg", contentType: "image/jpeg", buffer: Buffer.from("jpeg bytes") };
+
+    // Another job's document is refused before anything is prepared.
+    await assert.rejects(
+      () => sendJobQuote({ jobDir, meta, dataDir: jobDir, config: {}, to: "customer@example.invalid", documents: [otherJob.uid], documentService: store, sendEmail: async () => { throw new Error("must not send"); } }),
+      (error) => error.code === "DOCUMENT_OF_ANOTHER_JOB" && error.statusCode === 409,
+    );
+    assert.equal(await readPendingQuoteDelivery(jobDir), null, "nothing was prepared");
+
+    // A timeout leaves the attempt unknown; then it is put back to pending
+    // (as a crash before the claim would leave it) and dispatched again.
+    const sends = [];
+    await assert.rejects(() => sendJobQuote({
+      jobDir, meta, dataDir: jobDir, config: { mail: { fromEmail: "office@harlow.example.invalid" } }, to: "customer@example.invalid",
+      documents: [{ uid: plan.uid }], documentService: store, additionalAttachments: [upload],
+      sendEmail: async (args) => { sends.push(args); throw Object.assign(new Error("timed out"), { code: "ETIMEDOUT" }); },
+    }), /timed out/);
+    assert.deepEqual(sends[0].additionalAttachments.map((entry) => entry.filename), ["ER-TEST-M1.pdf", "site-photo.jpg"], "Field documents first, then uploads");
+    assert.ok(sends[0].additionalAttachments[0].buffer.equals(plan.bytes));
+    const outboxPath = join(jobDir, "quote-delivery-outbox.json");
+    const unknown = JSON.parse(await readFile(outboxPath, "utf8"));
+    assert.equal(sends[0].deliveryMessageId, unknown.messageId, "the stored Message-ID is the one sent");
+    assert.match(unknown.messageId, /@harlow\.example\.invalid>$/);
+    assert.deepEqual(unknown.documents, [{
+      uid: plan.uid, documentType: "receipt", number: "ER-TEST-M1", filename: "ER-TEST-M1.pdf",
+      sha256: createHash("sha256").update(plan.bytes).digest("hex"), byteLength: plan.bytes.length, status: "paid",
+    }]);
+    assert.doesNotMatch(JSON.stringify(unknown.documents), /receipt\\n/, "no bytes in the outbox");
+
+    // Pending again with the document's bytes changed since: refused for review.
+    await updatePendingQuoteDelivery(jobDir, unknown.attemptId, { status: "pending", claim: null });
+    const changedStore = fakeDocumentStore([{ ...plan, bytes: Buffer.from("%PDF-1.4 something else\n") }]);
+    await assert.rejects(
+      () => sendJobQuote({ jobDir, meta, dataDir: jobDir, config: {}, to: "customer@example.invalid", documentService: changedStore, sendEmail: async () => { throw new Error("must not send"); } }),
+      (error) => error.code === "DOCUMENT_BYTES_CHANGED",
+    );
+    assert.equal(JSON.parse(await readFile(outboxPath, "utf8")).status, "failed", "the attempt is retired, never dispatched");
+    // Pending with the same bytes: dispatched with the recorded document.
+    await updatePendingQuoteDelivery(jobDir, unknown.attemptId, { status: "pending", claim: null });
+    const result = await sendJobQuote({
+      jobDir, meta, dataDir: jobDir, config: {}, to: "customer@example.invalid", documentService: store,
+      sendEmail: async (args) => {
+        sends.push(args);
+        return { id: "gmail-docs-1", threadId: "thread-docs-1", subject: "Quote", to: ["customer@example.invalid"], cc: [], bcc: [], attachments: [] };
+      },
+    });
+    assert.equal(result.id, "gmail-docs-1");
+    assert.equal(sends[1].deliveryMessageId, unknown.messageId);
+    assert.ok(sends[1].additionalAttachments[0].buffer.equals(plan.bytes));
+    assert.equal(attachmentEmails.length, 1);
+    assert.equal(attachmentEmails[0].email.messageId, "gmail-docs-1");
+    assert.deepEqual(attachmentEmails[0].attachments.map((entry) => entry.uid), [plan.uid]);
+    assert.equal(attachmentEmails[0].withDocument.documentType, "quote");
+  } finally {
+    installIssuedDocumentRecorder(null);
     await rm(jobDir, { recursive: true, force: true });
   }
 });

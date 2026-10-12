@@ -116,6 +116,38 @@ export async function recordDeliveredDocument({ finalization, issuance }) {
   }
 }
 
+/**
+ * The Field documents attached to an email (by uid) next to the document it
+ * was for: one `emailed` event each, with the same Gmail message id. Used by
+ * the document send (finalizeAndProjectDelivery) and by a plain job email,
+ * which has no document of its own. Never throws.
+ */
+export async function recordAttachedDocumentsEmailed({ jobId, attachments = [], result = {}, user = null, sentAt = null, attemptId = null, withDocument = null }) {
+  if (!attachments?.length) return [];
+  const recorder = issuedDocumentRecorder();
+  try {
+    return await recorder.recordAttachmentEmails({
+      jobId,
+      attachments,
+      withDocument,
+      email: {
+        sentAt: sentAt || new Date().toISOString(),
+        by: user || null,
+        messageId: result.id || null,
+        threadId: result.threadId || null,
+        attemptId,
+        to: result.to || [],
+        cc: result.cc || [],
+        bcc: result.bcc || [],
+        subject: result.subject || null,
+      },
+    });
+  } catch (error) {
+    console.error(`[issued-documents] attached documents' emails not recorded: ${error.message}`);
+    return [];
+  }
+}
+
 /** The email for a prepared attempt failed (or its outcome is unknown). */
 export async function recordFailedDelivery({ attempt, documentType, error, outcome, user = null, at = new Date().toISOString() }) {
   const recorder = issuedDocumentRecorder();

@@ -102,6 +102,55 @@ including `authMode`, `gmailUser`, and the Gmail `messageId`. That archive, not
 the UI toast, is the evidence to cite. Failures are logged by the service as
 `[email-quote] <jobId> failed: …`; successes are not logged, so read the archive.
 
+## Attachments
+
+An email carries the document it is for, any other issued documents of the
+same job, and uploads, in that order.
+
+- **Field documents by uid.** `POST /api/jobs/:id/email-quote` and
+  `POST /api/jobs/:id/email` take `documents: [{ "uid": "doc_…" }]`
+  (`field send-document … --attach doc_…`). The bytes always come from the
+  issued-document store, hash-checked, and are named by the document's number
+  (`server/documents/email-attachments.js`). Field never renders a document
+  again to attach it and takes no file path. A document of another job (409),
+  an unknown uid (404), a uid named twice or the email's own document again
+  (409), and bytes that fail their hash (410) are refused before anything is
+  prepared or sent. Without a database the picker is not offered and a
+  `documents` list is refused (503).
+- **Events.** After Gmail accepts, each attached document gets an `emailed`
+  event with the Gmail message id and `role: "attachment"`, idempotency key
+  `emailed:<messageId>:<uid>`. The email's own document keeps its own
+  `emailed` event as before.
+- **Limits.** At most 10 attachments, 10 MB per upload and 18 MB in total
+  across the email's document, Field documents and uploads. Base64 adds a
+  third, so 18 MB is about 24 MB on the wire, under Gmail's 25 MB message
+  limit. Over a limit is a 413 with the size and the limit, before Gmail is
+  called.
+- **Large messages.** `messages.send` takes the message in its JSON `raw`
+  field only up to about 5 MB (Google's simple-request limit). A message
+  over 4 MB of encoded text goes through the media upload form
+  (`/upload/gmail/v1/users/me/messages/send`, `message/rfc822`, up to
+  35 MB); smaller ones keep the JSON form.
+- **Queued and pending sends** (the schedule queue, drafts and the delivery
+  outbox) keep each document's uid, number, SHA-256, size and status, never
+  its bytes. At dispatch Field reads the bytes again: if they no longer hash
+  to the recorded SHA-256, or the document was credited or voided since, the
+  send fails for review instead of going out.
+- `GET /api/jobs/:id/documents` lists each issued document with `byteLength`
+  and `status` (issued, accepted, paid, credited, superseded, void), and
+  `notIssued`: the job's draft milestone invoices, which cannot be attached
+  until they are issued.
+
+## Message-ID
+
+Every document send carries a stable `Message-ID: <field-<attempt>@<host>>`,
+stored with the delivery attempt when it is prepared, so an interrupted send
+can be found in Sent Mail before any retry. The host is `mail.messageIdHost`
+(or `FIELD_MAIL_MESSAGE_ID_HOST`) when set, else the domain of the address
+Field sends from, else `field.invalid`. An attempt prepared before this host
+changed keeps the Message-ID it was stored with (the old host was
+`arcforge.local`), so reconciliation still finds it.
+
 ## Scheduled sending
 
 The Gmail API exposes immediate message and draft sends but no public operation

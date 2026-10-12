@@ -340,7 +340,7 @@ describe("backfill", () => {
       const recorder = createUnavailableIssuedDocumentRecorder("no database configured", { logger: { warn: (line) => lines.push(line) } });
       await recorder.recordDelivery({});
       await recorder.recordDelivery({});
-      assert.deepEqual(recorder.status(), { enabled: false, reason: "no database configured", skipped: { delivery: 2, emailFailure: 0, invoiceRevisions: 0 } });
+      assert.deepEqual(recorder.status(), { enabled: false, reason: "no database configured", skipped: { delivery: 2, emailFailure: 0, attachmentEmails: 0, invoiceRevisions: 0 } });
       assert.equal(lines.length, 1);
       assert.match(lines[0], /no database configured: issued deliveries are not recorded/);
     });

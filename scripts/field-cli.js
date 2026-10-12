@@ -678,15 +678,17 @@ const commands = {
   },
 
   async "send-document"(args) {
+    // --attach doc_… (repeatable): another issued document of the job, by uid.
+    const attach = args.flatMap((value, index) => (value === "--attach" && args[index + 1] ? [args[index + 1]] : []));
     const versionSelector = parseFlag(args, "--version");
     const milestoneIndex = parseMilestoneNumber(parseFlag(args, "--milestone"));
     const requestedDocumentType = trimText(parseFlag(args, "--document"));
     const paidAmountRaw = parseFlag(args, "--paid");
     const [id, email] = collectPositionals(args, {
-      flagsWithValue: ["--version", "--milestone", "--document", "--paid", "--body", "--body-file"],
+      flagsWithValue: ["--version", "--milestone", "--document", "--paid", "--body", "--body-file", "--attach"],
     });
     if (!id || !email) {
-      throw new Error("usage: send-document <id> <email> [--document quote|invoice|receipt] [--version latest|customer|vNNN] [--milestone 1] [--paid 100] [--body text | --body-file file]");
+      throw new Error("usage: send-document <id> <email> [--document quote|invoice|receipt] [--version latest|customer|vNNN] [--milestone 1] [--paid 100] [--body text | --body-file file] [--attach doc_… ...]");
     }
 
     const detail = await getJobDetail(id);
@@ -713,6 +715,7 @@ const commands = {
         ...(version ? { version: String(version) } : {}),
         ...(milestoneIndex != null ? { milestoneIndex } : {}),
         ...(invoicePaidAmount != null ? { invoicePaidAmount } : {}),
+        ...(attach.length ? { documents: attach.map((uid) => ({ uid })) } : {}),
       },
     });
 
@@ -1299,7 +1302,7 @@ Core:
   get-quote <id> [--version ...]
   get-quote-markdown <id> [output.md] [--version ...]
   get-pdf <id> [output.pdf] [--version ...] [--document quote|invoice|receipt] [--milestone 1]
-  send-document <id> <email> [--document quote|invoice|receipt] [--version ...] [--milestone 1] [--paid 100]
+  send-document <id> <email> [--document quote|invoice|receipt] [--version ...] [--milestone 1] [--paid 100] [--attach doc_… ...]
   set-details <id> key=value [key=value ...]
   set-quote-inputs <id> <file-or-inline-json>
   update-quote <id> [--lock final|draft] [--json '{...}']

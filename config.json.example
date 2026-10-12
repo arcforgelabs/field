@@ -64,6 +64,8 @@
     "fromName": "Your Business",
     "replyTo": "owner@example.com",
     "gmailUser": "owner@example.com",
+    "_comment_messageIdHost": "Optional. The host in the stable Message-ID of each send. Unset: the domain of fromEmail.",
+    "messageIdHost": "example.com",
     "_comment_deliveryPolicy": "Delivery policy is environment-specific. Use live for production. Use allowlist or disabled in non-production environments.",
     "deliveryPolicy": {
       "mode": "live",

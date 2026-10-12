@@ -1,7 +1,11 @@
 // Issued documents by uid.
 //
 //   GET /api/documents/:uid/pdf   the exact bytes that were issued
-//   GET /api/jobs/:id/documents   a job's issued documents and their events
+//   GET /api/jobs/:id/documents   a job's issued documents and their events,
+//                                 each with its size and current status, and
+//                                 the documents not issued yet (draft
+//                                 milestone invoices), which cannot be
+//                                 attached to an email
 //
 // Both run in the signed-in caller's organisation (row-level security): a
 // document of another organisation is indistinguishable from one that does
@@ -16,6 +20,8 @@
 // The older job routes (/api/jobs/:id/quote-pdf, /milestones/:index/pdf) are
 // unchanged; they move to read from here in a follow-up.
 import { createIssuedDocumentService } from "./issued-documents.js";
+import { documentStatus, notIssuedDocuments } from "./status.js";
+import { readJobMeta } from "../job-meta-store.js";
 import { isDocumentUid } from "./uid.js";
 
 function unavailable(res, error) {
@@ -90,10 +96,14 @@ export function registerIssuedDocumentRoutes(app, { requireAuth, getDb, requestO
     }
     try {
       const { documents, unattachedEvents } = await service.listJobDocuments(job.meta.id);
+      // The job's milestone state (paid, still draft) lives beside meta.json.
+      const meta = (job.dir ? await readJobMeta(job.dir).catch(() => null) : null) || job.meta;
       res.json({
         ok: true,
         jobId: job.meta.id,
         documents: documents.map((document) => ({
+          byteLength: document.byteLength ?? null,
+          status: documentStatus(document, { meta, documents }),
           uid: document.uid,
           documentType: document.documentType,
           number: document.number,
@@ -109,6 +119,7 @@ export function registerIssuedDocumentRoutes(app, { requireAuth, getDb, requestO
           details: document.details,
         })),
         unattachedEvents,
+        notIssued: notIssuedDocuments(meta),
       });
     } catch (error) {
       res.status(error.statusCode || 500).json({ error: error.message });
