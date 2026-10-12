@@ -170,3 +170,32 @@ describe("api scheduled email payloads", () => {
     });
   });
 });
+
+describe("quote saves carry the quote rows' version (If-Match)", () => {
+  it("sends back the version the job detail and the last save reported, and nothing before one", async () => {
+    const respond = (tag: string | null, body: unknown = { ok: true }) => ({
+      ok: true,
+      headers: { get: (name: string) => (name === "X-Field-Quote-Rows-Version" ? tag : null) },
+      json: async () => body,
+    });
+    const lastHeaders = () => (fetchMock.mock.calls.at(-1)?.[1] as RequestInit).headers as Record<string, string>;
+    fetchMock.mockImplementation(async () => respond(null));
+    await api.quoteUpdate("job-1", { presentation: {} });
+    expect(lastHeaders()).not.toHaveProperty("If-Match");
+
+    fetchMock.mockImplementationOnce(async () => respond('"q1-3"', { meta: { id: "job-1" } }));
+    await api.recording("job-1");
+    fetchMock.mockImplementationOnce(async () => respond('"q1-4"'));
+    await api.quoteUpdate("job-1", { presentation: {} });
+    expect(lastHeaders()).toMatchObject({ "If-Match": '"q1-3"' });
+
+    // The save's own reply moved it on; a save that reports nothing keeps it.
+    fetchMock.mockImplementationOnce(async () => respond(null));
+    await api.quoteUpdate("job-1", { presentation: {} });
+    expect(lastHeaders()).toMatchObject({ "If-Match": '"q1-4"' });
+
+    // Another job's version is its own.
+    await api.quoteUpdate("job-2", { presentation: {} });
+    expect(lastHeaders()).not.toHaveProperty("If-Match");
+  });
+});

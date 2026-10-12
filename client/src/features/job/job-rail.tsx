@@ -24,7 +24,8 @@ export function JobRail({ detail, totals, paid, landed, selectedVersion, onPickV
 }) {
   const meta = detail.meta;
   const details = detail.jobState?.details;
-  const quoteTotals = detail.quote?.totals;
+  // The saved quote's totals come from its rows (customerPricing, #245).
+  const quoteTotals = detail.quote?.customerPricing ?? detail.quote?.totals;
   // Null when the server withholds amounts (pricing checks not passed): shown as "—".
   const subtotal = totals?.subtotal ?? quoteTotals?.subtotal ?? null;
   const gst = totals?.gst ?? quoteTotals?.gst ?? null;

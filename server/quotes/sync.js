@@ -145,6 +145,12 @@ export async function syncJobQuoteRows({
     for (const difference of shownDifferences) {
       failures.push({ kind: "totals", against: "shown", ...difference });
     }
+    // The rows must also print what the files print (#245): documents are
+    // rendered from them. A quote with no organizer (pre-organizer legacy)
+    // keeps printing from its files; its rows hold the money only.
+    if (!mapped.legacy && !mapped.printable) {
+      failures.push({ kind: "print", reason: "the rows would not print the schedule the files print", differences: mapped.printDifferences.slice(0, 5) });
+    }
     if (mapped.printedLines.length) {
       warnings.push({ kind: "line-total-printed", count: mapped.printedLines.length, lines: mapped.printedLines, reason: "line totals kept as printed, where quantity x rate does not give them" });
     }

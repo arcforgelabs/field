@@ -19,7 +19,7 @@ import { projectQuoteForReviewState } from "./quote-review-projection.js";
 import { buildAndWriteEvidencePack } from "./quote-evidence-pack.js";
 import { markQuoteBuilt, readQuoteLifecycle, recordQuotePipelineStageChange } from "./quote-lifecycle.js";
 import { buildRateCardFromPriceMaps } from "./retaining-wall-rate-card.js";
-import { getCustomerPresentationFinancials } from "./quote-presentation.js";
+import { quoteRowsFromArtifact } from "./quotes/read-model.js";
 import { applyQuoteIdentity, ensureQuoteIdentityMeta } from "./quote-identity.js";
 import { canonicalizeQuoteOverrides } from "./quote-commercial-adjustments.js";
 import { resolveQuoteCatalogIdFromMeta } from "./quote-catalog-ids.js";
@@ -588,8 +588,9 @@ async function buildAndPersistQuoteInPlace({
     quoteReviewStatus: quote.review?.status || quote.status,
     quoteStatus: "complete",
     quoteLineItemCount: quote.lineItems?.length || 0,
-    quoteSubtotal: getCustomerPresentationFinancials(quote).subtotal || 0,
-    quoteTotal: getCustomerPresentationFinancials(quote).total || quote.totals?.total || 0,
+    // The job's cached totals (the job list) come from the quote's rows (#245).
+    quoteSubtotal: quoteRowsFromArtifact({ quote, meta: identifiedMetaWithQuoteIdentity }).financials.subtotal || 0,
+    quoteTotal: quoteRowsFromArtifact({ quote, meta: identifiedMetaWithQuoteIdentity }).financials.total || quote.totals?.total || 0,
     quoteVersion: quote.version,
     // DEL-67: see preserveQuoteDeliveryState in pipeline.js for why this is
     // unconditional rather than gated on shouldForkSentQuote.

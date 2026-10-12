@@ -21,7 +21,14 @@
 //   components, engine breakdowns,      counted, because the row above
 //   rows under a fixed price)           carries the price
 //   "listed only" row                   its line, optional and not selected
-//   row excluded from the price         left out: the PDF does not print it
+//   row excluded from the price         its line, `isExcluded`: never printed
+//                                       and never counted (the editor keeps it)
+//
+// Each line and section also keeps what the documents print besides money
+// (#245): amount hidden or blank, collapsed, row style, how it is styled
+// (`rowKind`), the rate printed beside a fixed price (`displayUnitSell`), its
+// internal notes and cost. Sections and lines share one `sortOrder` sequence,
+// so the printed order of sections and top-level lines is kept.
 //
 // Every line keeps the quantity and unit it prints, its rate to four decimals
 // (the row's own rate, which the PDF prints rounded to cents) and, as its
@@ -39,7 +46,8 @@
 // on the quote (`taxTotalSource`); the caller passes the totals read from
 // that PDF as `printed`.
 import { createHash } from "node:crypto";
-import { getCustomerPresentationFinancials, getCustomerScheduleView } from "../quote-presentation.js";
+import { getCustomerPresentationFinancials, getCustomerScheduleItems, getCustomerScheduleView } from "../quote-presentation.js";
+import { comparePrintedSchedule, financialsFromRows, printedRate, scheduleFromRows } from "./schedule.js";
 import { partiesDetails } from "../documents/job-sources.js";
 import { centsToText, fixed, isHalfCentTax, lineTotalCents, quoteTotals, roundMoney, toCents, toScaled, unitSellForTotal } from "./totals.js";
 
@@ -196,16 +204,21 @@ export function mapQuoteArtifact({ quote, meta = null, customer = null, printed 
   let excludedRows = 0;
   let keySeq = 0;
   const nextKey = (prefix) => `${prefix}${(keySeq += 1)}`;
+  let order = 0;
+  const nextOrder = () => order++;
 
   const items = view.items || [];
-  const legacy = !view.organizer;
+  // A flat schedule with no organizer (pre-organizer data). An empty quote is
+  // not legacy: it prints nothing either way.
+  const legacy = !view.organizer && (view.items || []).length > 0;
   const roots = buildTree(legacy ? items.map((item) => ({ ...item, depth: 0 })) : items);
 
-  function baseLine(row, { lineType, sectionKey, parentKey }) {
+  function baseLine(row, { lineType, sectionKey, parentKey, excluded = false }) {
     const node = organizerNodes[row.nodeId] || null;
     const link = lineType === "note" ? null : catalogLink(node);
     return {
       key: nextKey("l"),
+      sortOrder: nextOrder(),
       sectionKey,
       parentKey,
       lineType,
@@ -229,7 +242,34 @@ export function mapQuoteArtifact({ quote, meta = null, customer = null, printed 
       isOptional: false,
       isSelected: true,
       sourceNodeId: text(row.nodeId) || text(row.code) || null,
+      // Display. An excluded row renders with its amount hidden; keep the
+      // row's own setting for the editor.
+      isExcluded: excluded,
+      showAmount: excluded ? node?.amountVisible !== false : row.amountVisible !== false,
+      amountBlank: row.amountBlank === true,
+      isCollapsed: row.collapsed === true,
+      rowStyle: ["branded", "bold", "normal"].includes(row.rowStyle) ? row.rowStyle : null,
+      notes: text(node?.notes),
+      rowKind: row.kind === "group" ? "group" : isGenerated(row) ? "generated" : "row",
+      displayUnitSell: null,
+      lineCost: excluded ? null : money(row.totalCost),
     };
+  }
+
+  // The rate a document prints: the renderer's unit price. When the line's
+  // unit sell, rounded the way the renderer rounds it, would print something
+  // else (a fixed price beside the row's original rate), keep the printed one.
+  function keepPrintedRate(line, row) {
+    if (line.unitSell === null || line.isExcluded) return;
+    const printed = finite(row.unitPrice);
+    if (printedRate(line.unitSell) !== printed) line.displayUnitSell = fixed(printed, 4);
+  }
+
+  // An excluded row's amount is never printed or counted: its total is
+  // quantity x its own rate, whatever the renderer zeroed.
+  function excludedTotal(line) {
+    if (line.unitSell === null) return;
+    line.lineTotal = centsToText(lineTotalCents(line.quantity, line.unitSell));
   }
 
   // The row's own rate, to four decimals: a manual row's typed rate (the PDF
@@ -278,27 +318,25 @@ export function mapQuoteArtifact({ quote, meta = null, customer = null, printed 
   }
 
   // Rows under a line that carries their price: shown, never counted.
-  function emitComponents(children, { sectionKey, parentKey }) {
+  function emitComponents(children, { sectionKey, parentKey, excluded = false }) {
     for (const child of children) {
-      if (child.row.excludedFromPrice) {
-        excludedRows += 1 + countDescendants(child);
-        continue;
-      }
-      const line = baseLine(child.row, { lineType: "component", sectionKey, parentKey });
+      const childExcluded = excluded || child.row.excludedFromPrice === true;
+      if (childExcluded) excludedRows += 1;
+      const line = baseLine(child.row, { lineType: "component", sectionKey, parentKey, excluded: childExcluded });
       if (child.row.kind === "group") Object.assign(line, { quantity: "1.0000", unitCode: "lot", unitSell: rate4(money(child.row.totalPrice)) });
-      settleTotal(line, child.row);
+      if (childExcluded) excludedTotal(line);
+      else {
+        settleTotal(line, child.row);
+        keepPrintedRate(line, child.row);
+      }
       lines.push(line);
-      emitComponents(child.children, { sectionKey, parentKey: line.key });
+      emitComponents(child.children, { sectionKey, parentKey: line.key, excluded: childExcluded });
     }
   }
 
-  function countDescendants(node) {
-    return node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
-  }
-
-  function emitPriced(node, { sectionKey, parentKey, lineType }) {
+  function emitPriced(node, { sectionKey, parentKey, lineType, excluded = false }) {
     const { row } = node;
-    const line = baseLine(row, { lineType, sectionKey, parentKey });
+    const line = baseLine(row, { lineType, sectionKey, parentKey, excluded });
     if (row.kind === "group") {
       Object.assign(line, { quantity: "1.0000", unitCode: "lot", unitSell: rate4(money(row.totalPrice)), unitCost: unitCostText(row.totalCost) });
     }
@@ -324,40 +362,55 @@ export function mapQuoteArtifact({ quote, meta = null, customer = null, printed 
       }
     }
     if (isListedOnly(row)) Object.assign(line, { isOptional: true, isSelected: false });
-    settleTotal(line, row, { fixedReason });
+    if (excluded) excludedTotal(line);
+    else {
+      settleTotal(line, row, { fixedReason });
+      keepPrintedRate(line, row);
+    }
     lines.push(line);
-    emitComponents(node.children, { sectionKey, parentKey: line.key });
+    emitComponents(node.children, { sectionKey, parentKey: line.key, excluded });
   }
 
-  function emit(node, { sectionKey = null, parentKey = null, topLevel = false }) {
+  function emit(node, { sectionKey = null, parentKey = null, topLevel = false, excluded: ancestorExcluded = false }) {
     const { row } = node;
-    if (row.excludedFromPrice) {
-      excludedRows += 1 + countDescendants(node);
-      return;
-    }
+    const excluded = ancestorExcluded || row.excludedFromPrice === true;
+    if (excluded) excludedRows += 1;
     if (legacy && row.kind === "component") {
       // Old flat schedules list a row's components after it, without depth.
       const owner = [...lines].reverse().find((line) => line.lineType !== "component" && line.lineType !== "note");
-      const line = baseLine(row, { lineType: "component", sectionKey, parentKey: owner?.key || parentKey });
-      settleTotal(line, row);
+      const line = baseLine(row, { lineType: "component", sectionKey, parentKey: owner?.key || parentKey, excluded });
+      if (excluded) excludedTotal(line);
+      else settleTotal(line, row);
       lines.push(line);
       return;
     }
     if (row.kind === "group") {
-      const transparent = !hasOverride(row) && !isListedOnly(row)
+      const transparent = !hasOverride(row) && !isListedOnly(row) && typeof row.costOverride !== "number"
         && (legacy || countedChildrenCents(node) === contributionCents(row));
       if (!transparent) {
-        emitPriced(node, { sectionKey, parentKey, lineType: "custom" });
+        emitPriced(node, { sectionKey, parentKey, lineType: "custom", excluded });
         return;
       }
+      const groupNode = organizerNodes[row.nodeId] || null;
       if (topLevel) {
         const key = nextKey("s");
-        sections.push({ key, title: text(row.label) || "Group", sortOrder: sections.length, showSubtotal: row.amountVisible !== false, sourceNodeId: text(row.nodeId) });
-        for (const child of node.children) emit(child, { sectionKey: key, parentKey: null });
+        sections.push({
+          key,
+          title: text(row.label) || "Group",
+          sortOrder: nextOrder(),
+          showSubtotal: excluded ? groupNode?.amountVisible !== false : row.amountVisible !== false,
+          sourceNodeId: text(row.nodeId),
+          isExcluded: excluded,
+          amountBlank: row.amountBlank === true,
+          isCollapsed: row.collapsed === true,
+          rowStyle: ["branded", "bold", "normal"].includes(row.rowStyle) ? row.rowStyle : null,
+          notes: text(groupNode?.notes),
+        });
+        for (const child of node.children) emit(child, { sectionKey: key, parentKey: null, excluded });
         return;
       }
       const note = {
-        ...baseLine(row, { lineType: "note", sectionKey, parentKey }),
+        ...baseLine(row, { lineType: "note", sectionKey, parentKey, excluded }),
         quantity: "1.0000",
         unitCode: "lot",
         unitCost: null,
@@ -366,23 +419,23 @@ export function mapQuoteArtifact({ quote, meta = null, customer = null, printed 
         itemUid: null,
         priceUid: null,
         priceKey: null,
+        lineCost: null,
       };
       lines.push(note);
-      for (const child of node.children) emit(child, { sectionKey, parentKey: note.key });
+      for (const child of node.children) emit(child, { sectionKey, parentKey: note.key, excluded });
       return;
     }
     if (isGenerated(row) && !legacy) {
       // A generated row that is not under its owner (the owner was removed
       // or moved): it still prints and counts on its own.
-      emitPriced(node, { sectionKey, parentKey, lineType: "custom" });
+      emitPriced(node, { sectionKey, parentKey, lineType: "custom", excluded });
       return;
     }
-    emitPriced(node, { sectionKey, parentKey, lineType: rowLineType(row) });
+    emitPriced(node, { sectionKey, parentKey, lineType: rowLineType(row), excluded });
   }
 
   for (const root of roots) emit(root, { topLevel: true });
 
-  lines.forEach((line, index) => { line.sortOrder = index; });
   const computed = quoteTotals(lines);
   const shown = shownTotals(quote);
   const totals = { subtotal: computed.subtotal, taxTotal: computed.taxTotal, total: computed.total };
@@ -412,7 +465,16 @@ export function mapQuoteArtifact({ quote, meta = null, customer = null, printed 
     taxTotalSource,
     taxTotalReason,
   };
-  return { header, sections, lines, shown, totals, unpriced: computed.unpriced, printedLines, excludedRows };
+  const mapped = { header, sections, lines, shown, totals, unpriced: computed.unpriced, printedLines, excludedRows, legacy };
+  // Whether the rows print exactly what the renderer prints (#245): only an
+  // organizer quote can be printed from its rows.
+  mapped.printDifferences = legacy ? null : comparePrintedSchedule(scheduleFromRows(mapped), getCustomerScheduleItems(quote));
+  // The job's cost (shown to the operator, never printed) must come out the same too.
+  const rowsCost = financialsFromRows(mapped).cost;
+  const filesCost = Math.round(Number(getCustomerPresentationFinancials(quote).cost || 0) * 100) / 100;
+  if (!legacy && rowsCost !== filesCost) mapped.printDifferences.push({ field: "cost", rows: rowsCost, renderer: filesCost });
+  mapped.printable = !legacy && mapped.printDifferences.length === 0;
+  return mapped;
 }
 
 /**

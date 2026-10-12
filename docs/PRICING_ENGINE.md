@@ -15,9 +15,11 @@ is built yet unless it says so. Pricing configuration names items by uid
 with the code as fallback (step 4). The price book clean-up (step 5) is a
 boot data migration behind the price-equality gate, and MCP answers carry no
 item codes (step 6; HTTP on request, by default once the app stops reading
-them). Phase 3 step 3 part one is built too: every quote version is also
-written as `quotes`, `quote_sections` and `quote_lines` rows and checked
-against what Field shows, while the files stay the source of truth.
+them). Phase 3 step 3 parts one and two are built too: every quote version
+is also written as `quotes`, `quote_sections` and `quote_lines` rows and
+checked against what Field shows, and the quote PDF, the quote email's
+totals, the job's totals and the API and MCP customer pricing are read from
+those rows, while the files are still written alongside.
 
 The owner's six decisions of 2026-10-12 (#178, from the document audit) are
 recorded where they change the design: credit notes ("Invoices and
@@ -860,7 +862,8 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 2 | The document store and issue service (#223): `document_blobs`, `issued_documents`, `document_events`, `document_number_counters`; dual-write from today's send path; backfill; `GET /api/documents/:uid/pdf` and `GET /api/jobs/:id/documents` | Built |
 | 2b | The old PDF routes (`/api/jobs/:id/quote-pdf`, `/milestones/:index/pdf`) serve issued documents from the tables; the issuance ledger and the legacy sent-quote lookup are no longer read | Next |
 | 3, part one | Quotes as rows (#241): `quotes`, `quote_sections`, `quote_lines` (migration 0010), one `quoteTotals`, the quote service, dual-write after every committed quote change, and a backfill that verifies every version to the cent | Built |
-| 3, part two | The quote editor, PDFs and MCP read quote rows; quote numbers from `document_number_counters` | Next |
+| 3, part two | Quote reads from rows (#245): display columns (migration 0011); the quote PDF, the quote email's totals, the job's cached totals and the job detail's customer pricing (client and MCP) come from the rows; editor saves carry `If-Match` | Built |
+| 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
 | 4 | Invoices, credit notes, payments and receipts as rows; `INV-YYYY-MM-N` numbers allocated at issue; claim-line milestone invoices and milestone rules (#239) | Later |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
@@ -939,3 +942,43 @@ stay the source of truth, and nothing reads the rows yet.
   reaches) all reproduce. What still fails a check is a version whose files
   disagree with the PDF that was sent, which the backfill reports and never
   writes.
+
+How step 3 part two reads the quote tables (`server/quotes/read-model.js`,
+`schedule.js`, `concurrency.js`). The files are still written alongside.
+
+- **Display columns** (migration 0011). Lines and sections also keep what
+  the documents print besides money: excluded from the price (kept, never
+  printed or counted), amount hidden or blank, collapsed, row style and
+  notes; lines also how the PDF styles them (`row_kind`), the rate printed
+  beside a fixed price (`display_unit_sell`) and the cost behind the amount
+  (`line_cost`, internal). Sections and lines share one `sort_order`
+  sequence, so the printed order of sections and top-level lines is kept.
+- **Printed only when exact.** The dual-write and the backfill now also
+  check that a version's rows print exactly the schedule its files print
+  (every printed row's label, depth, quantity, unit, rate, amount, style
+  and visibility, and the cost); a version that would not is not written. A
+  sent version written before 0011 keeps its rows and is never printed from
+  them (its PDF is its issued copy anyway).
+- **Where a read comes from.** The version's rows in the database when they
+  were written from the same files under the current mapping; otherwise the
+  rows the files map to (the same rows the dual-write stores; a quote being
+  built renders before its rows are committed); otherwise the files.
+  `FIELD_QUOTE_READS=files` sends every read to the files, for rollback.
+  Reads are counted by source under `quoteReads` in
+  `GET /api/storage/status`.
+- **What reads them.** The quote PDF (built, previewed and sent; invoices
+  and receipts still print the quote's schedule from the files until they
+  are rows), the quote email's totals, the job's cached totals (the job
+  list), and the job detail's `customerPricing`, which the client and the
+  MCP quote tool read.
+- **Saves.** `GET /api/jobs/:id` and every quote save answer with
+  `X-Field-Quote-Rows-Version` (`"q<version>-<lock>"`). The editor sends it
+  back as `If-Match` on `POST /api/jobs/:id/quote-update`; a save against
+  rows that moved on since is refused with 412 (`QUOTE_ROWS_CHANGED`)
+  inside the job's mutation lock. A request without `If-Match` (CLI, MCP) is
+  not checked. The save is written to the rows through the quote service
+  before the response, which says so in `X-Field-Quote-Rows`.
+- **Not yet.** The editor still edits the organizer tree in the browser:
+  its engine rows point at engine line items that rows do not carry until
+  the engine goes (phase 4). It reads its saved totals from the rows
+  through the job detail. Editing rows directly is part three.

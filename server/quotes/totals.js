@@ -154,6 +154,7 @@ export function isHalfCentTax(base, taxRatePercent) {
 export function isCountedLine(line) {
   return COUNTED_LINE_TYPES.includes(line?.lineType)
     && line?.isSelected !== false
+    && line?.isExcluded !== true
     && line?.unitSell !== null && line?.unitSell !== undefined && line?.unitSell !== "";
 }
 
@@ -195,7 +196,7 @@ export function quoteTotals(lines) {
     if (line?.lineType === "note") return { lineTotal: "0.00", counted: false };
     const total = resolveLineTotal(line);
     if (total === null) {
-      if (COUNTED_LINE_TYPES.includes(line?.lineType) && line?.isSelected !== false) unpriced.push(index);
+      if (COUNTED_LINE_TYPES.includes(line?.lineType) && line?.isSelected !== false && line?.isExcluded !== true) unpriced.push(index);
       return { lineTotal: null, counted: false };
     }
     if (line?.lineTotalSource !== "printed" && hasValue(line?.lineTotal) && toCents(line.lineTotal) !== total) inconsistent.push(index);

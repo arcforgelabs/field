@@ -78,6 +78,13 @@
       "when": 1791783947685,
       "tag": "0010_quote_rows",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791784747969,
+      "tag": "0011_quote_row_display",
+      "breakpoints": true
     }
   ]
 }

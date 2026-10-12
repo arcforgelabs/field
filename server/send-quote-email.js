@@ -12,6 +12,7 @@ import {
   resolveJobDocumentType,
 } from "./job-documents.js";
 import { renderQuoteEmailHtml } from "./quote-email-template.js";
+import { loadQuoteRows } from "./quotes/read-model.js";
 
 const _gmailClients = new Map();
 const _gmailProfiles = new Map();
@@ -299,9 +300,12 @@ async function performSendQuoteEmail({
   const quoteCatalog = quote.quoteCatalog || quote.profile || {};
   const deliveryDefaults = quoteCatalog.deliveryDefaults || {};
   const biz = applyBusinessProfileOverride(quoteCatalog.businessProfile || {});
+  // A quote email's totals come from the quote's rows (#245).
+  const rowsView = resolvedDocumentType === "quote" ? await loadQuoteRows({ quote, meta }) : null;
   const htmlBody = buildEmailHtml({
     meta,
     quote,
+    totals: rowsView?.financials || null,
     biz,
     deliveryDefaults,
     fromName: sender.fromName,
@@ -606,6 +610,7 @@ function buildEmailHtml({
   customBody = null,
   documentType = "quote",
   themeFontFamily = null,
+  totals = null,
 }) {
   const clientName = meta.clientName || meta.client?.name || null;
   const jobTitle = meta.title || meta.label || null;
@@ -639,9 +644,9 @@ function buildEmailHtml({
     quoteDate,
     validDays,
     lineItems: [],
-    subtotal: quote.totals?.subtotal,
-    gst: quote.totals?.gst,
-    total: quote.totals?.total,
+    subtotal: totals ? totals.subtotal : quote.totals?.subtotal,
+    gst: totals ? totals.gst : quote.totals?.gst,
+    total: totals ? totals.total : quote.totals?.total,
     companyName: biz.tradingName || fromName || installationBusinessName(),
     companyAbn: biz.abn || null,
     companyAddress: biz.address || null,

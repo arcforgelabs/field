@@ -1,4 +1,4 @@
-import { getCustomerPresentationFinancials } from "./quote-presentation.js";
+import { quoteRowsFromArtifact } from "./quotes/read-model.js";
 import { preserveQuoteDeliveryState } from "./pipeline.js";
 
 /**
@@ -30,8 +30,8 @@ export function buildWallQuoteMeta({
     quoteReviewStatus: quoteFromModel.review?.status || quoteFromModel.status,
     quoteStatus: "complete",
     quoteLineItemCount: quoteFromModel.lineItems?.length || 0,
-    quoteSubtotal: getCustomerPresentationFinancials(quoteFromModel).subtotal || 0,
-    quoteTotal: getCustomerPresentationFinancials(quoteFromModel).total || quoteFromModel.totals?.total || 0,
+    quoteSubtotal: quoteRowsFromArtifact({ quote: quoteFromModel, meta: jobMeta }).financials.subtotal || 0,
+    quoteTotal: quoteRowsFromArtifact({ quote: quoteFromModel, meta: jobMeta }).financials.total || quoteFromModel.totals?.total || 0,
     quoteVersion: quoteFromModel.version,
     ...preserveQuoteDeliveryState(jobMeta),
     jobNumber: quoteFromModel.jobNumber || jobMeta?.jobNumber || null,
