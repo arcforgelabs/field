@@ -28,6 +28,7 @@ import {
 } from "./quote-version-context.js";
 import { resolveActiveJobGeneration, resolveWritableJobGeneration, runAtomicJobGeneration } from "./job-generation.js";
 import { isIssuedQuoteVersion } from "./quote-pricing-attestation.js";
+import { countFieldMetric } from "./observability/sentry.js";
 import { findAnyIssuedDocument, readQuoteIssuanceLedger } from "./quote-issuance.js";
 import { applyBusinessProfileOverride, businessDisplayName, configuresBusinessName } from "./business-profile.js";
 import { loadQuoteRows } from "./quotes/read-model.js";
@@ -885,7 +886,22 @@ async function buildQuoteVersionEntry({ baseDir, fallbackLabel }) {
 // PDF GENERATION
 // ═══════════════════════════════════════════════════════════════════════
 
-export async function generateQuotePdfBuffer({
+export async function generateQuotePdfBuffer(options) {
+  try {
+    return await renderQuotePdfBuffer(options);
+  } catch (error) {
+    let documentType = "unknown";
+    try {
+      documentType = resolveJobDocumentType({ meta: options?.meta, documentType: options?.documentType ?? null }) || "unknown";
+    } catch {
+      // The count must not replace the rendering error.
+    }
+    countFieldMetric("field.pdf.generation_failed", { document_type: documentType });
+    throw error;
+  }
+}
+
+async function renderQuotePdfBuffer({
   meta,
   quote,
   images,

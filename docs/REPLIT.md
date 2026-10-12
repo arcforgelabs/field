@@ -489,6 +489,121 @@ connections stay Field-issued. `FIELD_TOKEN` becomes the owner's break-glass
 key. The cutover checklist, roles, the owner gate and break-glass are in
 `docs/CLERK_SIGN_IN.md`.
 
+## Error monitoring (Sentry)
+
+With `SENTRY_DSN` set, Field reports to a Sentry project: errors, a replay
+of what the operator saw, traces, server logs, a few counters, and problem
+reports the operator sends from the app. One setting covers the server and
+the browser. Without `SENTRY_DSN` nothing is loaded and nothing is sent, so
+an installation that does not set it sends nothing anywhere. Use a Sentry
+account that belongs to the business that runs the installation; the free
+Developer plan is enough.
+
+What is reported:
+
+- Server errors: every 5xx answer (most routes catch their own errors and
+  answer `{ error }`; these are grouped by method, route and status), errors
+  that reach Express's error handler, uncaught exceptions and unhandled
+  rejections, and failed scheduled emails (tag `field.area:
+  scheduled-email`).
+- Browser errors: uncaught errors and errors the app's error boundary
+  catches, except the stale-chunk errors an open tab hits after a publish (it
+  reloads instead).
+- Session replay: a masked recording of the screen (below). Sentry raises
+  rage clicks (several fast clicks on something that does not respond) and
+  dead clicks (no response within 7 seconds) as issues from it.
+- Traces: page loads and navigations with Web Vitals, including INP (how long
+  the screen takes to respond to a click), and Express routes on the server.
+  Trace headers go only to Field's own origin. `/health` and static files are
+  not traced.
+- Logs: the server's console output, scrubbed like errors.
+- Counters: `field.document.issued`, `field.document.delivery_failed` and
+  `field.pdf.generation_failed`, by document type.
+- Problem reports: a small button in the corner opens "Report a problem".
+  It asks for no name or email; a screenshot is optional, and the operator can
+  crop or black out parts of it before sending.
+
+What never leaves (`shared/sentry-scrub.js`, used by both halves, on errors,
+transactions, breadcrumbs and logs): request bodies, cookies, headers other
+than User-Agent, query strings (sign-in tokens can travel in one), the user,
+console breadcrumbs, local variables, and any value under a key that names a
+customer, contact, address, title, note, bank or credential. Free text
+(error messages, log lines, URLs, file paths) is rewritten: email addresses,
+Australian phone numbers, BSBs and query strings become placeholders, and job
+folder or route segments that are not UUIDs (older job folders were named
+after the site address) become `[job]`. A name or street typed into free text
+cannot be recognised reliably, so keep customer details out of log and error
+messages. Replays mask all text and inputs, mask `title`, `aria-label`, `alt`
+and similar attributes, block images, frames, canvases, contact links, job
+links and links with a query string, and record no network detail. A problem
+report's message and screenshot are sent as the operator wrote and took them.
+
+Free-plan limits: the Developer plan stores about 5,000 errors, 50 replays,
+5 million spans and 5 GB of logs a month. Field sends the same error at most
+once an hour and at most 20 errors an hour in all (per server, and per open
+browser tab), so one repeating failure cannot use up the month. The default
+sample rates below fit a handful of users.
+
+### Settings
+
+Set these as the deployment's **Secrets** on the **published app only**
+(Publishing > Adjust settings), for the same reason as the R2 settings: a
+deployment Configuration is written into `.replit` and committed.
+
+| Name | Value |
+| --- | --- |
+| `SENTRY_DSN` | The Sentry project's DSN (Project settings > Client Keys). A DSN only lets a client send events; Field hands it to the browser in the page |
+| `SENTRY_ENVIRONMENT` | Unset on Replit: the published app reports `production` and the workspace `replit-workspace`. Set it only to override both |
+| `SENTRY_RELEASE` | Unset. Each build records its git commit (below), which becomes the release |
+| `SENTRY_TRACES_SAMPLE_RATE` | Unset: `0.2` (about one page load or request in five). From 0 to 1 |
+| `SENTRY_REPLAYS_SESSION_SAMPLE_RATE` | Unset: `0.05` (one session in twenty is recorded). From 0 to 1 |
+| `SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE` | Unset: `1` (every session that hits an error keeps its replay). From 0 to 1 |
+| `SENTRY_LOGS` | Unset: on. `0` stops sending server logs |
+| `SENTRY_METRICS` | Unset: on. `0` stops the counters |
+| `SENTRY_FEEDBACK` | Unset: on. `0` hides the "Report a problem" button |
+| `SENTRY_VERIFY` | `1` for one publish only: boot sends `Field Sentry verification (server)`. Remove it at the next publish, or every restart sends another |
+
+The defaults are sized for the free plan from the start, including during a
+Sentry trial, so nothing needs changing when a trial ends. Raise the rates
+only on a paid plan.
+
+If the workspace also gets `SENTRY_DSN` (Replit's Secrets page feeds both),
+its events are tagged `replit-workspace`, never `production`, as long as
+`SENTRY_ENVIRONMENT` is unset. Limit the Sentry alert rule to the
+`production` environment so workspace errors do not send email.
+
+Start-up: `scripts/replit-start.sh` and `npm start` run
+`node --import ./server/observability/instrument.js server/index.js`, so
+Sentry starts before Express loads and can name traces by route. Started
+without it (the Docker image), Sentry starts during boot: errors, logs and
+request traces still arrive, without route names. Profiling
+(`@sentry/profiling-node`) is not included: it needs a native binary in every
+build, and tracing already shows which routes are slow.
+
+Releases: `scripts/replit-build.sh` writes the build's commit to
+`.field-revision` (the last commit that changed files, so Replit's empty
+"Published your App" commits are skipped), and `scripts/replit-start.sh`
+exports it as `FIELD_REVISION`. Server and browser events carry it as their
+release. The client bundle ships public source maps, so Sentry reads browser
+stack traces against the real source with no upload token.
+
+### Checking it after publishing
+
+1. `GET /health` shows `sentry.enabled: true`, the `environment` and the
+   `release` (a commit on `main`). `release: null` means the build could not
+   read its commit; events still arrive, without a release.
+2. With `SENTRY_VERIFY=1`, the server's verification error is in Sentry
+   within a minute of `/health` answering.
+3. Browser: open the app, open the browser's developer console and run
+   `setTimeout(() => { throw new Error("Field Sentry verification (browser)") })`.
+   It arrives with the same environment and release, and a replay.
+4. Resolve both verification issues in Sentry, then remove `SENTRY_VERIFY`
+   at the next publish.
+
+Alert rules (who hears about a new issue or a spike) live in the Sentry
+project, not in this repository. Nothing is posted to this repository's
+issues automatically; see issue #46 for how maintainers triage Sentry issues.
+
 ## Publishing
 
 Publish as a Reserved VM (Field sends scheduled emails in-process, so it must
@@ -528,7 +643,8 @@ To deploy a change merged on GitHub:
 
 Production secrets (Publishing > Adjust settings) are separate from the
 workspace's: `FIELD_STORAGE=postgres`, `FIELD_CONFIG_JSON`, the Clerk keys,
-and the R2 replica's settings ("Issued documents in R2").
+the R2 replica's settings ("Issued documents in R2") and Sentry's ("Error
+monitoring (Sentry)").
 Replit's managed Clerk also sets `CLERK_PROXY_URL` (`/api/__clerk`); Field
 serves Clerk's Frontend API on that path (`server/auth/clerk-proxy.js`), so
 sign-in loads from the app's own origin.

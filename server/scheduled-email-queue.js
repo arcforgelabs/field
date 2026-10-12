@@ -3,6 +3,7 @@ import { existsSync } from "./storage/fs.js";
 import { mkdir, open, readFile, readdir, rename, rm, writeFile } from "./storage/fs-promises.js";
 import { basename, join } from "node:path";
 import { flushDurableStorage, flushDurableStorageQuietly } from "./storage/durable-hooks.js";
+import { reportBackgroundError } from "./observability/sentry.js";
 
 const QUEUE_DIR = ".scheduled-emails";
 const MAX_ATTEMPTS = 3;
@@ -499,9 +500,11 @@ export async function processDueScheduledEmails({ dataDir, processEmail, logger 
           lastError: error?.message || "scheduled email failed",
         });
         logger.error?.(`[scheduled-email] ${record.id} failed: ${error?.message || error}`);
+        reportBackgroundError(error, { area: "scheduled-email", stage: "send", willRetry: retryable });
       }
     } catch (error) {
       logger.error?.(`[scheduled-email] could not read or update ${name}: ${error?.message || error}`);
+      reportBackgroundError(error, { area: "scheduled-email", stage: "queue" });
     } finally {
       await handle?.close();
       await rm(lockPath, { force: true }).catch(() => {});
@@ -532,6 +535,7 @@ export async function startScheduledEmailScheduler({
       await processDueScheduledEmails({ dataDir, processEmail, logger });
     } catch (error) {
       logger.error?.(`[scheduled-email] scheduler failed: ${error.message}`);
+      reportBackgroundError(error, { area: "scheduled-email", stage: "scheduler" });
     } finally {
       // Scheduler tick: store whatever background work wrote.
       await flushDurableStorageQuietly({ reason: "scheduler tick", logger });

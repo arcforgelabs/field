@@ -12,6 +12,7 @@ import {
   receiptDocumentNumber,
 } from "./job-sources.js";
 import { issuedDocumentRecorder } from "./recorder.js";
+import { countFieldMetric } from "../observability/sentry.js";
 
 function numberOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -85,6 +86,7 @@ export async function recordDeliveredDocument({ finalization, issuance }) {
     const pdfBytes = finalization.pendingArtifacts?.quotePdf || finalization.quotePdfBuffer || null;
     const result = finalization.result || {};
     const sentAt = issuance?.issuedAt || finalization.quoteSentAt;
+    countFieldMetric("field.document.issued", { document_type: documentType });
     return await recorder.recordDelivery({
       jobId: finalization.preparedMeta?.id,
       documentType,
@@ -117,6 +119,7 @@ export async function recordDeliveredDocument({ finalization, issuance }) {
 /** The email for a prepared attempt failed (or its outcome is unknown). */
 export async function recordFailedDelivery({ attempt, documentType, error, outcome, user = null, at = new Date().toISOString() }) {
   const recorder = issuedDocumentRecorder();
+  countFieldMetric("field.document.delivery_failed", { document_type: documentType || "unknown", outcome: String(outcome || "unknown") });
   try {
     const version = attempt?.selectedVersion || attempt?.quoteVersion || attempt?.preparedQuote?.version || null;
     const described = describeDeliveredDocument({
