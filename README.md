@@ -27,7 +27,7 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `LICENSE` | MIT licence |
 | `ARCHITECTURE.md` | How Field is built: system boundary, storage, generations, quote engine, deployment |
 | `DESIGN.md` | The design system: tokens, components, light and dark mode |
-| `docs/REPLIT.md` | Running, publishing and storing data for an installation on Replit |
+| `docs/REPLIT.md` | Running, publishing, storing data and monitoring errors for an installation on Replit |
 | `docs/PRICING_ENGINE.md` | Target data model for the price book, quotes and invoices |
 | `docs/CLERK_SIGN_IN.md` | Clerk sign-in runbook and cutover |
 | `docs/GMAIL_SENDING.md` | How quote and invoice email is sent, and how to restore sending |

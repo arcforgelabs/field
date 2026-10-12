@@ -14,9 +14,10 @@ import { ensureThemeStylesheet } from "@/lib/color-mode";
 // put the chosen family and mode on <html>.
 ensureThemeStylesheet();
 
+// Errors the ErrorBoundary catches are reported there (it skips stale-chunk
+// errors after a deploy), so onCaughtError would report each one twice.
 createRoot(document.getElementById("root")!, {
   onUncaughtError: reactErrorHandler(),
-  onCaughtError: reactErrorHandler(),
   onRecoverableError: reactErrorHandler(),
 }).render(
   <StrictMode>

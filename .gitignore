@@ -20,3 +20,6 @@ __pycache__/
 # Replit
 attached_assets/
 .local/
+
+# Build revision written by scripts/replit-build.sh
+.field-revision

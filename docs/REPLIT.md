@@ -422,6 +422,76 @@ connections stay Field-issued. `FIELD_TOKEN` becomes the owner's break-glass
 key. The cutover checklist, roles, the owner gate and break-glass are in
 `docs/CLERK_SIGN_IN.md`.
 
+## Error monitoring (Sentry)
+
+With `SENTRY_DSN` set, Field reports errors to a Sentry project: the server's
+and the browser's, from the one setting.
+
+What is reported:
+
+- Server: every 5xx answer (most routes catch their own errors and answer
+  `{ error }`; these are grouped by method, route and status), errors that
+  reach Express's error handler, uncaught exceptions and unhandled
+  rejections, and failed scheduled emails (tag `field.area:
+  scheduled-email`).
+- Browser: uncaught errors and errors the app's error boundary catches,
+  except the stale-chunk errors an open tab hits after a publish (it reloads
+  instead). Each browser error carries a replay of the moments before it.
+
+What never leaves (`shared/sentry-scrub.js`, used by both halves): request
+bodies, cookies, headers other than User-Agent, query strings (sign-in tokens
+can travel in one), the user, console lines, local variables, and any value
+under a key that names a customer, contact, address, title, note, bank or
+credential. Error messages, URLs and file paths are rewritten: email
+addresses, Australian phone numbers, BSBs and query strings become
+placeholders, and job folder or route segments that are not UUIDs (older job
+folders were named after the site address) become `[job]`. Replays mask all
+text and inputs, mask `title`, `aria-label`, `alt` and similar attributes,
+block images, frames, canvases, contact links, job links and links with a
+query string, and record no network detail. Replays are kept only for
+sessions with an error. Tracing is off.
+
+### Settings
+
+Set these as the deployment's **Secrets** on the **published app only**
+(Publishing > Adjust settings), for the same reason as the R2 settings: a
+deployment Configuration is written into `.replit` and committed.
+
+| Name | Value |
+| --- | --- |
+| `SENTRY_DSN` | The Sentry project's DSN (Project settings > Client Keys). A DSN only lets a client send events; Field hands it to the browser in the page |
+| `SENTRY_ENVIRONMENT` | `production` |
+| `SENTRY_RELEASE` | Unset. Each build records its git commit (below), which becomes the release |
+| `SENTRY_TRACES_SAMPLE_RATE` | Unset (no tracing). A number from 0 to 1 turns it on |
+| `SENTRY_VERIFY` | `1` for one publish only: boot sends `Field Sentry verification (server)`. Remove it at the next publish, or every restart sends another |
+
+Leave `SENTRY_DSN` out of the workspace's Secrets. If the workspace does get
+one, its events are tagged `replit-workspace`, never `production`, unless
+`SENTRY_ENVIRONMENT` says otherwise.
+
+Releases: `scripts/replit-build.sh` writes the build's commit to
+`.field-revision` (the last commit that changed files, so Replit's empty
+"Published your App" commits are skipped), and `scripts/replit-start.sh`
+exports it as `FIELD_REVISION`. Server and browser events carry it as their
+release. The client bundle ships public source maps, so Sentry reads browser
+stack traces against the real source with no upload token.
+
+### Checking it after publishing
+
+1. `GET /health` shows `sentry.enabled: true`, the `environment` and the
+   `release` (a commit on `main`). `release: null` means the build could not
+   read its commit; events still arrive, without a release.
+2. With `SENTRY_VERIFY=1`, the server's verification error is in Sentry
+   within a minute of `/health` answering.
+3. Browser: open the app, open the browser's developer console and run
+   `setTimeout(() => { throw new Error("Field Sentry verification (browser)") })`.
+   It arrives with the same environment and release.
+4. Resolve both verification issues in Sentry, then remove `SENTRY_VERIFY`
+   at the next publish.
+
+Alert rules (who hears about a new issue or a spike) live in the Sentry
+project, not in this repository.
+
 ## Publishing
 
 Publish as a Reserved VM (Field sends scheduled emails in-process, so it must
@@ -461,7 +531,8 @@ To deploy a change merged on GitHub:
 
 Production secrets (Publishing > Adjust settings) are separate from the
 workspace's: `FIELD_STORAGE=postgres`, `FIELD_CONFIG_JSON`, the Clerk keys,
-and the R2 replica's settings ("Issued documents in R2").
+the R2 replica's settings ("Issued documents in R2") and Sentry's ("Error
+monitoring (Sentry)").
 Replit's managed Clerk also sets `CLERK_PROXY_URL` (`/api/__clerk`); Field
 serves Clerk's Frontend API on that path (`server/auth/clerk-proxy.js`), so
 sign-in loads from the app's own origin.

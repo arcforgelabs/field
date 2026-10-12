@@ -46,8 +46,9 @@ import { applyStoredGmailOAuthUsers, saveGmailOAuthUser } from "./gmail-oauth-st
 import { hasGoogleServiceAccountKey } from "./google-service-account.js";
 import {
   initFieldSentry,
-  isSentryEnabled,
-  sentryDsnBootstrapScript,
+  sentryBrowserBootstrapScript,
+  sentryErrorResponseReporter,
+  sentryPublicStatus,
   setupSentryExpress,
 } from "./observability/sentry.js";
 import { assertCommit, assertDigest, assertVerificationConfig } from "../scripts/verification/contract.js";
@@ -583,13 +584,15 @@ if (TRUST_PROXY.value !== false) {
   app.set("trust proxy", TRUST_PROXY.value);
   console.log(`[field] trust proxy: ${TRUST_PROXY.value} (${TRUST_PROXY.source})`);
 }
+// First, so every 5xx answer below is reported (server/observability/sentry.js).
+app.use(sentryErrorResponseReporter());
 // Before durable storage and the body parsers: Clerk needs the raw request body.
 if (clerkProxyMount) app.use(clerkProxyMount.path, clerkProxyMount.handler);
 if (durableStorage) app.use(durableStorage.middleware());
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    sentry: { enabled: isSentryEnabled() },
+    sentry: sentryPublicStatus(),
     // Public: storage state only. Counts, timestamps and the last error are
     // admin-only (GET /api/storage/status). The R2 replica (#12) reports its
     // state, pending count, oldest pending age and last error code.
@@ -625,7 +628,7 @@ const clientDist = join(import.meta.dirname, "../client/dist");
 const clientIndex = join(clientDist, "index.html");
 function sendClientIndex(res) {
   let html = readFileSync(clientIndex, "utf8");
-  const snippet = sentryDsnBootstrapScript();
+  const snippet = sentryBrowserBootstrapScript();
   if (snippet) {
     html = html.includes("</head>")
       ? html.replace("</head>", `${snippet}</head>`)
