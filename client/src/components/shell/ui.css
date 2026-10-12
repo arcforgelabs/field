@@ -739,6 +739,7 @@ html[data-theme="field"][data-mode] .fx-table th, html[data-theme="field"][data-
 .fx-composer__subject--masked { color: transparent; }
 .fx-subject__mirror { position: absolute; inset: 0; display: flex; align-items: center; gap: 0; pointer-events: none; overflow: hidden; white-space: pre; color: var(--t-text); font: 600 14px var(--t-body); }
 .fx-subject__field { padding: 1px 6px; margin: 0 1px; border-radius: 4px; background: color-mix(in srgb, var(--t-accent) 14%, transparent); text-decoration: underline dotted color-mix(in srgb, var(--t-accent) 70%, transparent); text-underline-offset: 3px; }
+@media (max-width: 600px), (pointer: coarse) { .fx-subject__mirror { font-size: 16px; } }
 .fx-composer__check { margin: 8px 14px 0; }
 .fx-rcpt { position: relative; }
 .fx-rcpt__chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; align-items: center; }

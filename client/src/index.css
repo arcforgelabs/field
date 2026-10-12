@@ -97,12 +97,14 @@
   html {
     @apply font-sans;
     -webkit-font-smoothing: antialiased;
-    touch-action: pan-x pan-y;
+    /* manipulation keeps pinch-zoom (WCAG 1.4.4) and drops double-tap zoom. */
+    touch-action: manipulation;
     -webkit-text-size-adjust: 100%;
   }
-  /* Prevent iOS Safari auto-zoom on input focus (font-size < 16px triggers zoom) */
-  @supports (-webkit-touch-callout: none) {
-    input, textarea, select {
+  /* Phones and tablets: iOS Safari zooms in on a focused field below 16px.
+     The subject chips in ui.css (.fx-subject__mirror) follow this size. */
+  @media (max-width: 600px), (pointer: coarse) {
+    input, textarea, select, [contenteditable="true"] {
       font-size: 16px !important;
     }
   }
