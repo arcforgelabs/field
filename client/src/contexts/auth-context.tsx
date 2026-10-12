@@ -34,6 +34,7 @@ export const DEFAULT_UI: UiConfig = {
   deploymentTheme: "gohub",
   workerDisplayName: "Agent",
   assistantDisplayName: "",
+  businessName: "",
 };
 
 export function createAuthSessionScope(_token: string): object {

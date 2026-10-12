@@ -41,7 +41,9 @@ import { ensureVerificationFixtureState } from "../scripts/verification/start.js
 import { uploadMoasureBatchToDrive, getDriveClient } from "./drive-upload.js";
 import {
   DEFAULT_QUOTE_CATALOG_ID,
+  configureBusinessProfile,
   getCommercialAuthorityStatus,
+  getQuoteCatalog,
   hasQuoteCatalog,
   listQuoteCatalogs,
   readQuoteCatalogReference,
@@ -232,6 +234,11 @@ try {
     VERIFICATION_IMAGE_DIGEST = assertDigest(process.env.FIELD_IMAGE_DIGEST, "FIELD_IMAGE_DIGEST");
     VERIFICATION_FIELD_REVISION = assertCommit(process.env.FIELD_REVISION, "FIELD_REVISION");
   }
+  // The installation's own business identity and payment details, merged over
+  // the quote catalogue's (server/business-profile.js). Never logged.
+  if (configureBusinessProfile(config.businessProfile)) {
+    console.log(`[field] business profile: configured in ${CONFIG_SOURCE}, merged over the quote catalogue's`);
+  }
 } catch (err) {
   console.error(`[field] ${err.message}`);
   process.exit(1);
@@ -252,6 +259,8 @@ const UI_CONFIG = {
   deploymentTheme: process.env.FIELD_DEPLOY_THEME || config.deploymentTheme || "gohub",
   workerDisplayName: process.env.FIELD_WORKER_DISPLAY_NAME || config.workerDisplayName || "Agent",
   assistantDisplayName: process.env.FIELD_ASSISTANT_DISPLAY_NAME || config.assistantDisplayName || "",
+  // The name stock email signatures sign with.
+  businessName: getQuoteCatalog()?.businessProfile?.tradingName || "",
 };
 
 if (!AUTH_TOKEN) {

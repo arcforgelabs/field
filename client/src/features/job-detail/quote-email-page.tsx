@@ -388,6 +388,7 @@ export function QuoteEmailPage() {
         jobTitle: detail.meta.title || detail.meta.label || "",
         milestoneLabel: milestoneInvoice?.milestoneLabel || "",
         defaultSubject: buildDefaultSubject({ detail, documentType, milestoneInvoice }),
+        businessName: detail.ui?.businessName || "",
       };
       const configured = storedTemplates?.[documentType || "email"];
       if (configured?.length) {
@@ -398,6 +399,7 @@ export function QuoteEmailPage() {
         jobTitle: context.jobTitle,
         documentType,
         milestoneInvoice,
+        businessName: context.businessName,
       });
     },
     [detail, documentType, milestoneInvoice, storedTemplates],
@@ -728,6 +730,7 @@ export function QuoteEmailPage() {
             onChange={setBodyHtml}
             attachments={attachments}
             onAttachmentsChange={setAttachments}
+            signatureName={detail?.ui?.businessName || ""}
           />
 
           <div className="quote-email-send-footer" style={{ display: "flex", alignItems: "flex-end", justifyContent: "flex-start", minHeight: 42, padding: "0 2px" }}>
@@ -1872,13 +1875,16 @@ function buildEmailTemplates({
   jobTitle,
   documentType,
   milestoneInvoice,
+  businessName = "",
 }: {
   clientName: string;
   jobTitle: string;
   documentType: JobDocumentType | null;
   milestoneInvoice: MilestoneInvoice | null;
+  businessName?: string;
 }): QuoteEmailTemplate[] {
   const greeting = clientName ? `Hi ${escapeText(clientName)},` : "Hi,";
+  const signature = escapeText(businessName.trim() || "Your Business");
   const escapedJobTitle = escapeText(jobTitle);
   if (!documentType) {
     return [
@@ -1886,19 +1892,19 @@ function buildEmailTemplates({
         id: "standard",
         name: "Standard email",
         description: "General job email.",
-        html: `<p>${greeting}</p><p>I wanted to send through an update${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""}.</p><p>Regards,<br/>Your Business</p>`,
+        html: `<p>${greeting}</p><p>I wanted to send through an update${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""}.</p><p>Regards,<br/>${signature}</p>`,
       },
       {
         id: "follow-up",
         name: "Follow-up",
         description: "Quick follow-up message.",
-        html: `<p>${greeting}</p><p>Just following up${escapedJobTitle ? ` on <strong>${escapedJobTitle}</strong>` : ""}.</p><p>Let me know if you have any questions.</p><p>Regards,<br/>Your Business</p>`,
+        html: `<p>${greeting}</p><p>Just following up${escapedJobTitle ? ` on <strong>${escapedJobTitle}</strong>` : ""}.</p><p>Let me know if you have any questions.</p><p>Regards,<br/>${signature}</p>`,
       },
       {
         id: "site-note",
         name: "Site note",
         description: "Site or scheduling note.",
-        html: `<p>${greeting}</p><p>I have a quick site note${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""}:</p><p></p><p>Regards,<br/>Your Business</p>`,
+        html: `<p>${greeting}</p><p>I have a quick site note${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""}:</p><p></p><p>Regards,<br/>${signature}</p>`,
       },
     ];
   }
@@ -1909,19 +1915,19 @@ function buildEmailTemplates({
         id: "standard",
         name: "Standard invoice",
         description: "Short invoice delivery note.",
-        html: `<p>${greeting}</p><p>Your ${milestone}invoice${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p><p>Regards,<br/>Your Business</p>`,
+        html: `<p>${greeting}</p><p>Your ${milestone}invoice${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p><p>Regards,<br/>${signature}</p>`,
       },
       {
         id: "payment",
         name: "Payment prompt",
         description: "Adds a clear payment request.",
-        html: `<p>${greeting}</p><p>Please find your ${milestone}invoice${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p><p>Regards,<br/>Your Business</p>`,
+        html: `<p>${greeting}</p><p>Please find your ${milestone}invoice${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p><p>Regards,<br/>${signature}</p>`,
       },
       {
         id: "friendly",
         name: "Friendly check-in",
         description: "Softer wording for known clients.",
-        html: `<p>${greeting}</p><p>I have attached the ${milestone}invoice${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""}.</p><p>Let me know if you need anything clarified.</p><p>Regards,<br/>Your Business</p>`,
+        html: `<p>${greeting}</p><p>I have attached the ${milestone}invoice${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""}.</p><p>Let me know if you need anything clarified.</p><p>Regards,<br/>${signature}</p>`,
       },
     ];
   }
@@ -1932,19 +1938,19 @@ function buildEmailTemplates({
         id: "standard",
         name: "Standard receipt",
         description: "Short receipt delivery note.",
-        html: `<p>${greeting}</p><p>Your ${milestone}receipt${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p><p>Regards,<br/>Your Business</p>`,
+        html: `<p>${greeting}</p><p>Your ${milestone}receipt${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p><p>Regards,<br/>${signature}</p>`,
       },
       {
         id: "thanks",
         name: "Thank you",
         description: "Receipt with a thank-you note.",
-        html: `<p>${greeting}</p><p>Thanks for the payment. I have attached the ${milestone}receipt${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""}.</p><p>Regards,<br/>Your Business</p>`,
+        html: `<p>${greeting}</p><p>Thanks for the payment. I have attached the ${milestone}receipt${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""}.</p><p>Regards,<br/>${signature}</p>`,
       },
       {
         id: "records",
         name: "For records",
         description: "Simple records copy.",
-        html: `<p>${greeting}</p><p>Please find the ${milestone}receipt attached for your records.</p><p>Regards,<br/>Your Business</p>`,
+        html: `<p>${greeting}</p><p>Please find the ${milestone}receipt attached for your records.</p><p>Regards,<br/>${signature}</p>`,
       },
     ];
   }
@@ -1953,19 +1959,19 @@ function buildEmailTemplates({
       id: "standard",
       name: "Standard quote",
       description: "Default quote delivery.",
-      html: `<p>${greeting}</p><p>Your quote${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p><p>Regards,<br/>Your Business</p>`,
+      html: `<p>${greeting}</p><p>Your quote${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p><p>Regards,<br/>${signature}</p>`,
     },
     {
       id: "approval",
       name: "Ready for approval",
       description: "Asks the client to approve or request changes.",
-      html: `<p>${greeting}</p><p>I have attached the quote${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p><p>Regards,<br/>Your Business</p>`,
+      html: `<p>${greeting}</p><p>I have attached the quote${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p><p>Regards,<br/>${signature}</p>`,
     },
     {
       id: "warm",
       name: "Warm follow-up",
       description: "More conversational tone.",
-      html: `<p>${greeting}</p><p>Thanks again for the details. The quote${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p><p>Regards,<br/>Your Business</p>`,
+      html: `<p>${greeting}</p><p>Thanks again for the details. The quote${escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : ""} is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p><p>Regards,<br/>${signature}</p>`,
     },
   ];
 }
@@ -1979,7 +1985,7 @@ function buildDefaultSubject({
   documentType: JobDocumentType | null;
   milestoneInvoice: MilestoneInvoice | null;
 }) {
-  const title = detail?.meta.title || detail?.meta.label || detail?.meta.siteAddress || "Your Business";
+  const title = detail?.meta.title || detail?.meta.label || detail?.meta.siteAddress || detail?.ui?.businessName || "Your Business";
   if (documentType === "invoice") {
     return ["Invoice", milestoneInvoice?.invoiceNumber, milestoneInvoice?.milestoneLabel || title].filter(Boolean).join(" - ");
   }

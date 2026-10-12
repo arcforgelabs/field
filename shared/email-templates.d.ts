@@ -21,5 +21,6 @@ export function renderEmailTemplate(
     jobTitle?: string;
     milestoneLabel?: string;
     defaultSubject?: string;
+    businessName?: string;
   },
 ): StoredEmailTemplate;

@@ -1,3 +1,4 @@
+import { applyBusinessProfileOverride, configuredTradingName } from "./business-profile.js";
 import { google } from "googleapis";
 import {
   googleServiceAccountCacheId,
@@ -289,15 +290,15 @@ async function performSendQuoteEmail({
     ? [
         isReceipt ? "Receipt" : "Invoice",
         documentRef,
-        milestoneInvoice?.milestoneLabel || meta.title || meta.label || "Your Business",
+        milestoneInvoice?.milestoneLabel || meta.title || meta.label || documentBusinessName(quote),
       ].filter(Boolean).join(" — ")
-    : `${quote.delivery?.status === "final" ? "Quote" : "Quote Draft"} — ${meta.title || meta.label || "Your Business"}`;
+    : `${quote.delivery?.status === "final" ? "Quote" : "Quote Draft"} — ${meta.title || meta.label || documentBusinessName(quote)}`;
   const subject = cleanHeaderText(subjectOverride) || defaultSubject;
   const body = customBody ? stripHtml(customBody) : buildEmailBody({ meta, quote, documentType: resolvedDocumentType });
 
   const quoteCatalog = quote.quoteCatalog || quote.profile || {};
   const deliveryDefaults = quoteCatalog.deliveryDefaults || {};
-  const biz = quoteCatalog.businessProfile || {};
+  const biz = applyBusinessProfileOverride(quoteCatalog.businessProfile || {});
   const htmlBody = buildEmailHtml({
     meta,
     quote,
@@ -397,7 +398,7 @@ async function performSendJobEmail({
     throw new Error("mail.fromEmail or FIELD_MAIL_FROM is required for email sending.");
   }
 
-  const resolvedSubject = cleanHeaderText(subject) || `Job update — ${meta?.title || meta?.label || meta?.siteAddress || meta?.id || "Your Business"}`;
+  const resolvedSubject = cleanHeaderText(subject) || `Job update — ${meta?.title || meta?.label || meta?.siteAddress || meta?.id || installationBusinessName()}`;
   const htmlBody = wrapGenericEmailHtml({
     customBody,
     fromName: sender.fromName,
@@ -465,7 +466,7 @@ export function resolveMailSender({ config = {}, user = null, gmailUser = "" } =
   }
   return {
     fromEmail,
-    fromName: process.env.FIELD_MAIL_FROM_NAME || mailConfig.fromName || user?.name || "Your Business",
+    fromName: process.env.FIELD_MAIL_FROM_NAME || mailConfig.fromName || user?.name || installationBusinessName(),
     replyTo: normalizeEmail(process.env.FIELD_MAIL_REPLY_TO || user?.settings?.gmail?.replyTo || mailConfig.replyTo || fromEmail),
   };
 }
@@ -574,7 +575,7 @@ function buildEmailBody({
         : "Reply to this email if you want any adjustments or clarifications.",
     "",
     "Regards,",
-    "Your Business",
+    documentBusinessName(quote),
     meta.title || meta.label ? `Reference: ${meta.title || meta.label}` : null,
   ].filter(Boolean).join("\n");
 }
@@ -641,7 +642,7 @@ function buildEmailHtml({
     subtotal: quote.totals?.subtotal,
     gst: quote.totals?.gst,
     total: quote.totals?.total,
-    companyName: biz.tradingName || fromName || "Your Business",
+    companyName: biz.tradingName || fromName || installationBusinessName(),
     companyAbn: biz.abn || null,
     companyAddress: biz.address || null,
     companyPhone: biz.phone || null,
@@ -656,20 +657,32 @@ function buildEmailHtml({
   });
 }
 
+// The business name an email speaks for: the configured profile's trading
+// name, else the quote catalogue's, else a placeholder.
+function documentBusinessName(quote = null) {
+  const profile = quote?.quoteCatalog?.businessProfile || quote?.profile?.businessProfile || null;
+  return applyBusinessProfileOverride(profile || {})?.tradingName || configuredTradingName() || "Your Business";
+}
+
+function installationBusinessName() {
+  return configuredTradingName() || "Your Business";
+}
+
 function resolvedDocumentIntro({ quote, documentType, meta = null }) {
+  const business = documentBusinessName(quote);
   if (documentType === "invoice") {
     if (meta?.milestoneInvoice?.milestoneLabel) {
-      return `Please find the ${meta.milestoneInvoice.milestoneLabel.toLowerCase()} invoice from Your Business attached as a PDF.`;
+      return `Please find the ${meta.milestoneInvoice.milestoneLabel.toLowerCase()} invoice from ${business} attached as a PDF.`;
     }
-    return "Please find the invoice from Your Business attached as a PDF.";
+    return `Please find the invoice from ${business} attached as a PDF.`;
   }
   if (documentType === "receipt") {
     if (meta?.milestoneInvoice?.milestoneLabel) {
-      return `Please find the receipt for the ${meta.milestoneInvoice.milestoneLabel.toLowerCase()} milestone from Your Business attached as a PDF.`;
+      return `Please find the receipt for the ${meta.milestoneInvoice.milestoneLabel.toLowerCase()} milestone from ${business} attached as a PDF.`;
     }
-    return "Please find the receipt from Your Business attached as a PDF.";
+    return `Please find the receipt from ${business} attached as a PDF.`;
   }
-  return `Please find the ${quote.delivery?.status === "final" ? "quote" : "draft quote"} from Your Business attached as a PDF.`;
+  return `Please find the ${quote.delivery?.status === "final" ? "quote" : "draft quote"} from ${business} attached as a PDF.`;
 }
 
 export function buildMimeMessage({
@@ -808,7 +821,7 @@ function wrapGenericEmailHtml({ customBody, fromName, themeFontFamily }) {
     <div style="max-width:640px;margin:0 auto;background:#ffffff;padding:28px 30px;color:#2d2d2d;font-size:14px;line-height:1.6;">
       ${safeBody || "<p>Hi,</p><p></p>"}
       <div style="margin-top:28px;padding-top:14px;border-top:1px solid #e0e0e0;color:#6b6b6b;font-size:12px;">
-        ${escapeHtml(fromName || "Your Business")}
+        ${escapeHtml(fromName || installationBusinessName())}
       </div>
     </div>
   </body>
@@ -886,3 +899,6 @@ function formatDate(value) {
     day: "numeric",
   });
 }
+
+/** The plain-text body of a quote, invoice or receipt email (exported for tests). */
+export { buildEmailBody as buildDocumentEmailText };

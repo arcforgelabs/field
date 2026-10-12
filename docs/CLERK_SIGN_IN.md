@@ -204,6 +204,30 @@ Rollback: unset `FIELD_AUTH` and restart. Password sign-in returns with the
 same `users.json` (bootstrap passwords included); the PostgreSQL `users` table
 is left alone and is used again when Clerk sign-in is turned back on.
 
+## First owner
+
+Field creates no account by default. A new installation gets its first owner
+in one of two ways:
+
+- **From config (recommended).** List them in `bootstrapUsers` with
+  `"role": "admin"`. Field writes them to `users.json` at boot, and the first
+  boot with Clerk sign-in, while the organisation has no members, copies them
+  into PostgreSQL as `owner`. They link on their first verified Clerk sign-in.
+- **With break-glass.** With nobody listed, the first person who signs in
+  lands as `pending`. Approve them as owner with the break-glass key:
+
+  ```bash
+  read -rs FIELD_BREAK_GLASS   # the deployment's authToken / FIELD_TOKEN
+  curl -sS -H "X-Field-Break-Glass: $FIELD_BREAK_GLASS" https://<field-host>/api/users        # find their id
+  curl -sS -X POST -H "X-Field-Break-Glass: $FIELD_BREAK_GLASS" -H "Content-Type: application/json" \
+    -d '{"role":"owner"}' https://<field-host>/api/users/<id>/approve
+  unset FIELD_BREAK_GLASS
+  ```
+
+An installation that already has people (any upgrade, including one moving
+from an older release that had a built-in default user) is unaffected: the
+import never runs again, and PostgreSQL stays the record of who may sign in.
+
 ## Break-glass (owner emergency access)
 
 If Clerk is down or no owner can get a verified owner sign-in, an owner can

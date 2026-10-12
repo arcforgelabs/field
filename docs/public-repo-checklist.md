@@ -62,7 +62,9 @@ below.
   person, and derives the remote user's runtime directory instead of
   assuming UID 1000.
 - There is no implicit bootstrap user: an installation lists its
-  `bootstrapUsers` in config, and no placeholder admin is ever created.
+  `bootstrapUsers` in config, and no placeholder admin is ever created. A Clerk installation's first
+  owner comes from those `bootstrapUsers` or from break-glass approval
+  (README "First owner").
 - The synthetic verification runtime (`FIELD_ENV=field-verification`) is kept
   because the server validates it at boot; its contract no longer names any
   real host, domain, path or image repository.
@@ -107,7 +109,8 @@ below.
 - A PostgreSQL database (`DATABASE_URL`), or PGlite for local development.
 - A price catalogue with at least one active item before first boot (see
   `README.md` "Getting started").
-- Its own business profile, payment details and quote rules in place of the
-  sample catalogue.
+- Its own business profile and payment details, set as `businessProfile` in
+  config (`FIELD_CONFIG_JSON`; README "Business profile"), and its own quote
+  rules in place of the sample catalogue's.
 - Its own sign-in, email and MCP configuration (`docs/CLERK_SIGN_IN.md`,
   `docs/GMAIL_SENDING.md`, `docs/REMOTE_MCP.md`).

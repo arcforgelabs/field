@@ -14,7 +14,25 @@
     "retentionDays": 7,
     "maxBackups": 7
   },
-  "_comment_bootstrapUsers": "Optional. If set, these users are guaranteed to exist in the local Field auth store. Omit password to reuse authToken. Staging can use this to carry a small managed operator list until SSO exists.",
+  "_comment_businessProfile": "Your business identity and payment details, printed on quotes, invoices and receipts and used in email. Merged over the quote catalogue's businessProfile: a field left out keeps the catalogue's value, an empty string clears it. Keep real values in your secret store (FIELD_CONFIG_JSON), never in the repository.",
+  "businessProfile": {
+    "tradingName": "Your Business",
+    "legalName": "Your Business Pty Ltd",
+    "abn": "00 000 000 000",
+    "address": "1 Example Street, Exampleton SA 5000",
+    "phone": "08 0000 0000",
+    "email": "accounts@example.com",
+    "paymentMethods": {
+      "bankTransfer": {
+        "accountName": "Your Business Pty Ltd",
+        "bsb": "000-000",
+        "accountNumber": "00000000",
+        "bank": "Your bank"
+      }
+    }
+  },
+
+  "_comment_bootstrapUsers": "Optional. These users are guaranteed to exist in the local Field auth store (omit password to reuse authToken). There is no default: with none listed, no account is created. With Clerk sign-in (FIELD_AUTH=clerk) the first boot imports them into PostgreSQL, admin as owner, so list your first owner here; see docs/CLERK_SIGN_IN.md.",
   "bootstrapUsers": [
     {
       "email": "admin@example.com",
