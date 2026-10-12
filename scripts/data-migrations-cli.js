@@ -13,7 +13,13 @@
 // from what durable storage holds in that database (field_files), restored
 // into a temporary directory, or from a copy of --data <dir>. Every pending
 // data migration is then planned, verified and applied to those copies, and
-// the copies are deleted.
+// the copies are deleted. The row backfills (per-job migrations) are skipped:
+// the copy holds no quote, invoice or document rows to check them against.
+//
+// It reads the database DATABASE_URL names. In a Replit workspace that is the
+// workspace's own database, not production's (docs/REPLIT.md "Data
+// migrations"); there, use GET /api/admin/data-migrations/dry-run in the
+// published app instead.
 //
 // Exit 0: every migration verifies and rehearses cleanly (or has already
 // run); 1: a verification failed; 2: the dry run could not run.
@@ -78,6 +84,7 @@ try {
   for (const entry of report) {
     console.log(`\n${entry.id}: ${entry.title}`);
     console.log(`  status: ${entry.status}${entry.appliedAt ? ` (${entry.appliedAt})` : ""}`);
+    if (entry.reason) console.log(`  ${entry.reason}`);
     if (entry.summary) console.log(`  summary: ${JSON.stringify(entry.summary)}`);
     for (const change of (entry.changes || []).slice(0, 400)) console.log(`  ${JSON.stringify(change)}`);
     if ((entry.changes || []).length > 400) console.log(`  ... ${entry.changes.length - 400} more (see --json)`);
@@ -86,7 +93,8 @@ try {
     writeFileSync(resolve(jsonPath), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
     console.error(`[dry-run] full report written to ${resolve(jsonPath)}`);
   }
-  console.error("\n[dry-run] every migration verified and rehearsed on copies; nothing real was written");
+  const skipped = report.filter((entry) => entry.status === "skipped").map((entry) => entry.id);
+  console.error(`\n[dry-run] every migration verified and rehearsed on copies; nothing real was written${skipped.length ? ` (not rehearsed here: ${skipped.join(", ")})` : ""}`);
 } catch (error) {
   console.error(`[dry-run] ${error.code === "DATA_MIGRATION_FAILED" ? "VERIFICATION FAILED" : "could not run"}: ${error.message}`);
   if (error.details?.failures) for (const failure of error.details.failures) console.error(`  - ${failure}`);

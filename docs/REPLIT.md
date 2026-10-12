@@ -47,6 +47,15 @@ overrides it if both are set). It is a credential: keep it a Secret and never
 print, log or paste it; Field's logs and `npm run db:smoke` name the variable,
 not its value.
 
+The workspace and the published app have separate databases, each with its
+own `DATABASE_URL`. The workspace's database is a copy: `npm run db:apply`
+keeps its schema in step with production (see "Publishing"), but its data is
+not production's. A command run in the workspace shell reads and writes the
+workspace's database, never production's. Never copy production's database
+credentials into the workspace. Field checks and changes production's data
+from inside the published app instead: data migrations and backfills run at
+boot, and an owner checks them with the dry-run route ("Data migrations").
+
 - On every start, before it serves anything, Field applies any pending
   migrations from `server/db/drizzle` (log line `[db] postgres (DATABASE_URL):
   ...`). If the database is unreachable or a migration fails, Field exits
@@ -66,7 +75,9 @@ not its value.
   then `npm run catalog:import-legacy -- <catalog.db> --dry-run` (verifies
   and rolls back) and the same without `--dry-run`. The import is one
   verified transaction, carries the data over as-is, and refuses a catalogue
-  that already has items unless given `--replace`. Data problems it carries
+  that already has items unless given `--replace`. It imports into the
+  database `DATABASE_URL` names: in the workspace shell, that is the
+  workspace's database, not production's. Data problems it carries
   over (missing items the quote rules name, archived items still used,
   `-copy` codes) are listed by the catalogue's "need attention" filter (`/pricing/health`); they do not stop Field.
 - Cutover order: import first, then publish. A build with the PostgreSQL
@@ -86,9 +97,12 @@ See `server/db/README.md` for the runtime module and how to add tables.
 ## Data migrations
 
 Some releases change existing records, not just the schema: re-keying quote
-rows by uid, for example. These are data migrations
-(`server/data-migrations/`). Field runs each one once, at boot, after the
-schema migrations and before it serves anything:
+rows by uid, for example, or filling the quote and invoice rows from the job
+files. These are data migrations (`server/data-migrations/`). The published
+app runs each one at boot, after the schema migrations and after durable
+storage has restored the data directory, and before it serves anything. They
+read production's own data directory and database, so nobody needs
+production's credentials to run them.
 
 - It works out every change and verifies it before writing anything. For
   the quote-row re-key that means: removing the added uids gives back each
@@ -106,30 +120,85 @@ schema migrations and before it serves anything:
   later edit in the app is not undone by a restart. The log line is
   `[data-migrations] <id>: applied (...); recorded`.
 
-**Before publishing a release that adds one, run the dry run in the
-workspace shell.** It reads the production database (the workspace shares
-`DATABASE_URL`) but never writes to it: it restores the stored job files into
-a temporary directory and runs the same plan and verification there.
+### The row backfills
 
-```bash
-git fetch origin && git switch -C <release-branch> origin/<release-branch>   # or main once merged
-npm ci && npm run db:build
-npm run db:smoke                          # applied and pending schema migrations
-npm run data:migrate -- --dry-run --json /tmp/data-migrations.json
+The quote rows backfill and the invoice rows backfill fill the quote and
+invoice tables from every job's files. They write database rows only, never
+job files. They check each job before they write it:
+
+- quote rows: each version's totals equal what Field shows, to the cent, and
+  a sent version's equal the totals on the PDF the customer was sent;
+- invoice rows: each issued invoice equals its stored revision and the
+  totals its PDF printed, the payments add up to the amount paid, and the
+  invoices do not claim more than the quote.
+
+A job that fails a check is refused. A refused job never stops boot. The
+recording rule:
+
+- No job refused: the backfill is recorded, with its summary (written,
+  already present, warnings), and never runs again.
+- Some jobs refused: every job that verifies is written. Each refused job is
+  logged with its job id and both numbers, never a customer name. The
+  backfill is not recorded, so the next boot runs it again. A retry is one
+  pass over the jobs: a job already written is checked and left as it is,
+  so a retry writes only what changed. To clear a refusal, correct the job
+  in the app; the next boot then writes it and records the backfill.
+- The invoice rows backfill runs after the quote rows backfill, so invoices
+  link the quote versions they bill. Until the quote rows backfill is
+  recorded, the invoice rows backfill writes what verifies but is not
+  recorded either, so a later boot fills in the links.
+
+The boot log has one line per backfill:
+
+```text
+[data-migrations] 2026-10-13-quote-rows-backfill: applied (12 job(s), 15 quote version(s): 15 written, 0 already present, 0 job(s) refused; 1 warning(s)); recorded
+[data-migrations] 2026-10-13-invoice-rows-backfill: incomplete (10 job(s) with milestones, 14 invoice(s): 9 job(s) written, 0 already present, 1 job(s) refused; 2 warning(s)); not recorded (1 job(s) refused), runs again at next boot
+[data-migrations] 2026-10-13-invoice-rows-backfill: refused job <job id>: <invoice number> totals: total rows 990.00 vs revision-pdf 1018.05
 ```
 
-- Exit 0 and `verification passed; nothing was written`: safe to publish.
-  The summary per migration says how many files, rows and PDFs it checked,
-  and `unresolved` counts rows whose code is not in the catalogue (those are
-  left as they were and listed in the JSON).
-- Exit 1 and `VERIFICATION FAILED`: do not publish. The failures are listed.
-- Exit 2: the dry run itself could not run (database unreachable, a schema
-  migration still pending: the dry run reads tables the new release adds, so
-  run it from the release's code against a database already migrated by
-  `npm run db:apply` only if you mean to migrate; otherwise publish first
-  with `FIELD_DATA_MIGRATIONS_HOLD=all`, then dry-run, then remove the hold
-  and restart).
-- Delete `/tmp/data-migrations.json` afterwards: it names customer jobs.
+"nothing to change" in place of "applied" means every job was already
+present. The numbers above are an example.
+
+### Checking a release in production
+
+The workspace shell cannot check production: its database is the
+workspace's own ("Database"). Production checks itself, through an admin
+route in the published app:
+
+```text
+GET /api/admin/data-migrations/dry-run
+```
+
+- Only an owner can call it: with Clerk sign-in, a verified owner sign-in or
+  the break-glass key; with password sign-in, an `admin`. Others get 401 or
+  403.
+- It runs every data migration not yet recorded, held ones included, against
+  production's live data directory and database, and writes nothing. Checks
+  that need a write run in a transaction that is rolled back.
+- It answers with JSON: per migration its id, status (`would-apply`,
+  `nothing-to-do`, `would-refuse`, `already-applied`, `deferred`), its summary
+  (counts only) and, for a backfill, each refused job with its id and both
+  numbers. It holds no customer names. `ok` is false when a backfill would
+  refuse a job or a migration fails its verification.
+- One runs at a time (another call gets 409). It stops after 2 minutes
+  (504); a new one can start once the old one has stopped at its next job.
+
+To check a release before its data migrations run:
+
+1. Before you publish, set the deployment secret
+   `FIELD_DATA_MIGRATIONS_HOLD=all` (Publishing > Adjust settings). Publish.
+   Boot logs each data migration as held.
+2. Sign in to the published app as an owner. With Clerk sign-in, open
+   `/api/admin/data-migrations/dry-run` in the same browser: the session
+   cookie authorizes a read. With password sign-in, send an admin's token
+   in the `Authorization: Bearer` header.
+3. `ok: true`: remove the hold and republish. Boot runs the migrations.
+   `ok: false`: keep the hold and look at the refused jobs or the failed
+   verification in the answer and the server log.
+
+The row backfills need no hold: a refused job leaves its backfill
+unrecorded, and boot carries on. Use the route after a publish to see what
+is still refused.
 
 The data migrations so far, in the order they run:
 
@@ -137,6 +206,8 @@ The data migrations so far, in the order they run:
 | --- | --- | --- |
 | `2026-10-12-quote-rows-by-uid` | Adds `catalogItemUid` / `sourceUid` beside codes on every job's quote rows | Files differ only by the added keys; PDFs byte-identical; pricing digest unchanged |
 | `2026-10-12-price-book-cleanup` | A price book clean-up driven by `server/data-migrations/price-book-cleanup.plan.json`: names, types, categories, kits flattened, per-metre walls, unused items archived | One catalogue transaction: every item prices exactly as before or it rolls back; an item edited in the app since the plan was made is left alone; an item on a draft quote is not archived |
+| `2026-10-13-quote-rows-backfill` | Writes every job's quote versions as quote rows (#6); no job files | Per job: rows equal what Field shows, to the cent; a sent version equals its sent PDF. Refused jobs are logged and the backfill retries at the next boot |
+| `2026-10-13-invoice-rows-backfill` | Writes every job's milestones, invoices, payments and receipts as rows (#27), linked to the quote rows; no job files | Per job: each issued invoice equals its revision and its PDF; payments add up. Refused jobs are logged and the backfill retries at the next boot |
 
 The repository ships no clean-up plan. Without
 `server/data-migrations/price-book-cleanup.plan.json` the clean-up is reported
@@ -149,41 +220,36 @@ Emergency stop: the deployment secret `FIELD_DATA_MIGRATIONS_HOLD=all` (or a
 comma-separated list of migration ids) makes boot skip them, logged as held.
 Remove it and restart to run them. Rolling back after one ran: the previous
 job generation still holds every file as it was, and point-in-time restore
-covers the database; the changes are additive (uids beside codes), so an
-older release reads re-keyed files unchanged.
+covers the database; the changes are additive (uids beside codes, rows beside
+files), so an older release reads them unchanged.
+
+`npm run data:migrate -- --dry-run` rehearses the data migrations on copies
+of the database `DATABASE_URL` names. In the workspace shell that is the
+workspace's database, so it does not check production; use the route above.
+It skips the row backfills. It suits an installation whose database you can
+reach directly, for example a Docker one.
 
 ## Invoice rows backfill
 
-The release with migration `0013_invoice_rows` (#27) writes invoice rows for
-every milestone change from then on. Jobs invoiced before it need the
-backfill once. Publish first, so boot applies 0013. Then, in the workspace
-shell (it shares `DATABASE_URL` with the published app):
+The quote rows and invoice rows from before #6 and #27 are filled at boot by
+the `2026-10-13-quote-rows-backfill` and `2026-10-13-invoice-rows-backfill`
+data migrations ("The row backfills"). There is nothing to run in the
+workspace shell: there, `scripts/backfill-quote-rows.js` and
+`scripts/backfill-invoice-rows.js` reach only the workspace's own database.
 
-```bash
-git fetch origin && git switch -C main origin/main
-npm ci && npm run db:build
-npm run db:smoke                    # no pending schema migrations
-node scripts/backfill-invoice-rows.js --from-storage --dry-run --json > /tmp/invoice-rows-dry-run.json; echo "exit $?"
-node scripts/backfill-invoice-rows.js --from-storage
-rm /tmp/invoice-rows-dry-run.json
-```
+After the release that adds them is published:
 
-- `--from-storage` restores the stored job files, through a read-only
-  session, into a new directory under `/tmp`, and deletes that directory
-  when the run ends. The dry run writes nothing anywhere.
-- Exit 0: every job verified. Exit 2: some jobs were refused; each is listed
-  with both numbers (for example an invoice whose stored money differs from
-  the totals its PDF printed), and nothing is written for those jobs. The
-  real run still writes every job that verifies. Exit 1: it could not run
-  (no database, or a migration still pending).
-- Warnings do not refuse a job: `tax-total-printed` (a milestone's GST kept
-  as issued), `reconcile-stale` (drafts built against an earlier quote),
-  `issued-unverified` (no readable copy of the PDF) and
-  `payment-on-superseded` (a payment on a revision that was later revised).
-- A second run writes nothing new. Invoices link the quote versions they
-  bill when the quote rows exist; run it again after the quote-row backfill
-  to fill those links (each is filled once).
-- Delete the JSON afterwards: it names customer jobs and amounts.
+1. In the server log, find the two `[data-migrations]` lines for the
+   backfills. `recorded` means done.
+2. `incomplete` means jobs were refused. The next lines name each refused job
+   with both numbers. Every other job is written.
+3. `GET /api/admin/data-migrations/dry-run` shows the same refusals at any
+   time, with the counts.
+
+Warnings do not refuse a job: `tax-total-printed` (a milestone's GST kept as
+issued), `reconcile-stale` (drafts built against an earlier quote),
+`issued-unverified` (no readable copy of the PDF) and `payment-on-superseded`
+(a payment on a revision that was later revised).
 
 ## Durable storage
 
@@ -221,11 +287,12 @@ PostgreSQL holds (`server/storage/durable-store.js`):
   error are at `GET /api/storage/status` (admin login). Errors never include
   file contents or connection strings.
 
-Set `FIELD_STORAGE=postgres` for the **published app only**, never in this
-workspace's `[env]` or Secrets shared with it: the workspace and the published
-app would otherwise compete for the same lock (the second to start waits 60 s,
-then exits). If the workspace needs it, give it its own database through
-`FIELD_DB_URL`.
+Set `FIELD_STORAGE=postgres` for the **published app only** (Publishing >
+Adjust settings), never in the workspace's `[env]` or Secrets. The workspace
+has its own database ("Database"), so durable storage there would only store
+the workspace's data directory in the workspace's database. Two Field
+processes on one database compete for the lock: the second to start waits
+60 s, then exits.
 
 Moving existing data in (once, before the first publish with durable storage,
 with no Field process using the database):

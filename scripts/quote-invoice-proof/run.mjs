@@ -40,7 +40,10 @@
 // quote rows (#6) it also checks those tables against what was sent
 // (storage-documents.json, storage-backfill.json, storage-quote-rows.json),
 // and on checkouts with invoice rows (#27) job A's invoices, payment and
-// receipt (storage-invoice-rows.json).
+// receipt (storage-invoice-rows.json). On checkouts that backfill those rows
+// at boot (#36) the first server holds the backfills, and the restart from an
+// empty disk must run them over the proof's jobs and record them
+// (storage-boot-backfills.json).
 //
 // PROOF_R2_REPLICA=minio (with PROOF_STORAGE=postgres) also turns on the R2
 // replica of issued documents (#12, FIELD_DOCUMENT_REPLICA=r2) against a
@@ -83,6 +86,10 @@ let quoteRowStatus = null;
 // Checkouts with invoice rows (#27, server/invoices/).
 const HAS_INVOICE_ROWS = existsSync(join(repoRoot, "server/invoices/backfill.js"));
 let invoiceRowStatus = null;
+// Checkouts that backfill quote and invoice rows as boot data migrations (#36).
+const HAS_BOOT_BACKFILLS = existsSync(join(repoRoot, "server/data-migrations/row-backfills.js"));
+const BOOT_BACKFILL_IDS = ["2026-10-13-quote-rows-backfill", "2026-10-13-invoice-rows-backfill"];
+let restartLog = "";
 // Checkouts whose quote documents and totals are read from the rows (#10).
 const HAS_QUOTE_READS = existsSync(join(repoRoot, "server/quotes/read-model.js"));
 let quoteReadStatus = null;
@@ -160,10 +167,10 @@ execFileSync(process.execPath, ["--require", preload, join(here, "seed.mjs"), re
 });
 
 const serverLog = [];
-function startServer(serverDataDir) {
+function startServer(serverDataDir, extraEnv = {}) {
   const child = spawn(process.execPath, ["--require", preload, "--import", pathToFileURL(join(here, "hooks.mjs")).href, "server/index.js"], {
     cwd: repoRoot,
-    env: { ...baseEnv, ...storageEnv, ...replicaEnv, FIELD_CONFIG: configPath, FIELD_DATA: serverDataDir, FIELD_PORT: String(port) },
+    env: { ...baseEnv, ...storageEnv, ...replicaEnv, ...extraEnv, FIELD_CONFIG: configPath, FIELD_DATA: serverDataDir, FIELD_PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.on("data", (b) => serverLog.push(b.toString()));
@@ -176,7 +183,10 @@ async function stopServer(child) {
   child.kill("SIGTERM");
   await exited;
 }
-let server = startServer(dataDir);
+// In durable storage mode the first server holds the boot backfills (#36), so
+// the restart from an empty disk is the boot that backfills the proof's jobs
+// (bootBackfillProof).
+let server = startServer(dataDir, STORAGE_MODE && HAS_BOOT_BACKFILLS ? { FIELD_DATA_MIGRATIONS_HOLD: BOOT_BACKFILL_IDS.join(",") } : {});
 
 const base = `http://127.0.0.1:${port}`;
 async function waitHealthy() {
@@ -266,6 +276,7 @@ try {
   if (STORAGE_MODE) {
     try {
       if (!process.exitCode) await proveRestartFromEmptyDisk();
+      if (!process.exitCode && HAS_BOOT_BACKFILLS) await bootBackfillProof();
       if (!process.exitCode && HAS_ISSUED_DOCUMENTS) await backfillProof();
       if (!process.exitCode && HAS_QUOTE_ROWS) await quoteRowsProof(restartChecks.ids);
       if (!process.exitCode && HAS_INVOICE_ROWS) await invoiceRowsProof(restartChecks.ids);
@@ -328,6 +339,7 @@ async function proveRestartFromEmptyDisk() {
   // before the first server stopped.
   const emptyDir = join(root, "restart-data");
   mkdirSync(emptyDir);
+  const logStart = serverLog.length;
   server = startServer(emptyDir);
   await waitHealthy();
   const after = await readOnlyChecks(restartChecks.ids.aid, restartChecks.ids.bid);
@@ -337,6 +349,7 @@ async function proveRestartFromEmptyDisk() {
     report.steps[name].ok = report.steps[name].same && check.status === 200;
   }
   await stopServer(server);
+  restartLog = serverLog.slice(logStart).join("");
 
   report.ok = report.originalTreeHash === report.rebuiltTreeHash
     && Object.values(report.sqlite).every((entry) => entry.original === entry.restored)
@@ -570,6 +583,44 @@ async function quoteRowsProof({ aid, bid }) {
   if (!report.ok) throw new Error(`quote rows proof failed: ${JSON.stringify(report.checks.filter((entry) => !entry.ok))}`);
 }
 
+// Boot backfills (#36): the first server held the quote and invoice row
+// backfills, so the restart from an empty disk ran them over the files
+// durable storage restored. Both must be recorded, with every proof job checked
+// (their rows already present from the live dual-write), nothing refused and
+// nothing new written, each logged in one line. Results go to
+// storage-boot-backfills.json (compare.mjs ignores storage-* files).
+async function bootBackfillProof() {
+  const load = (rel) => import(pathToFileURL(join(repoRoot, rel)).href);
+  const { getDb, closeDb, queryRows } = await load("server/db-runtime/index.js");
+  const { DEFAULT_ORG_UID, withOrg } = await load("server/db-runtime/tenancy.js");
+  const { sql } = await import(pathToFileURL(join(repoRoot, "node_modules/drizzle-orm/index.js")).href);
+  let rows;
+  try {
+    rows = await withOrg(getDb({ env: { FIELD_DB_URL: storageDb.url } }), DEFAULT_ORG_UID, (tx) => queryRows(sql`select id, summary from data_migrations`, tx));
+  } finally {
+    await closeDb();
+  }
+  const ledger = Object.fromEntries(rows.map((row) => [row.id, typeof row.summary === "string" ? JSON.parse(row.summary) : row.summary]));
+  const [quoteId, invoiceId] = BOOT_BACKFILL_IDS;
+  const quote = ledger[quoteId];
+  const invoice = ledger[invoiceId];
+  const lines = restartLog.split("\n").filter((line) => BOOT_BACKFILL_IDS.some((id) => line.includes(`[data-migrations] ${id}:`)));
+  const report = { checks: [], ok: true, ledger: { [quoteId]: quote || null, [invoiceId]: invoice || null }, log: lines };
+  const check = (name, ok, detail = null) => {
+    report.checks.push({ name, ok: Boolean(ok), ...(detail == null ? {} : { detail }) });
+    if (!ok) report.ok = false;
+  };
+  check("the restart's boot recorded the quote rows backfill: every proof job (A, B and the catalogue-sync job) checked, nothing refused, nothing new written", quote
+    && quote.jobs >= 2 && quote.refusedJobs === 0 && quote.written === 0 && quote.alreadyPresent === quote.versions && quote.versions >= 2, quote);
+  check("the restart's boot recorded the invoice rows backfill: job A checked, nothing refused, nothing new written", invoice
+    && invoice.jobsWithMilestones === 1 && invoice.refusedJobs === 0 && invoice.written === 0 && invoice.alreadyPresent === 1, invoice);
+  check("boot logged one line per backfill, each recorded", lines.length === 2
+    && lines.every((line) => /: nothing to change \(.*0 job\(s\) refused; \d+ warning\(s\)\); recorded$/.test(line)), lines);
+  writeFileSync(join(outDir, "storage-boot-backfills.json"), `${JSON.stringify(report, null, 2)}\n`);
+  console.log(`boot backfills proof: ${report.ok ? "OK" : "FAILED"} (${report.checks.filter((entry) => entry.ok).length}/${report.checks.length} checks)`);
+  if (!report.ok) throw new Error(`boot backfills proof failed: ${JSON.stringify(report.checks.filter((entry) => !entry.ok))}`);
+}
+
 // Invoice rows (#27): the live dual-write left job A's milestone invoices as
 // rows. Invoice 0 is paid, with exactly the subtotal, GST and total printed on
 // the invoice PDF the proof fetched (a08) and a claim line for its subtotal,
@@ -609,7 +660,7 @@ async function invoiceRowsProof({ aid }) {
     && Object.keys(dry.report.actions).every((action) => action === "unchanged"), { code: dry.code, actions: dry.report?.actions, stderr: dry.stderr });
   check("a real backfill run writes nothing new", clean(real)
     && Object.keys(real.report.actions).every((action) => action === "unchanged"), { code: real.code, actions: real.report?.actions });
-  // As production runs it (docs/REPLIT.md): the files restored from durable storage.
+  // From the files restored from durable storage (--from-storage).
   const stored = run(["--from-storage", "--dry-run"]);
   report.fromStorage = stored.report;
   check("--from-storage restores the stored files, verifies the same jobs and finds nothing to write", clean(stored)

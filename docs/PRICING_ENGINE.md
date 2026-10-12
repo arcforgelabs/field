@@ -797,11 +797,13 @@ Rules for the migration:
   The migration verifies, per quote, that the new totals equal the totals on
   the PDF the customer received, to the cent. Any mismatch is reported and
   refuses the migration. Built as `scripts/backfill-quote-rows.js` (#6;
-  see "Phase 3, step by step"), which refuses per job.
+  see "Phase 3, step by step"), which refuses per job, and run at boot as a
+  data migration (#36).
 - Milestone state becomes `payment_milestones`, and issued revisions become
   issued `invoices` with their stored PDFs. Built as
   `scripts/backfill-invoice-rows.js` (#27), which verifies every issued
-  invoice against its PDF and refuses per job.
+  invoice against its PDF and refuses per job, and run at boot as a data
+  migration (#36).
 - The old files stay read-only in the job folder until the watch period ends.
 
 ## Price book UI
@@ -1008,9 +1010,11 @@ stay the source of truth, and nothing reads the rows yet.
   its versions pass. A failing job is reported per version with both
   numbers, nothing is written for it, and the run exits 2. A second run
   writes nothing new. Without a database, `--dry-run` checks the files
-  alone. It is not a boot step of the data-migration runner: like the
-  issued-document backfill, it becomes one only after a production dry run
-  shows what it would refuse.
+  alone. Since #36 production runs it at boot as the data migration
+  `2026-10-13-quote-rows-backfill`: every job that verifies is written,
+  each refused job is logged with both numbers, and the migration is
+  recorded only when nothing is refused, so a later boot retries
+  (`docs/REPLIT.md`, "The row backfills").
 - **Every sent PDF's totals reproduce.** With the 2026-10-12 decisions
   (GST on the subtotal, line totals as printed, four-decimal rates), the
   three cases the first version of this step could not reproduce (GST per
@@ -1091,8 +1095,9 @@ nothing reads the rows yet. No customer document changes.
   [--json] [--data-dir <dir> | --from-storage]` writes every job that
   passes and refuses the rest (exit 2). A second run writes nothing new.
   Run the quote-row backfill first, so invoices link their quote versions.
-  Production runs it from the stored files (`docs/REPLIT.md`, "Invoice rows
-  backfill").
+  Production runs it at boot as the data migration
+  `2026-10-13-invoice-rows-backfill`, after the quote rows (#36;
+  `docs/REPLIT.md`, "The row backfills").
 - **What does not reproduce exactly.** A payment recorded against a
   revision that was later superseded stays on that revision (that is what
   the payment record says), so the new revision's `amount_paid` can be

@@ -4,7 +4,10 @@
 // equal what Field shows, to the cent, and a sent version's equal the totals
 // on the PDF the customer was sent. A job with any mismatch is reported with
 // both numbers and nothing is written for it. Idempotent: a second run writes
-// nothing new. Never writes to the data directory.
+// nothing new. Never writes to the data directory. Production does not run
+// this script: the published app runs the same backfill at boot as a data
+// migration (docs/REPLIT.md "The row backfills"), and a Replit workspace's
+// DATABASE_URL is the workspace's own database, not production's.
 //
 //   node scripts/backfill-quote-rows.js [--dry-run] [--json] [--data-dir <dir>]
 //
