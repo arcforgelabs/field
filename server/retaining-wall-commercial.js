@@ -1,4 +1,5 @@
 import { buildMaterialOrdersFromLines } from "./quote-quantity-rules.js";
+import { taxOnSubtotal } from "../shared/money.js";
 import {
   buildCommercialItemReference,
   buildStructuredTrace,
@@ -982,7 +983,7 @@ export function buildQuoteFromWallModel({ model, design, rateCard, meta, version
   const subtotal = wallCharge == null || ancillaryCharge == null
     ? null
     : roundMoney(wallCharge + ancillaryCharge);
-  const gst = subtotal == null ? null : roundMoney(subtotal * 0.1);
+  const gst = subtotal == null ? null : taxOnSubtotal(subtotal, 0.1);
   const rockOptionTotalIncGst = rockAlternative
     && rockAlternative.totals.charge != null
     && ancillaryCharge != null

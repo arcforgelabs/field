@@ -16,6 +16,7 @@ import {
   normalizeTraceNotes,
 } from "./quote-trace.js";
 import { formatCatalogUnit, formatCatalogUnitText } from "../shared/catalog-units.js";
+import { taxOnSubtotal } from "../shared/money.js";
 
 function validMoney(value) {
   return value != null && Number.isFinite(Number(value));
@@ -840,7 +841,7 @@ function buildScenarioQuoteTotals({
 }) {
   const gstRate = Number(quote?.quoteCatalog?.gstRate || 0);
   const subtotal = roundMoney(activeCustomerSubtotal);
-  const gst = subtotal == null ? null : roundMoney(subtotal * gstRate);
+  const gst = subtotal == null ? null : taxOnSubtotal(subtotal, gstRate);
   return {
     ...(quote?.totals || {}),
     subtotal,

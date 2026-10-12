@@ -533,6 +533,41 @@ test("manual-only quotes do not rehydrate manual rows as duplicate engine rows",
   });
 });
 
+test("GST on a subtotal that lands on exactly half a cent rounds up to the cent (#2)", () => {
+  const quote = applyPresentationToQuote({
+    quote: { quoteCatalog: { gstRate: 0.1 }, summary: "Half-cent GST", lineItems: [] },
+    overrides: {
+      presentation: {
+        organizer: {
+          root: ["manual:fee"],
+          nodes: {
+            "manual:fee": {
+              kind: "source",
+              origin: "manual",
+              sourceCode: "manual-fee",
+              labelOverride: "Fee",
+              quantity: 1,
+              unit: "nos",
+              sellRate: 21.15,
+              buyRate: 10,
+              rateMode: "catalog-linked",
+              catalogItemCode: "FEE",
+            },
+          },
+        },
+      },
+    },
+  });
+  // 21.15 × 0.1 is 2.1149999999999998 in floating point, which used to print $2.11.
+  assert.deepEqual(getCustomerPresentationFinancials(quote), {
+    charge: 21.15,
+    cost: 10,
+    subtotal: 21.15,
+    gst: 2.12,
+    total: 23.27,
+  });
+});
+
 test("source overrides replace nested subtree totals instead of adding on top of children", () => {
   const parentNodeId = buildPresentationSourceNodeId("parent");
   const childNodeId = buildPresentationSourceNodeId("child");

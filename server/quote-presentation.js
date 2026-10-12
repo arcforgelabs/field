@@ -1,3 +1,4 @@
+import { taxOnSubtotal } from "../shared/money.js";
 import {
   buildRenderedPresentationScheduleItems,
   calculatePresentationScheduleTotals,
@@ -168,7 +169,7 @@ export function getCustomerPresentationFinancials(quote) {
     sourceItems,
   });
   const subtotal = roundMoney(pricing.charge);
-  const gst = Math.round(subtotal * gstRate * 100) / 100;
+  const gst = taxOnSubtotal(subtotal, gstRate);
   return {
     charge: subtotal,
     cost: roundMoney(pricing.cost),
