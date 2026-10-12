@@ -103,7 +103,7 @@ export function QuoteEmailEditor({
   attachments = [],
   onAttachmentsChange,
   fullPage = false,
-  signatureName = "Your Business",
+  signatureName = "",
 }: QuoteEmailEditorProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -199,7 +199,7 @@ export function QuoteEmailEditor({
   }
 
   function insertSignature() {
-    const name = (signatureName.trim() || "Your Business")
+    const name = signatureName.trim()
       .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
     editor?.chain().focus().insertContent(`<p>Regards,<br/>${name}</p>`).run();
   }

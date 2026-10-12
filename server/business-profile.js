@@ -9,7 +9,8 @@
 // every new quote's snapshot), PDFs, issued-document records and email.
 //
 // Shape (every field optional; a field left out keeps the catalogue's value,
-// an empty string clears it):
+// an empty string clears it). `tradingName` is optional: where it is unset or
+// empty, documents and email use `legalName` (businessDisplayName below).
 //   {
 //     "tradingName": "...", "legalName": "...", "abn": "...", "address": "...",
 //     "phone": "...", "email": "...",
@@ -76,9 +77,36 @@ export function hasBusinessProfileOverride() {
   return override !== null;
 }
 
-/** The configured trading name, or null. */
-export function configuredTradingName() {
-  return override?.fields.tradingName || null;
+/** What documents say when a profile names no business at all. */
+export const DEFAULT_BUSINESS_NAME = "Business name not set";
+
+function nameOf(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** The name a profile issues documents under: its trading name, else its legal name, else null. */
+export function businessNameOf(profile) {
+  return nameOf(profile?.tradingName) || nameOf(profile?.legalName) || null;
+}
+
+/**
+ * The one place the business's printed name is decided: the trading name,
+ * else the legal name, else a neutral default. Used for the PDF issuer, header
+ * and footer, email header, body, signature and sender-name fallback, quote
+ * snapshots' issuer and issued-document records.
+ */
+export function businessDisplayName(profile) {
+  return businessNameOf(profile) || DEFAULT_BUSINESS_NAME;
+}
+
+/** True when config names the business (a trading or legal name, empty strings included). */
+export function configuresBusinessName() {
+  return Boolean(override && ("tradingName" in override.fields || "legalName" in override.fields));
+}
+
+/** The installation's own business name: the configured profile's, else the neutral default. */
+export function installationBusinessName() {
+  return businessDisplayName(applyBusinessProfileOverride({}));
 }
 
 /**

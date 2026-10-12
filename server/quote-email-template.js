@@ -1,3 +1,4 @@
+import { DEFAULT_BUSINESS_NAME } from "./business-profile.js";
 import mjml2html from "mjml";
 
 const COLORS = {
@@ -28,7 +29,7 @@ export function renderQuoteEmailHtml({
   gst,
   total,
   documentType = "quote",
-  companyName = "Your Business",
+  companyName = DEFAULT_BUSINESS_NAME,
   companyAbn = "",
   companyAddress = "Your business address",
   companyPhone = "",

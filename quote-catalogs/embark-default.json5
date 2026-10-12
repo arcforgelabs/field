@@ -24,7 +24,6 @@
   // Business profile — the source of truth for identity and payment details.
   // Not hardcoded in code. Each price list / client can override.
   "businessProfile": {
-    "tradingName": "Your Business",
     "legalName": "Your Business Pty Ltd",
     "abn": "",
     "address": "Your business address",
@@ -404,7 +403,6 @@
     }
   ],
   "deliveryDefaults": {
-    "issuerName": "Your Business",
     "validityDays": 14,
     "paymentTerms": "10% deposit due upon acceptance of this quote to secure booking. 30% progress payment due upon commencement of works. Remaining balance due within 7 days of project completion.",
     "footerNote": "This quote is based on the listed scope, rate card, and assumptions current at issue time."

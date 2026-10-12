@@ -84,15 +84,14 @@ For a real installation:
 
 ### Business profile
 
-Your trading name, legal name, ABN, address, phone, email and bank account
-go in config as `businessProfile`, in the same shape as the quote catalogue's
+Your legal name, trading name (optional), ABN, address, phone, email and bank
+account go in config as `businessProfile`, in the same shape as the quote catalogue's
 (see `config.json.example`). On Replit or Docker, put it in the
 `FIELD_CONFIG_JSON` secret so real details never enter the repository:
 
 ```json
 {
   "businessProfile": {
-    "tradingName": "Your Business",
     "legalName": "Your Business Pty Ltd",
     "abn": "00 000 000 000",
     "address": "1 Example Street, Exampleton SA 5000",
@@ -105,12 +104,15 @@ go in config as `businessProfile`, in the same shape as the quote catalogue's
 }
 ```
 
-It is merged over the catalogue's profile: a field left out keeps the
-catalogue's value, and an empty string clears it. Field applies it to the
+Add `"tradingName": "..."` only if you trade under a name other than your
+legal name. Documents and email use the trading name where one is set, and
+the legal name otherwise. It is merged over the catalogue's profile: a field
+left out keeps the catalogue's value, and an empty string clears it (an empty
+`tradingName` falls back to the legal name). Field applies it to the
 quote catalogue (so every new quote records it), to quote, invoice and receipt
 PDFs, to issued-document records, and to email: the plain-text body, the
-sender-name fallback and the stock signatures sign with its trading name,
-which is also the issuer printed at the top of each document. A document
+sender-name fallback and the stock signatures sign with that name, which is
+also the issuer printed at the top of each document. A document
 already sent is a stored file and never changes. An unknown field or a
 non-string value stops Field at boot with a message naming the field (never
 its value). The boot log says `[field] business profile: configured in ...`

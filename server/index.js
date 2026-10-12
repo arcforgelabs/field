@@ -24,6 +24,7 @@ import { createR2ObjectStore } from "./documents/r2-client.js";
 import { createDisabledReplicator, createDocumentReplicator } from "./documents/replicator.js";
 import { startDurableStorage } from "./storage/durable-store.js";
 import { heldDataMigrations, runDataMigrations } from "./data-migrations/index.js";
+import { businessDisplayName } from "./business-profile.js";
 import { registerSqliteImage } from "./storage/durable-hooks.js";
 import {
   createClerkAuth,
@@ -285,7 +286,7 @@ const UI_CONFIG = {
   workerDisplayName: process.env.FIELD_WORKER_DISPLAY_NAME || config.workerDisplayName || "Agent",
   assistantDisplayName: process.env.FIELD_ASSISTANT_DISPLAY_NAME || config.assistantDisplayName || "",
   // The name stock email signatures sign with.
-  businessName: getQuoteCatalog()?.businessProfile?.tradingName || "",
+  businessName: businessDisplayName(getQuoteCatalog()?.businessProfile),
 };
 
 if (!AUTH_TOKEN) {

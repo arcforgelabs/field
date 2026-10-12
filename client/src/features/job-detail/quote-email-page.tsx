@@ -1884,7 +1884,7 @@ function buildEmailTemplates({
   businessName?: string;
 }): QuoteEmailTemplate[] {
   const greeting = clientName ? `Hi ${escapeText(clientName)},` : "Hi,";
-  const signature = escapeText(businessName.trim() || "Your Business");
+  const signature = escapeText(businessName.trim());
   const escapedJobTitle = escapeText(jobTitle);
   if (!documentType) {
     return [
@@ -1985,7 +1985,7 @@ function buildDefaultSubject({
   documentType: JobDocumentType | null;
   milestoneInvoice: MilestoneInvoice | null;
 }) {
-  const title = detail?.meta.title || detail?.meta.label || detail?.meta.siteAddress || detail?.ui?.businessName || "Your Business";
+  const title = detail?.meta.title || detail?.meta.label || detail?.meta.siteAddress || detail?.ui?.businessName || "";
   if (documentType === "invoice") {
     return ["Invoice", milestoneInvoice?.invoiceNumber, milestoneInvoice?.milestoneLabel || title].filter(Boolean).join(" - ");
   }

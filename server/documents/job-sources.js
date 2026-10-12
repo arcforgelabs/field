@@ -2,6 +2,7 @@
 // Read-only: nothing here writes to a job directory. Used by the live
 // dual-write (server/documents/recorder.js) and the backfill
 // (server/documents/backfill.js).
+import { businessNameOf } from "../business-profile.js";
 import { readFile } from "../storage/fs-promises.js";
 import { resolve, sep } from "node:path";
 import { resolveActiveJobGeneration } from "../job-generation.js";
@@ -60,7 +61,8 @@ export function partiesDetails({ meta = null, quote = null }) {
       siteAddress: text(meta?.siteAddress),
     }),
     business: compact({
-      tradingName: text(business?.tradingName),
+      // The name it was issued under: trading name, else legal name.
+      tradingName: text(businessNameOf(business)),
       legalName: text(business?.legalName),
       abn: text(business?.abn),
       address: text(business?.address),
