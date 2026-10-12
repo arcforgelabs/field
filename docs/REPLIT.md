@@ -484,12 +484,17 @@ upstream project; your fork otherwise).
   open a PR, merge on GitHub, then pull.
 - `scripts/github-sync.sh status`: remote, ahead/behind, and whether
   `GITHUB_TOKEN` works.
-- `scripts/github-sync.sh pull`: fast-forward `main` from GitHub.
+- `scripts/github-sync.sh pull`: fast-forward `main` from GitHub. It needs no
+  token for a public repository. It drops Replit's "Published your App"
+  commits when together they change no files, and stops if a local commit
+  changes files.
 - `scripts/github-sync.sh open-pr "<title>" [body-file]`: push the current
   branch and open a PR.
 - `scripts/github-sync.sh handoff`: what to click in the Git pane when no
   token is set.
 
-`GITHUB_TOKEN` (Replit Secret) is a fine-grained token whose resource owner is
-the repository's owner, scoped to this repo only, with Contents and Pull requests
-read/write. The Agent's instructions are in `.agents/skills/github-sync/SKILL.md`.
+`GITHUB_TOKEN` (Replit Secret) is needed only to push or open pull requests
+from the workspace. When used, it is a fine-grained token whose resource owner
+is the repository's owner, scoped to this repo only, with Contents and Pull
+requests read/write. Without it, the workspace only pulls, and changes reach
+GitHub through pull requests opened elsewhere. The Agent's instructions are in `.agents/skills/github-sync/SKILL.md`.
