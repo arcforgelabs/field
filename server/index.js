@@ -26,6 +26,7 @@ import { createR2ObjectStore } from "./documents/r2-client.js";
 import { createDisabledReplicator, createDocumentReplicator } from "./documents/replicator.js";
 import { startDurableStorage } from "./storage/durable-store.js";
 import { heldDataMigrations, runDataMigrations } from "./data-migrations/index.js";
+import { createDataMigrationDryRunHandler, DRY_RUN_PATH as DATA_MIGRATIONS_DRY_RUN_PATH } from "./data-migrations/dry-run-route.js";
 import { businessDisplayName } from "./business-profile.js";
 import { registerSqliteImage } from "./storage/durable-hooks.js";
 import {
@@ -1012,6 +1013,26 @@ app.get("/api/storage/status", requireAuth, requireAdmin, (_req, res) => {
     documentReplica: documentReplica.status(),
   });
 });
+
+// The data-migration dry run against the live data and database, writing
+// nothing (server/data-migrations/dry-run-route.js): how an operator checks a
+// release in production without its credentials. Admin (owner) only, one at
+// a time, with a time limit.
+app.get(DATA_MIGRATIONS_DRY_RUN_PATH, requireAuth, requireAdmin, createDataMigrationDryRunHandler({
+  run: async ({ signal }) => {
+    if (!catalogStore || !deploymentOrg) return null;
+    return runDataMigrations({
+      db: getDb(),
+      orgUid: deploymentOrg.uid,
+      dataDir: DATA_DIR,
+      getState: () => catalogStore.getState({ fresh: true }),
+      catalogStore,
+      mode: "dry-run",
+      signal,
+      logger: { log() {}, warn() {} },
+    });
+  },
+}));
 
 app.get("/api/users", requireAuth, requireAdmin, (_req, res) => {
   res.json({ ok: true, users: listUsers() });
@@ -5575,7 +5596,10 @@ if (existsSync(clientIndex)) {
 // that run once, after the schema migrations and before anything is served
 // or scheduled. Each verifies itself before writing and is recorded in
 // data_migrations; a failure stops boot with nothing half-applied. With
-// durable storage their file changes are stored in one flush.
+// durable storage their file changes are stored in one flush. The quote and
+// invoice row backfills write each job that verifies; a refused job is
+// logged, never stops boot, and leaves its backfill unrecorded so the next
+// boot retries it.
 // FIELD_DATA_MIGRATIONS_HOLD=<id>|all skips them (emergency stop, logged).
 if (catalogStore && deploymentOrg) {
   try {

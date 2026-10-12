@@ -15,7 +15,10 @@
 // come from what durable storage holds in that database instead: they are
 // restored, through a read-only session, into a new directory under the
 // system temporary directory, and that directory is deleted when the run
-// ends (docs/REPLIT.md "Invoice rows backfill"). Refuses to run while migrations
+// ends. Production does not run this script: the published app runs the same
+// backfill at boot as a data migration (docs/REPLIT.md "The row backfills"),
+// and a Replit workspace's DATABASE_URL is the workspace's own database, not
+// production's. Refuses to run while migrations
 // are pending: boot the server once to apply them. The organisation is the
 // deployment's (FIELD_ORG, default organisation). Run the quote-row backfill
 // first, so invoices link the quote versions they bill. --dry-run writes

@@ -148,6 +148,7 @@ async function plan(context) {
   let filesScanned = 0;
   let rowsScanned = 0;
   for (const jobDir of listJobDirs(context.dataDir)) {
+    context.signal?.throwIfAborted();
     const activeDir = await resolveActiveJobGeneration(jobDir);
     const files = [];
     const paths = quoteFilePaths(activeDir);
@@ -185,6 +186,7 @@ async function verify(context, planned) {
   let pdfsCompared = 0;
   let pdfsUnrenderable = 0;
   for (const job of planned.jobs) {
+    context.signal?.throwIfAborted();
     const meta = (() => {
       for (const dir of [job.activeDir, job.jobDir]) {
         try { return readJson(join(dir, "meta.json")).json; } catch { /* next */ }

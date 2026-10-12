@@ -231,8 +231,10 @@ migrated only to 0006. Roll back 0007 before 0006.
 
 `0008_data_migrations` adds `data_migrations` (org, id, applied_at, summary),
 the record of data migrations that ran (`server/data-migrations/`, run at
-boot by `server/index.js` and rehearsed by `npm run data:migrate --
---dry-run`; procedure in `docs/REPLIT.md` "Data migrations"). A recorded
+boot by `server/index.js`, rehearsed by `npm run data:migrate --
+--dry-run` and checked in a running installation with `GET
+/api/admin/data-migrations/dry-run`; procedure in `docs/REPLIT.md` "Data
+migrations"). A recorded
 migration never runs again. `field_app` may read and insert, never update or
 delete. `rollback/0008_data_migrations.down.sql` drops it (roll back 0008
 before 0007).

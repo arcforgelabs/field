@@ -14,18 +14,35 @@
 //   plan file this installation does not ship) is reported as "deferred" and
 //   NOT recorded, so it can still run later once its plan is supplied.
 //
+// A per-job migration (row-backfills.js) is instead { id, title, perJob:
+// true, requires, run(ctx, { dryRun }), describe(summary) }: `run` checks
+// every job and writes each one that verifies, and returns { summary,
+// refused }. A refused job never stops boot. With nothing refused it is
+// recorded; with refusals, or while a migration it `requires` is not yet
+// recorded, it is reported "incomplete" and NOT recorded, so the next boot
+// runs it again. Each refused job is logged by id with both numbers. It
+// writes database rows only, which the rehearsal's catalogue-only copy does
+// not hold, so a rehearsal reports it "skipped".
+//
 // `npm run data:migrate -- --dry-run` runs plan and verify only and prints
-// exactly what would change (scripts/data-migrations-cli.js).
+// exactly what would change (scripts/data-migrations-cli.js). In the
+// published app, GET /api/admin/data-migrations/dry-run does the same
+// against the live data and database, writing nothing (dry-run-route.js).
 import { sql } from "drizzle-orm";
 import { withOrg } from "../db-runtime/tenancy.js";
 import { DataMigrationError } from "./errors.js";
 import { priceBookCleanup } from "./price-book-cleanup.js";
 import { quoteRowsByUid } from "./quote-rows-by-uid.js";
+import { describeRefusedJob, invoiceRowsBackfill, quoteRowsBackfill } from "./row-backfills.js";
 
 export { DataMigrationError };
 
-/** In the order they run. */
-export const DATA_MIGRATIONS = Object.freeze([quoteRowsByUid, priceBookCleanup]);
+/**
+ * In the order they run. The backfills come after the uid re-key, so they
+ * read the files as it left them, and the invoice rows after the quote rows,
+ * so invoices link the quote versions they bill.
+ */
+export const DATA_MIGRATIONS = Object.freeze([quoteRowsByUid, priceBookCleanup, quoteRowsBackfill, invoiceRowsBackfill]);
 
 function rowsOf(result) {
   return Array.isArray(result) ? result : result?.rows || [];
@@ -50,9 +67,12 @@ export async function recordDataMigration(tx, { id, summary, appliedAt }) {
  * (boot), "dry-run" (plan and verify only) or "rehearse" (all of it, against
  * throwaway copies: rehearsal.js). Returns one report entry per migration:
  * { id, title, status: "applied" | "rehearsed" | "would-apply" |
- * "nothing-to-do" | "already-applied" | "held" | "deferred", summary, changes }.
+ * "nothing-to-do" | "already-applied" | "held" | "deferred" | "incomplete" |
+ * "would-refuse" | "skipped", summary, changes }.
  * A failed verification or write throws; the caller (boot) exits, so Field
- * never serves half a migration.
+ * never serves half a migration. A per-job migration's refused jobs do not
+ * throw: they leave it "incomplete" (in a dry run, "would-refuse").
+ * `signal` (an AbortSignal) stops a per-job migration between jobs.
  */
 export async function runDataMigrations({
   db,
@@ -67,11 +87,13 @@ export async function runDataMigrations({
   flush = async () => {},
   now = () => new Date(),
   logger = console,
+  signal = null,
 } = {}) {
   if (!["apply", "dry-run", "rehearse"].includes(mode)) throw new Error(`mode must be apply, dry-run or rehearse, not ${mode}`);
   const ledger = await readDataMigrationLedger(db, orgUid);
   const held = new Set(hold);
   const report = [];
+  const recorded = new Set(ledger.keys());
   for (const migration of migrations) {
     if (only && !only.includes(migration.id)) continue;
     if (ledger.has(migration.id)) {
@@ -83,7 +105,13 @@ export async function runDataMigrations({
       logger.warn?.(`[data-migrations] ${migration.id} held by FIELD_DATA_MIGRATIONS_HOLD; not run`);
       continue;
     }
-    const context = { db, orgUid, dataDir, getState, catalogStore, now, logger, mode };
+    const context = { db, orgUid, dataDir, getState, catalogStore, now, logger, mode, signal };
+    if (migration.perJob) {
+      const outcome = await runPerJobMigration(migration, context, recorded);
+      if (outcome.recorded) recorded.add(migration.id);
+      report.push(outcome.report);
+      continue;
+    }
     const plan = await migration.plan(context);
     if (plan?.deferred) {
       report.push({ id: migration.id, title: migration.title, status: "deferred", reason: plan.deferredReason || null });
@@ -103,11 +131,44 @@ export async function runDataMigrations({
       await flush({ reason: `data migration ${migration.id}` });
       await withOrg(db, orgUid, (tx) => recordDataMigration(tx, { id: migration.id, summary, appliedAt }));
     }
+    recorded.add(migration.id);
     const done = mode === "rehearse" ? "rehearsed" : "applied";
     report.push({ ...entry, summary: migration.summarize(plan), status: summary.changed ? done : "nothing-to-do", ...(result?.report ? { applied: result.report } : {}) });
     logger.log?.(`[data-migrations] ${migration.id}: ${summary.changed ? `${done} (${migration.describe(summary)})` : "nothing to change"}; recorded`);
   }
   return report;
+}
+
+/**
+ * One per-job migration (see the top of this file). Returns { report,
+ * recorded }. Logs one line with the counts, and one line per refused job.
+ */
+async function runPerJobMigration(migration, context, recorded) {
+  const { id, title } = migration;
+  const { mode, logger } = context;
+  if (mode === "rehearse") {
+    return {
+      report: { id, title, status: "skipped", reason: "it writes database rows only, which the rehearsal copy does not hold; check it in the published app with GET /api/admin/data-migrations/dry-run" },
+      recorded: false,
+    };
+  }
+  const dryRun = mode === "dry-run";
+  const { summary, refused } = await migration.run(context, { dryRun });
+  const waitingFor = (migration.requires || []).filter((required) => !recorded.has(required));
+  const entry = { id, title, summary, refused, ...(waitingFor.length ? { waitingFor } : {}) };
+  if (dryRun) {
+    return { report: { ...entry, status: refused.length ? "would-refuse" : summary.changed ? "would-apply" : "nothing-to-do" }, recorded: false };
+  }
+  const counts = migration.describe(summary);
+  if (refused.length || waitingFor.length) {
+    const why = [refused.length ? `${refused.length} job(s) refused` : null, waitingFor.length ? `waits for ${waitingFor.join(", ")}` : null].filter(Boolean).join("; ");
+    logger.warn?.(`[data-migrations] ${id}: incomplete (${counts}); not recorded (${why}), runs again at next boot`);
+    for (const job of refused) logger.warn?.(`[data-migrations] ${id}: refused ${describeRefusedJob(job)}`);
+    return { report: { ...entry, status: "incomplete" }, recorded: false };
+  }
+  await withOrg(context.db, context.orgUid, (tx) => recordDataMigration(tx, { id, summary, appliedAt: context.now() }));
+  logger.log?.(`[data-migrations] ${id}: ${summary.changed ? "applied" : "nothing to change"} (${counts}); recorded`);
+  return { report: { ...entry, status: summary.changed ? "applied" : "nothing-to-do" }, recorded: true };
 }
 
 /** FIELD_DATA_MIGRATIONS_HOLD=<id>[,<id>] or "all": an emergency stop, logged at boot. */
