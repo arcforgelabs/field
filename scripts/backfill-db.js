@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { execFile } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 import {
   buildBackfillBundle,
   renderImportSql,
@@ -10,7 +9,6 @@ import {
   summarizeBundle,
 } from "../server/db/job-backfill.js";
 
-const execFileAsync = promisify(execFile);
 const DB_ROOT = resolve(import.meta.dirname, "../server/db");
 const DEFAULT_SCHEMA_PATH = join(DB_ROOT, "migrations", "0001_initial.sql");
 
@@ -86,10 +84,11 @@ Options:
   --recording <id>           Limit import to one recording directory or legacy recording ID.
   --limit <n>                Limit the number of recording directories scanned.
   --emit-sql <path|->        Write SQL to a file or stdout.
-  --apply                    Apply generated SQL through psql using DATABASE_URL or FIELD_DATABASE_URL.
+  --apply                    Apply generated SQL through psql to the database named by --database-url.
   --include-schema           Prepend the initial schema migration to the emitted SQL.
   --schema-path <path>       Override schema path used with --include-schema.
-  --database-url <url>       Override DATABASE_URL for --apply.
+  --database-url <url>       Target database for --apply. Required: DATABASE_URL and FIELD_DATABASE_URL
+                             are never read, because on Replit they name Field's own database.
   --psql <cmd>               Override the psql executable path.
   --seed-backup-jobs         Seed pending google_drive rows into backup_jobs for eligible storage objects.
   --help                     Show this message.
@@ -97,7 +96,7 @@ Options:
 Examples:
   node scripts/backfill-db.js --source-root docs/reference-recordings/processed
   node scripts/backfill-db.js --source-root /path/to/field/data --emit-sql /tmp/field-backfill.sql
-  node scripts/backfill-db.js --source-root /path/to/field/data --include-schema --apply --seed-backup-jobs
+  node scripts/backfill-db.js --source-root /path/to/field/data --include-schema --apply --database-url postgres://localhost/field_legacy --seed-backup-jobs
 `.trim());
 }
 
@@ -107,6 +106,16 @@ async function main() {
     if (options.help) {
       printHelp();
       return;
+    }
+
+    // Fail closed: only a target named on the command line. DATABASE_URL and
+    // FIELD_DATABASE_URL are Field's own database on Replit, and the SQL
+    // itself refuses a database with Drizzle migrations (renderImportSql).
+    if (options.apply && !options.databaseUrl) {
+      throw new Error(
+        "--apply needs --database-url <url> naming a dedicated, empty database. "
+          + "DATABASE_URL and FIELD_DATABASE_URL are never used: on Replit they are Field's own database.",
+      );
     }
 
     const sourceRoot = resolve(options.sourceRoot || resolveFieldDataRoot());
@@ -141,16 +150,17 @@ async function main() {
     }
 
     if (options.apply) {
-      const databaseUrl = options.databaseUrl || process.env.FIELD_DATABASE_URL || process.env.DATABASE_URL;
-      if (!databaseUrl) {
-        throw new Error("DATABASE_URL or FIELD_DATABASE_URL required for --apply");
-      }
-
       const psql = options.psql || process.env.PSQL || "psql";
-      await execFileAsync(psql, [databaseUrl, "-v", "ON_ERROR_STOP=1", "-f", "-"], {
-        input: sql,
-        maxBuffer: 1024 * 1024 * 20,
-      });
+      // Synchronous so `input` reaches psql's stdin; the async execFile ignores it.
+      try {
+        execFileSync(psql, [options.databaseUrl, "-v", "ON_ERROR_STOP=1", "-f", "-"], {
+          input: sql,
+          stdio: ["pipe", "inherit", "inherit"],
+        });
+      } catch (error) {
+        // error.message repeats the command line, and the URL can hold a password.
+        throw new Error(`psql failed (exit ${error.status ?? error.code}); see its error above`);
+      }
       console.log("SQL applied via psql");
     }
   } catch (error) {
