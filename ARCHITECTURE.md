@@ -349,6 +349,32 @@ An issued invoice is a money document, not a projection of the current quote.
 - `migrateJobMilestoneInvoices` produces the same audited revisions for any issued invoice whose claim it moves.
 - **An invoice is issued when it is finalised (#28).** Authorising it, sending it or issuing a revision calls the invoice issue service (`server/invoices/issue.js`) before the job generation commits: in one PostgreSQL transaction, under the organisation's issue lock, it allocates the number from `document_number_counters`, renders the PDF once with it, stores the bytes (`document_blobs`, then the R2 replica) with an `issued_documents` row and an `issued` event, and writes the frozen `invoices` row with the job number as its required reference. The milestone then carries that number, and the exact stored bytes are written at its PDF path. A failed issue rolls the number back, so the sequence has no gaps; a retried issue (same job, milestone, revision and money) returns the same invoice, number and bytes. A server without a database refuses to issue. Email is delivery: an `emailed` event (with the hash of the bytes sent) or an `email_failed` event against the issued document. A failed email never undoes the issue, and a resend sends the stored bytes.
 - Revisions issued before the sequence are issued documents too, under their own numbers (`EI-...-M<n>` or `-R<k>`), recorded once the generation that froze them committed (see "Every issued document has a uid" below).
+- **Legacy invoices.** A record issued before 2026-08-05 never froze a snapshot.
+  - Its first rebuild freezes the stored amounts. It pins the quote that is
+    current then and marks it `quoteVersionInferred`.
+  - It adopts the file on disk as the issued PDF and never overwrites it.
+  - Before 2026-08-05, every milestone action re-allocated every milestone's
+    amounts and redrew only the targeted milestone's PDF. So the record and
+    the file can come from different quote versions.
+  - When the adopted file claims a different total, the job activity says so
+    (`invoice.adopted_pdf_differs`).
+  - A missing legacy PDF is never redrawn from its inferred version. It stays
+    unrecoverable (410) until someone restores the file.
+- **What was sent decides (#60).** The sources, strongest first
+  (`server/invoices/sent-copies.js`):
+  1. An `issued_documents` row with an `emailed` event.
+  2. An issuance-ledger invoice delivery. Both hold hash-checked bytes.
+  3. The sent-email archive. It names the quote version but holds no hash
+     before the issuance ledger.
+  4. The stored revision PDF.
+  5. The milestone record.
+- **Settling a disagreement.** `settleJobMilestoneInvoiceAmounts` records an
+  owner's choice of the record, the stored PDF or the emailed copy on the
+  revision (`amountsSettlement`: who, when, why, and the amounts recorded
+  before).
+  - What is owed follows the choice. The PDF and the payments do not change.
+  - The owner routes are `GET /api/admin/invoices/amount-disagreements` and
+    `POST /api/admin/invoices/amount-disagreements/settle`.
 - `GET /api/jobs/:id/milestones/:index/pdf` serves an issued revision's stored bytes and accepts `?revision=<n>` to address a superseded one. `GET /api/jobs/:id/milestones/:index/revisions` lists the history. The `field` CLI exposes `credit-invoice` (formerly `revise-invoice`) and `list-invoice-revisions`. A credit note's PDF is an issued document: `GET /api/jobs/:id/documents` lists it and `GET /api/documents/:uid/pdf` serves it, and the email editor offers it as an attachment when the replacement invoice is sent. An invoice returned to draft and reissued with different content is credited first according to the account setting `creditNoteOnReissue` in `business_settings` (`when-emailed` by default: only when Field has evidence it was emailed or delivered; `always`; `never`), read by the issue service; "Credit and reissue" always credits.
 
 ## Presentation Organizer

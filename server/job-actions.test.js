@@ -5503,7 +5503,7 @@ test("a job stored before artifactState (pdfIssuedAt/pdfUnrecoverable, no artifa
   }
 });
 
-test("a legacy issued invoice with a missing PDF is reconstructed from its pinned quote version, stamped, and audited — not silently re-rendered from the current quote", async () => {
+test("a legacy issued invoice with a missing PDF is never redrawn from its inferred quote version: the action targeting it answers 410 until the file is restored", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-invoice-legacy-reconstruct-"));
 
   try {
@@ -5555,31 +5555,44 @@ test("a legacy issued invoice with a missing PDF is reconstructed from its pinne
     const changed = { ...quote, version: 2, summary: "Changed after the fact — must not be used to reconstruct" };
     await writeFile(join(jobDir, "quote.json"), JSON.stringify(changed, null, 2));
 
+    // The legacy record has no recorded quote version: the one its frozen
+    // revision gets (v2, current at the freeze) is inferred, not the one its
+    // PDF was drawn from. Field must not redraw the PDF from that guess and
+    // store it under the original issue time as if it were the document the
+    // customer was sent: the action that targets it answers 410, as for any
+    // unrecoverable issued invoice, and writes nothing.
     const hydrated = await readJobMeta(jobDir);
-    const resynced = await updateJobMilestone({
+    await assert.rejects(
+      () => updateJobMilestone({
+        jobDir,
+        meta: hydrated,
+        config: {},
+        milestoneIndex: 0,
+        patch: { dueDate: "2026-06-01" },
+      }),
+      (err) => {
+        assert.equal(err.statusCode, 410);
+        assert.match(err.message, /not redrawn from a guessed version/);
+        return true;
+      },
+    );
+    assert.ok(!existsSync(join(jobDir, "milestone-invoices", "EI-RECON-01-M1.pdf")), "no PDF was drawn");
+    const { activity } = await readJobState(jobDir);
+    assert.ok(!activity.some((entry) => entry.kind === "invoice.artifact_reconstructed"));
+
+    // Restoring the file is the way back: the next action adopts it as it is.
+    const restored = Buffer.from("%PDF-1.3 restored copy of the sent invoice\n");
+    await mkdir(join(jobDir, "milestone-invoices"), { recursive: true });
+    await writeFile(join(jobDir, "milestone-invoices", "EI-RECON-01-M1.pdf"), restored);
+    const adopted = await updateJobMilestone({
       jobDir,
-      meta: hydrated,
+      meta: await readJobMeta(jobDir),
       config: {},
       milestoneIndex: 0,
       patch: { dueDate: "2026-06-01" },
     });
-
-    const legacyResult = resynced.meta.milestoneInvoices[0];
-    assert.ok(legacyResult.issuedRevision, "the legacy record synthesized an issued revision");
-    // Reconstruction must stamp `pdfIssuedAt` so the revision reads as
-    // genuinely issued on every later read (the read path depends on this
-    // being reliable) and record a real sha for the newly
-    // written bytes.
-    assert.ok(legacyResult.issuedRevision.pdfIssuedAt, "pdfIssuedAt was stamped on reconstruction");
-    assert.ok(legacyResult.issuedRevision.pdfSha256, "a sha was recorded for the reconstructed bytes");
-
-    const reconstructedPath = join(jobDir, "milestone-invoices", "EI-RECON-01-M1.pdf");
-    assert.ok(existsSync(reconstructedPath), "the reconstructed PDF was written to disk");
-
-    const { activity } = await readJobState(jobDir);
-    const reconstructedActivity = activity.find((entry) => entry.kind === "invoice.artifact_reconstructed");
-    assert.ok(reconstructedActivity, "an invoice.artifact_reconstructed activity event was recorded");
-    assert.match(reconstructedActivity.body, /EI-RECON-01-M1/);
+    assert.equal(adopted.meta.milestoneInvoices[0].issuedRevision.artifactState, ARTIFACT_STATE.STORED);
+    assert.deepEqual(await readFile(join(jobDir, "milestone-invoices", "EI-RECON-01-M1.pdf")), restored);
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }

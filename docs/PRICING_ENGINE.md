@@ -1101,6 +1101,22 @@ nothing reads the rows yet. No customer document changes.
   drafts were built against an earlier quote, the difference is a warning:
   Field rebuilds them on the next milestone action. A job that fails is
   reported with both numbers, and nothing is written for it.
+- **What was sent decides (#60).** Before 2026-08-05, an invoice's milestone
+  record and its PDF could come from different quote versions. Where an
+  issued invoice disagrees with one of its PDFs:
+  - Field may hold hash-verified copies of the emailed PDF (an issued
+    document with an `emailed` event, or an issuance-ledger delivery;
+    `sent-copies.js`). If they agree, the rows take the emailed amounts, with
+    `tax_total_source = printed` and a reason that names both versions. That
+    is a warning, not a refusal. A stored PDF that differs from the emailed
+    copy is reported as not the copy that was sent.
+  - Without such a copy, the job is refused. Its entry lists the archived
+    emails of the invoice: when it was sent, and the quote version it was
+    built against.
+  - An owner settles the invoice through
+    `GET`/`POST /api/admin/invoices/amount-disagreements`
+    (`amount-evidence.js`). A settled invoice's rows carry the settled
+    amounts, as printed, with the decision.
 - **Live.** After every committed job generation, after the quote rows,
   the recorder writes the job's invoice rows. After an invoice or receipt
   email the send path syncs again, so the rows link the issued document. A

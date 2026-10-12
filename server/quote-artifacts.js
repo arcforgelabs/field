@@ -34,6 +34,7 @@ import { applyBusinessProfileOverride, businessDisplayName, configuresBusinessNa
 import { loadQuoteRows } from "./quotes/read-model.js";
 import { claimDescription, customerQuoteReference, quoteReferenceFromMeta, quoteReferenceLine } from "./invoices/customer-wording.js";
 import { isSequenceInvoiceNumber } from "./invoices/numbers.js";
+import { extractInvoicePdfTotals } from "./invoices/issued-totals.js";
 
 const QUOTE_VERSIONS_DIR = "quote-versions";
 
@@ -337,7 +338,7 @@ async function resolvePinnedQuoteArtifactsForReconstruction(jobDir, pinnedQuoteV
 // / `pdfUnrecoverable` a different way.
 //
 // Returns `{ pdfBuffer, pdfPath, relativePdfPath, alreadyIssued, selfHealed,
-// reconstructed, quoteVersionInferred, artifactTransition }`.
+// reconstructed, artifactTransition }`.
 // `artifactTransition` is either `null` (no change — already correctly
 // stored) or `{ pdfPath, toState, pdfSha256, pdfIssuedAt }`, the exact
 // arguments the caller passes to `transitionArtifactState` to commit the
@@ -400,12 +401,27 @@ export async function writeMilestoneInvoiceArtifact({
       // time. Both preserve history; only the preference order
       // was inconsistent between the two branches.
       const pdfIssuedAt = identitySource?.issuedAt || identitySource?.pdfIssuedAt || null;
+      // A legacy file adopted for the first time: before revisions were
+      // frozen, Field re-rendered a milestone's PDF only when an action
+      // targeted it, but re-allocated its amounts on every action, so the
+      // file and the record can come from different quote versions. Adopt
+      // the file regardless (it is never overwritten), and say so when its
+      // claim differs from the record, so an owner settles which was sent.
+      let adoptedClaimDiffers = null;
+      if (state === ARTIFACT_STATE.ADOPT_PENDING && identitySource) {
+        const printed = extractInvoicePdfTotals(existingBytes);
+        const recordedTotal = Math.round(Number(identitySource.total || 0) * 100);
+        if (printed && Math.round(Number(printed.total) * 100) !== recordedTotal) {
+          adoptedClaimDiffers = { printedTotal: printed.total, recordedTotal: (recordedTotal / 100).toFixed(2) };
+        }
+      }
       return {
         pdfBuffer: existingBytes,
         pdfPath,
         relativePdfPath,
         alreadyIssued: true,
         selfHealed: state !== ARTIFACT_STATE.STORED,
+        adoptedClaimDiffers,
         // Convenience top-level mirrors of the transition's data fields —
         // callers that only care about the bytes/hash/timestamp (tests,
         // simple consumers) don't need to unpack `artifactTransition`.
@@ -420,7 +436,24 @@ export async function writeMilestoneInvoiceArtifact({
       };
     }
 
-    // No file at all. Reconstruct from the quote version this revision was
+    // No file at all. A legacy revision (issued before revisions recorded
+    // their quote version) only has a version inferred from whatever quote
+    // was current when it was first frozen, not the one its PDF was drawn
+    // from. Redrawing it from that guess would store a document the customer
+    // was never sent under the original issue time, so it is unrecoverable
+    // until the file itself is restored (the adopt branch above takes it).
+    if (identitySource?.quoteVersionInferred) {
+      const message = `the PDF for invoice ${milestoneInvoice.invoiceNumber || relativePdfPath} is missing, and it was issued before Field recorded which quote version an invoice was drawn from, so it is not redrawn from a guessed version; restore the file to ${relativePdfPath}`;
+      const err = new Error(message);
+      err.statusCode = 410;
+      err.artifactTransition = {
+        pdfPath: relativePdfPath,
+        toState: ARTIFACT_STATE.MISSING,
+        reason: message,
+      };
+      throw err;
+    }
+    // Otherwise reconstruct from the quote version this revision was
     // actually issued against, or fail loudly — never render from whatever
     // quote this call happens to be carrying.
     const pinnedQuoteVersion = issuedRevision?.quoteVersion || historicalMatch?.quoteVersion || null;
@@ -458,10 +491,6 @@ export async function writeMilestoneInvoiceArtifact({
       relativePdfPath,
       alreadyIssued: true,
       reconstructed: true,
-      // A legacy-pinned quote version is a best-effort substitute, not a
-      // historically-accurate record — surfaced so the
-      // caller can word the audit event accordingly.
-      quoteVersionInferred: Boolean(identitySource?.quoteVersionInferred),
       pdfSha256,
       pdfIssuedAt,
       artifactTransition: {

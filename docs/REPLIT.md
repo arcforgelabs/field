@@ -159,6 +159,50 @@ The boot log has one line per backfill:
 "nothing to change" in place of "applied" means every job was already
 present. The numbers above are an example.
 
+### Legacy invoices whose record and PDF disagree
+
+Milestone invoices issued before 2026-08-05 can hold amounts from one quote
+version while their stored PDF prints another (#60). Before that date, every
+milestone action re-allocated every milestone's amounts, including issued
+milestones, from the quote that was current. It redrew the PDF only of the
+milestone that it acted on.
+
+The invoice rows backfill uses what was emailed:
+
+- **Field holds a hash-verified copy of the emailed PDF.** This is an issued
+  document with an `emailed` event, or an issuance ledger record. The rows
+  take the amounts that were emailed, and the job is written.
+- **Field holds no such copy.** The job is refused. Invoices emailed before
+  the issuance ledger have no such copy.
+
+To see every affected invoice, sign in as an owner and open this route:
+
+```text
+GET /api/admin/invoices/amount-disagreements
+```
+
+The route is read-only. For each invoice, it lists the job id and the
+invoice number. It shows the amounts in the milestone record, in the stored
+PDF and in the emailed copy (when Field has one). It shows the quote version
+that each was drawn from. It also lists the archived emails of the invoice,
+with the quote version that each was built against.
+
+Use the archived email to decide which set the customer received, and the
+payments to support it. Then record your choice:
+
+```text
+POST /api/admin/invoices/amount-disagreements/settle
+{ "jobId": "<id>", "invoiceNumber": "<number>", "choose": "milestone-record" | "stored-pdf" | "sent-copy",
+  "total": "<the total of that set>", "reason": "<why>" }
+```
+
+- Field records the choice on the invoice, with who made it and why.
+- What is owed and the invoice rows follow the choice. The PDF and the
+  payments do not change.
+- Field refuses a choice below the amount already paid. Void or move the
+  payment first.
+- The next boot writes the job.
+
 ### Checking a release in production
 
 The workspace shell cannot check production: its database is the

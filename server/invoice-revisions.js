@@ -108,6 +108,33 @@ export function buildInvoiceRevisionFingerprint({
   });
 }
 
+export const AMOUNT_SETTLEMENT_SOURCES = Object.freeze(["sent-copy", "stored-pdf", "milestone-record"]);
+
+// An owner's recorded decision about which amounts a legacy invoice was
+// actually issued for, where its milestone record and its stored PDF came
+// from different quote versions (`settleJobMilestoneInvoiceAmounts`). The
+// revision's subtotal, GST and total carry the settled amounts; `recorded`
+// keeps the amounts the record held before, so nothing is lost.
+export function normalizeAmountsSettlement(entry = null) {
+  if (!entry || typeof entry !== "object") return null;
+  const source = cleanText(entry.source);
+  if (!AMOUNT_SETTLEMENT_SOURCES.includes(source)) return null;
+  const money = (value) => (value && typeof value === "object"
+    ? { subtotal: roundMoney(value.subtotal), gst: roundMoney(value.gst), total: roundMoney(value.total) }
+    : null);
+  return {
+    source,
+    ...money(entry),
+    recorded: money(entry.recorded),
+    storedPdfSha256: cleanText(entry.storedPdfSha256),
+    storedPdfTotal: entry.storedPdfTotal != null ? roundMoney(entry.storedPdfTotal) : null,
+    sentSha256: cleanText(entry.sentSha256),
+    decidedBy: normalizeActorLabel(entry.decidedBy),
+    decidedAt: normalizeIsoTimestamp(entry.decidedAt),
+    reason: cleanText(entry.reason),
+  };
+}
+
 export function normalizeInvoiceRevision(entry = null) {
   if (!entry || typeof entry !== "object") return null;
   const invoiceNumber = cleanText(entry.invoiceNumber);
@@ -160,6 +187,9 @@ export function normalizeInvoiceRevision(entry = null) {
     // Operator-facing detail only (why the last reconstruction attempt
     // failed) — never dispatched on. Superseded by `artifactState`.
     pdfUnrecoverableReason: cleanText(entry.pdfUnrecoverableReason),
+    ...(normalizeAmountsSettlement(entry.amountsSettlement)
+      ? { amountsSettlement: normalizeAmountsSettlement(entry.amountsSettlement) }
+      : {}),
     // Revision event — who changed what, when and why. Only revisions above
     // the first can carry one, because the first issue supersedes nothing.
     revisedAt: normalizeIsoTimestamp(entry.revisedAt),

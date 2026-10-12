@@ -21,6 +21,7 @@ import {
   recordMilestoneInvoicePayment,
   resolveJobDocumentType,
   resolveRequestedMilestoneInvoice,
+  settleMilestoneInvoiceRevision,
   sumActiveMilestonePayments,
   updateMilestoneInvoice,
   validateInvoicePaidAmount,
@@ -62,6 +63,8 @@ import { invoiceRevisionDetails, partiesDetails } from "./documents/job-sources.
 import { creditIssueKey, invoiceIssueKey, invoiceIssuer, mapCreditNoteForIssue, mapInvoiceForIssue, receiptIssueKey } from "./invoices/issue.js";
 import { quoteTaxRatePercent } from "./quotes/from-artifact.js";
 import { claimDescription, customerQuoteReference, quoteReferenceLine } from "./invoices/customer-wording.js";
+import { invoiceAmountEvidence } from "./invoices/amount-evidence.js";
+import { toCents } from "./quotes/totals.js";
 import { applyQuoteCatalogChanges, computeQuoteCatalogChanges, upgradeOrganizerCatalogLinks } from "./quote-catalog-sync.js";
 import {
   buildQuoteDeliveryAttempt,
@@ -1373,7 +1376,7 @@ async function persistMilestoneInvoiceState({
         invoiceNumber: entry.invoiceNumber,
         revisionNumber: entry.issuedRevision?.revisionNumber ?? null,
         reconstructed: Boolean(invoiceArtifact?.reconstructed),
-        quoteVersionInferred: Boolean(invoiceArtifact?.quoteVersionInferred),
+        adoptedClaimDiffers: invoiceArtifact?.adoptedClaimDiffers || null,
       });
     }
 
@@ -1459,6 +1462,19 @@ async function persistMilestoneInvoiceState({
   await recordIssuedInvoiceRevisionsAfterCommit(jobDir, nextMeta);
 
   for (const [milestoneIndex, info] of artifactTransitionsByIndex) {
+    if (info.toState === ARTIFACT_STATE.STORED && info.adoptedClaimDiffers) {
+      await appendJobActivity({
+        jobDir,
+        activity: {
+          kind: "invoice.adopted_pdf_differs",
+          ts: new Date().toISOString(),
+          actor: { kind: "system", label: "Field" },
+          title: "Invoice PDF and record disagree",
+          body: `The stored PDF for ${info.invoiceNumber || `milestone ${milestoneIndex + 1}`} claims ${info.adoptedClaimDiffers.printedTotal}, but its milestone record holds ${info.adoptedClaimDiffers.recordedTotal}. It was issued before invoice revisions were frozen, when Field could redraw one without the other. An owner settles which amount was sent (GET /api/admin/invoices/amount-disagreements).`,
+        },
+      });
+      continue;
+    }
     if (info.toState === ARTIFACT_STATE.STORED && info.reconstructed) {
       await appendJobActivity({
         jobDir,
@@ -1467,7 +1483,7 @@ async function persistMilestoneInvoiceState({
           ts: new Date().toISOString(),
           actor: { kind: "system", label: "Field" },
           title: "Invoice PDF reconstructed",
-          body: `The stored PDF for ${info.invoiceNumber || `milestone ${milestoneIndex + 1}`}${info.revisionNumber ? ` (revision ${info.revisionNumber})` : ""} was missing and has been reconstructed from ${info.quoteVersionInferred ? "the best available quote version — inferred, not necessarily the version it was originally rendered from, because this is a legacy invoice from before invoice revisions were tracked" : "the quote version it was originally issued against"}.`,
+          body: `The stored PDF for ${info.invoiceNumber || `milestone ${milestoneIndex + 1}`}${info.revisionNumber ? ` (revision ${info.revisionNumber})` : ""} was missing and has been reconstructed from the quote version it was originally issued against.`,
         },
       });
       continue;
@@ -3371,6 +3387,136 @@ export async function creditAndReissueJobMilestoneInvoice({
     invoice: change,
     revision: change,
     quoteLifecycle,
+  };
+}
+
+const SETTLEMENT_LABELS = {
+  "sent-copy": "the copy Field emailed",
+  "stored-pdf": "the stored PDF",
+  "milestone-record": "the milestone record",
+};
+
+/**
+ * Settle which amounts an issued legacy invoice was issued for, when its
+ * milestone record and its PDFs disagree (server/invoices/amount-evidence.js).
+ *
+ * The owner chooses one of the sets Field holds — the milestone record, the
+ * stored PDF, or the copy Field emailed — never types an amount: `total` is
+ * the total of the set they saw, and a mismatch (the evidence changed) is a
+ * 409. The choice is recorded on the revision with who, when and why; the
+ * amounts the record held before are kept beside it. The PDF is never
+ * touched, and payments are never changed: settling below what is already
+ * paid against the invoice is refused. What is owed, the job page, the
+ * invoices list and the invoice rows then follow the settled amounts.
+ */
+export async function settleJobMilestoneInvoiceAmounts({
+  jobDir,
+  meta,
+  config,
+  invoiceNumber,
+  choose,
+  total = null,
+  reason = null,
+  actor = null,
+  issuedDocuments = undefined,
+  now = null,
+}) {
+  const settleReason = String(reason ?? "").trim();
+  if (!settleReason) throw createJobActionError("a reason is required to settle an invoice's amounts", 400);
+  const number = String(invoiceNumber ?? "").trim();
+  if (!number) throw createJobActionError("an invoice number is required", 400);
+  if (!SETTLEMENT_LABELS[choose]) {
+    throw createJobActionError(`choose one of ${Object.keys(SETTLEMENT_LABELS).join(", ")}`, 400);
+  }
+  const documents = issuedDocuments === undefined ? (issuedDocumentRecorder().service || null) : issuedDocuments;
+
+  const {
+    meta: resolvedMeta,
+    selectedQuoteArtifacts,
+  } = await readDocumentQuoteArtifacts({ jobDir, meta, documentType: "invoice" });
+  const quote = selectedQuoteArtifacts?.quote || await readPersistedQuote(jobDir);
+  // The same rebuild every milestone action starts with: a legacy invoice
+  // gets its frozen revision here, so there is a revision to settle.
+  const generated = buildMilestoneInvoices({
+    meta: resolvedMeta,
+    quote,
+    config,
+    existingMilestoneInvoices: resolvedMeta?.milestoneInvoices || [],
+  });
+  const evidence = await invoiceAmountEvidence({
+    jobDir,
+    meta: { ...resolvedMeta, milestoneInvoices: generated.milestoneInvoices },
+    issuedDocuments: documents,
+  });
+  const entry = evidence.invoices.find((candidate) => candidate.number === number);
+  if (!entry) throw createJobActionError(`no issued invoice ${number} on this job`, 404);
+  if (entry.state === "settled") {
+    throw createJobActionError(`invoice ${number} was already settled on ${entry.settlement?.decidedAt || "an earlier date"}`, 409);
+  }
+  if (entry.state === "agrees") {
+    throw createJobActionError(`invoice ${number}'s record and PDFs agree; there is nothing to settle`, 409);
+  }
+  const option = entry.options.find((candidate) => candidate.choose === choose);
+  if (!option) {
+    throw createJobActionError(`${SETTLEMENT_LABELS[choose]} gives no amounts for ${number}; choose one of ${entry.options.map((candidate) => candidate.choose).join(", ")}`, 409);
+  }
+  if (total == null || total === "" || Math.round(Number(total) * 100) !== Math.round(Number(option.total) * 100)) {
+    throw createJobActionError(`${SETTLEMENT_LABELS[choose]} for ${number} totals ${option.total}, not ${total ?? "(none given)"}; reload and choose again`, 409);
+  }
+  if (Number(entry.paid) > Number(option.total)) {
+    throw createJobActionError(`${entry.paid} is already paid against ${number}, more than ${option.total}; void or move that payment first`, 409);
+  }
+
+  const at = now || new Date().toISOString();
+  const settled = settleMilestoneInvoiceRevision({
+    milestoneInvoices: generated.milestoneInvoices,
+    invoiceNumber: number,
+    source: choose,
+    amounts: { subtotal: option.subtotal, gst: option.taxTotal, total: option.total },
+    storedPdfSha256: entry.storedPdf?.sha256 || null,
+    storedPdfTotal: entry.storedPdf?.totals?.total ?? null,
+    sentSha256: entry.sent?.sha256 || null,
+    actor: actor || { kind: "system", label: "Field" },
+    reason: settleReason,
+    at,
+  });
+  // Rebuild once more so milestones still open re-spread around the settled amount.
+  const rebuilt = buildMilestoneInvoices({
+    meta: { ...resolvedMeta, milestoneInvoices: settled.milestoneInvoices },
+    quote,
+    paymentSchedule: generated.paymentSchedule,
+    config,
+    existingMilestoneInvoices: settled.milestoneInvoices,
+  });
+  const persisted = await persistMilestoneInvoiceState({
+    jobDir,
+    meta: resolvedMeta,
+    quote,
+    paymentSchedule: rebuilt.paymentSchedule,
+    milestoneInvoices: rebuilt.milestoneInvoices,
+  });
+
+  const others = [
+    toCents(entry.recorded.total) !== toCents(option.total) ? `the milestone record held ${entry.recorded.total}` : null,
+    entry.storedPdf?.totals && toCents(entry.storedPdf.totals.total) !== toCents(option.total) ? `the stored PDF prints ${entry.storedPdf.totals.total}` : null,
+  ].filter(Boolean);
+  await appendJobActivity({
+    jobDir,
+    activity: {
+      kind: "invoice.amounts_settled",
+      ts: at,
+      actor: actor || { kind: "system", label: "Field" },
+      title: "Invoice amounts settled",
+      body: `${number} was issued for ${option.total}, from ${SETTLEMENT_LABELS[choose]}${others.length ? ` (${others.join("; ")})` : ""}. Reason: ${settleReason}.`,
+    },
+  });
+
+  return {
+    ...persisted,
+    quote,
+    paymentSchedule: rebuilt.paymentSchedule,
+    milestoneInvoices: persisted.meta.milestoneInvoices || [],
+    settlement: { invoiceNumber: number, milestoneIndex: settled.milestoneIndex, source: choose, ...option, recorded: entry.recorded },
   };
 }
 
