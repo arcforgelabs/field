@@ -22,9 +22,11 @@ class FakeAuth {
 const gmailUsers = {
   async getProfile() { return { data: { emailAddress: "proof.sender@example.invalid" } }; },
   messages: {
-    async send({ requestBody }) {
+    // The JSON form (requestBody.raw) and, for messages over about 4 MB, the
+    // media upload form (media.body, message/rfc822) Field uses for them.
+    async send({ requestBody, media }) {
       const index = nextIndex();
-      const raw = Buffer.from(String(requestBody.raw), "base64url");
+      const raw = media?.body ? Buffer.from(media.body) : Buffer.from(String(requestBody.raw), "base64url");
       writeFileSync(join(mailDir, `${String(index).padStart(3, "0")}.eml`), raw);
       return { data: { id: `proof-message-${index}`, threadId: `proof-thread-${index}` } };
     },

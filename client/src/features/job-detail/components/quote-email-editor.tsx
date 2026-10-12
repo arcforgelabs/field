@@ -37,6 +37,8 @@ type QuoteEmailEditorProps = {
   attachments?: File[];
   onAttachmentsChange?: (attachments: File[]) => void;
   fullPage?: boolean;
+  /** Show the uploaded files under the editor (false when a tray lists them). */
+  showAttachmentList?: boolean;
   /** The business name the signature button signs with. */
   signatureName?: string;
 };
@@ -103,6 +105,7 @@ export function QuoteEmailEditor({
   attachments = [],
   onAttachmentsChange,
   fullPage = false,
+  showAttachmentList = true,
   signatureName = "",
 }: QuoteEmailEditorProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -436,7 +439,7 @@ export function QuoteEmailEditor({
         <EditorContent editor={editor} />
       </div>
 
-      {onAttachmentsChange && attachments.length ? (
+      {showAttachmentList && onAttachmentsChange && attachments.length ? (
         <div
           style={{
             padding: "12px 14px",

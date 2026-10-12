@@ -5,11 +5,12 @@ import { createPortal } from "react-dom";
 import { AlertCircle, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock3, FileText, History, Paperclip, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
-import { api, type GoogleContact, type ScheduledEmail } from "@/lib/api";
+import { api, type GoogleContact, type JobDocument, type NotIssuedDocument, type ScheduledEmail } from "@/lib/api";
 import type { JobDocumentType, MilestoneInvoice, RecordingDetail } from "@/lib/types";
 import { renderEmailTemplate } from "../../../../shared/email-templates.js";
 import { suggestGoogleContacts } from "./contact-suggestions";
 import { QuoteEmailEditor, type QuoteEmailTemplate } from "./components/quote-email-editor";
+import { AttachmentPicker, AttachmentTray, attachmentTotals, type MainAttachment } from "./email-attachments";
 
 type SendPhase = "compose" | "sending" | "sent" | "scheduled" | "error" | "auth_expired";
 type SendMode = "now" | "later";
@@ -305,6 +306,12 @@ export function QuoteEmailPage() {
   // An invoice issued in place of a credited one can carry its adjustment
   // note too; the operator ticks it (#28).
   const [attachCreditNote, setAttachCreditNote] = useState(false);
+  // The job's issued documents, attachable by uid. Null until loaded; the
+  // picker is not offered when the server has no issued-document store.
+  const [jobDocuments, setJobDocuments] = useState<JobDocument[] | null>(null);
+  const [notIssued, setNotIssued] = useState<NotIssuedDocument[]>([]);
+  const [selectedDocumentUids, setSelectedDocumentUids] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [automaticAttachmentBaseName, setAutomaticAttachmentBaseName] = useState("");
   const [phase, setPhase] = useState<SendPhase>("compose");
   const [sendMode, setSendMode] = useState<SendMode>("now");
@@ -337,6 +344,19 @@ export function QuoteEmailPage() {
         setLoadError(err instanceof Error ? err.message : "Failed to load job");
       });
   }, [id, params]);
+
+  useEffect(() => {
+    if (!id) return;
+    api.jobDocuments(id)
+      .then((result) => {
+        setJobDocuments(result.documents);
+        setNotIssued(result.notIssued || []);
+      })
+      .catch(() => {
+        setJobDocuments(null);
+        setNotIssued([]);
+      });
+  }, [id]);
 
   useEffect(() => {
     api.emailTemplates()
@@ -443,6 +463,33 @@ export function QuoteEmailPage() {
     if (template.subject) setSubject(template.subject);
   }
 
+  // The document this email is for, by its printed number (it cannot also be
+  // picked), and its stored size once issued.
+  const mainNumber = !documentType
+    ? null
+    : documentType === "quote"
+      ? (() => {
+        const ref = detail?.quote?.quoteNumber || detail?.meta.quoteNumber || null;
+        const version = activeDraftQuoteVersion || detail?.quote?.version || null;
+        return ref && version ? `${ref} v${version}` : null;
+      })()
+      : documentType === "invoice"
+        ? milestoneInvoice?.issuedRevision?.invoiceNumber || milestoneInvoice?.invoiceNumber || null
+        : milestoneInvoice?.receiptNumber || null;
+  const mainIssued = mainNumber ? (jobDocuments || []).find((document) => document.documentType === documentType && document.number === mainNumber) || null : null;
+  const mainAttachment: MainAttachment | null = documentType ? {
+    filename: activeDraftAttachmentFilename || buildPdfFilename(automaticAttachmentBaseName, automaticAttachmentDefaultBaseName),
+    documentType,
+    byteLength: mainIssued?.byteLength ?? null,
+    issued: Boolean(mainIssued),
+  } : null;
+  const creditNoteDocument = creditNoteNumber ? (jobDocuments || []).find((document) => document.documentType === "credit_note" && document.number === creditNoteNumber) || null : null;
+  const attachedDocuments = (jobDocuments || []).filter((document) => (
+    selectedDocumentUids.includes(document.uid)
+    && document.number !== mainNumber
+    && !(attachCreditNote && creditNoteDocument?.uid === document.uid)
+  ));
+
   async function handleSend(mode: SendMode = sendMode) {
     if (!id || !detail || !subject.trim()) return;
     const recipients = mergeEmailAddresses(toEmails, parseEmailAddresses(toDraft));
@@ -477,6 +524,7 @@ export function QuoteEmailPage() {
           scheduledAt,
           draftId: activeDraftId,
           attachCreditNote: Boolean(creditNoteNumber && attachCreditNote),
+          documents: attachedDocuments.map(({ uid }) => ({ uid })),
         })
         : await api.emailJob(id, recipients, subject.trim(), bodyHtml, {
           cc: ccRecipients,
@@ -485,6 +533,7 @@ export function QuoteEmailPage() {
           attachments,
           scheduledAt,
           draftId: activeDraftId,
+          documents: attachedDocuments.map(({ uid }) => ({ uid })),
         });
       if (result.scheduled) {
         await refreshScheduledEmails();
@@ -528,6 +577,7 @@ export function QuoteEmailPage() {
     setSubject(item.subject || "");
     setBodyHtml(item.draftContent?.customBody || "");
     setRetainedAttachmentNames(item.attachmentNames || []);
+    setSelectedDocumentUids((item.documents || []).map((document) => document.uid));
     setAttachments([]);
     setThemeFontFamily(item.draftContent?.themeFontFamily || themeFontFamily);
     setSendMode("now");
@@ -570,7 +620,8 @@ export function QuoteEmailPage() {
 
   const documentLabel = documentType === "invoice" ? "Invoice" : documentType === "receipt" ? "Receipt" : documentType === "quote" ? "Quote" : "Email";
   const sendRecipients = mergeEmailAddresses(toEmails, parseEmailAddresses(toDraft));
-  const canSend = sendRecipients.length > 0 && Boolean(subject.trim()) && phase !== "sending";
+  const attachmentProblem = attachmentTotals({ main: mainAttachment, documents: attachedDocuments, uploads: attachments }).problem;
+  const canSend = sendRecipients.length > 0 && Boolean(subject.trim()) && phase !== "sending" && !attachmentProblem;
 
   if (phase === "sent") {
     const sentRecipients = toEmails.join(", ");
@@ -735,8 +786,41 @@ export function QuoteEmailPage() {
             onChange={setBodyHtml}
             attachments={attachments}
             onAttachmentsChange={setAttachments}
+            showAttachmentList={false}
             signatureName={detail?.ui?.businessName || ""}
           />
+
+          <AttachmentTray
+            main={mainAttachment}
+            documents={[...attachedDocuments, ...(attachCreditNote && creditNoteDocument ? [creditNoteDocument] : [])]}
+            uploads={attachments}
+            retainedNames={retainedAttachmentNames}
+            pickerAvailable={jobDocuments !== null}
+            onAdd={() => setPickerOpen(true)}
+            onRemoveDocument={(uid) => {
+              if (uid === creditNoteDocument?.uid) setAttachCreditNote(false);
+              setSelectedDocumentUids((current) => current.filter((entry) => entry !== uid));
+            }}
+            onRemoveUpload={(index) => setAttachments((current) => current.filter((_file, fileIndex) => fileIndex !== index))}
+          />
+          {pickerOpen && jobDocuments ? (
+            <AttachmentPicker
+              jobId={detail.meta.id}
+              documents={jobDocuments}
+              // The draft this email is for is issued when it sends; it is not
+              // one of the drafts that cannot go.
+              notIssued={notIssued.filter((draft) => !(documentType === "invoice" && draft.milestoneIndex === milestoneInvoice?.milestoneIndex))}
+              selected={attachedDocuments.map((document) => document.uid)}
+              mainNumber={mainNumber}
+              lockedNote={attachCreditNote && creditNoteDocument ? { [creditNoteDocument.uid]: "Attached by the adjustment note box" } : {}}
+              onCancel={() => setPickerOpen(false)}
+              onAttach={(uids) => {
+                setSelectedDocumentUids(uids);
+                setPickerOpen(false);
+              }}
+              onUpload={(files) => setAttachments((current) => [...current, ...files])}
+            />
+          ) : null}
 
           {creditNoteNumber ? (
             <label className="fx-check" style={{ padding: "0 2px" }}>
@@ -782,7 +866,7 @@ export function QuoteEmailPage() {
             automaticAttachmentBaseName={automaticAttachmentBaseName}
             automaticAttachmentDefaultBaseName={automaticAttachmentDefaultBaseName}
             onAutomaticAttachmentBaseNameChange={setAutomaticAttachmentBaseName}
-            additionalAttachmentCount={attachments.length + retainedAttachmentNames.length}
+            additionalAttachmentCount={attachments.length + retainedAttachmentNames.length + attachedDocuments.length + (attachCreditNote && creditNoteNumber ? 1 : 0)}
           />
 
           {scheduledEmails.length ? (
@@ -1469,7 +1553,7 @@ function AttachmentSummary({
       )}
       {additionalAttachmentCount ? (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--t-brd)", color: "var(--t-dim)", fontSize: 12 }}>
-          {additionalAttachmentCount} additional {additionalAttachmentCount === 1 ? "file" : "files"} attached in the editor
+          {additionalAttachmentCount} more {additionalAttachmentCount === 1 ? "attachment" : "attachments"} in the tray
         </div>
       ) : null}
     </div>

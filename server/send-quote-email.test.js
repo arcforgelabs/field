@@ -15,6 +15,11 @@ import {
   resolveMailSender,
   resolveMailDeliveryPolicy,
   withGmailSendCeiling,
+  formatDeliveryMessageId,
+  GMAIL_RAW_JSON_MAX_CHARS,
+  NEUTRAL_MESSAGE_ID_HOST,
+  resolveMessageIdHost,
+  sendGmailMessage,
 } from "./send-quote-email.js";
 import { renderQuoteEmailHtml } from "./quote-email-template.js";
 
@@ -405,4 +410,53 @@ test("withGmailSendCeiling propagates the wrapped work's own rejection when it f
       return true;
     },
   );
+});
+
+test("the stable Message-ID uses the installation's own host, never a third party's (#50)", () => {
+  const saved = process.env.FIELD_MAIL_MESSAGE_ID_HOST;
+  delete process.env.FIELD_MAIL_MESSAGE_ID_HOST;
+  try {
+    // The sender's domain by default.
+    assert.equal(resolveMessageIdHost({ config: { mail: { fromEmail: "office@harlow.example.invalid" } } }), "harlow.example.invalid");
+    assert.equal(resolveMessageIdHost({ config: {}, fromEmail: "jess@site.example.invalid" }), "site.example.invalid");
+    // A configured host wins; a malformed one is ignored.
+    assert.equal(resolveMessageIdHost({ config: { mail: { messageIdHost: "mail.example.invalid", fromEmail: "a@b.example.invalid" } } }), "mail.example.invalid");
+    assert.equal(resolveMessageIdHost({ config: { mail: { messageIdHost: "not a host", fromEmail: "a@b.example.invalid" } } }), "b.example.invalid");
+    // Nothing to go on: a neutral reserved host.
+    assert.equal(resolveMessageIdHost({ config: {} }), NEUTRAL_MESSAGE_ID_HOST);
+    process.env.FIELD_MAIL_MESSAGE_ID_HOST = "env.example.invalid";
+    assert.equal(resolveMessageIdHost({ config: { mail: { fromEmail: "a@b.example.invalid" } } }), "env.example.invalid");
+  } finally {
+    if (saved === undefined) delete process.env.FIELD_MAIL_MESSAGE_ID_HOST;
+    else process.env.FIELD_MAIL_MESSAGE_ID_HOST = saved;
+  }
+  assert.equal(formatDeliveryMessageId("abc-123", "harlow.example.invalid"), "<field-abc-123@harlow.example.invalid>");
+});
+
+test("a delivery attempt's stored Message-ID goes out unchanged, including one with the old host", () => {
+  const mime = (messageId) => Buffer.from(buildMimeMessage({
+    fromName: "Proof", fromEmail: "proof@example.invalid", replyTo: "proof@example.invalid", to: ["customer@example.invalid"],
+    subject: "Quote", body: "Hi", htmlBody: "<p>Hi</p>", deliveryAttemptId: "attempt-1", messageId,
+  }), "base64url").toString("utf8");
+  assert.match(mime("<field-attempt-1@example.invalid>"), /\r\nMessage-ID: <field-attempt-1@example\.invalid>\r\n/);
+  // An attempt prepared before the change keeps the host it was stored with,
+  // so Sent Mail is searched for the id that actually went out.
+  assert.match(mime("<field-attempt-1@arcforge.local>"), /\r\nMessage-ID: <field-attempt-1@arcforge\.local>\r\n/);
+  assert.match(mime(null), /\r\nMessage-ID: <field-attempt-1@field\.invalid>\r\n/);
+});
+
+test("messages over Gmail's JSON size go through the media upload form", async () => {
+  const calls = [];
+  const gmail = { users: { messages: { send: async (params, options) => { calls.push({ params, options }); return { data: { id: "m", threadId: "t" } }; } } } };
+  const small = Buffer.from("small message").toString("base64url");
+  await sendGmailMessage(gmail, small);
+  assert.deepEqual(calls[0].params, { userId: "me", requestBody: { raw: small } });
+  const bytes = Buffer.alloc(GMAIL_RAW_JSON_MAX_CHARS, 1);
+  const large = bytes.toString("base64url");
+  await sendGmailMessage(gmail, large, { threadId: "thread-1" });
+  assert.equal(calls[1].params.requestBody.raw, undefined);
+  assert.equal(calls[1].params.requestBody.threadId, "thread-1");
+  assert.equal(calls[1].params.media.mimeType, "message/rfc822");
+  assert.ok(Buffer.from(calls[1].params.media.body).equals(bytes), "the media body is the message itself");
+  assert.equal(calls[1].options.timeout, calls[0].options.timeout, "both forms keep the send timeout");
 });

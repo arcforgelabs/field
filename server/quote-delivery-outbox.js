@@ -3,6 +3,7 @@ import { readFile, writeFile } from "./storage/fs-promises.js";
 import { join } from "node:path";
 import { assertWritableJobDir, resolveActiveJobGeneration, runAtomicJobGeneration } from "./job-generation.js";
 import { flushDurableStorage } from "./storage/durable-hooks.js";
+import { NEUTRAL_MESSAGE_ID_HOST, formatDeliveryMessageId } from "./send-quote-email.js";
 
 export const QUOTE_DELIVERY_OUTBOX_FILE = "quote-delivery-outbox.json";
 
@@ -43,6 +44,7 @@ export function buildQuoteDeliveryAttempt({
   quotePdf,
   preparedQuote = null,
   preparedMeta = null,
+  messageIdHost = NEUTRAL_MESSAGE_ID_HOST,
 } = {}) {
   const quotePdfBytes = Buffer.isBuffer(quotePdf) ? quotePdf : Buffer.from(quotePdf || "");
   const quoteMarkdownBytes = Buffer.from(String(quoteMarkdown || ""));
@@ -52,7 +54,9 @@ export function buildQuoteDeliveryAttempt({
     version: 1,
     revision: 0,
     attemptId,
-    messageId: `<field-${attemptId}@arcforge.local>`,
+    // Stored once and reused for every dispatch and Sent Mail search of this
+    // attempt (#50): an attempt prepared before the host changed keeps its own.
+    messageId: formatDeliveryMessageId(attemptId, messageIdHost),
     status: "pending",
     claim: null,
     createdAt: new Date().toISOString(),

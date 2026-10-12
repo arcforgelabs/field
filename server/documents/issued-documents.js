@@ -22,7 +22,7 @@ import { DocumentBytesError, createPostgresBlobStore, sha256Hex } from "./blob-s
 import { isDocumentUid, newDocumentEventUid, newDocumentUid } from "./uid.js";
 import { compareDocumentNumbers } from "../invoices/numbers.js";
 
-const { issuedDocuments, documentEvents, ISSUED_DOCUMENT_TYPES, ISSUED_DOCUMENT_SOURCES, DOCUMENT_EVENTS } = schema;
+const { issuedDocuments, documentEvents, documentBlobs, ISSUED_DOCUMENT_TYPES, ISSUED_DOCUMENT_SOURCES, DOCUMENT_EVENTS } = schema;
 
 export class IssuedDocumentConflictError extends Error {
   constructor(message, { existing }) {
@@ -307,7 +307,11 @@ export function createIssuedDocumentService({
       });
     },
 
-    /** A job's issued documents (oldest first), each with its events, and events with no document. */
+    /**
+     * A job's issued documents (oldest first), each with its events and the
+     * size of its stored bytes (null when the bytes are not stored here), and
+     * events with no document.
+     */
     async listJobDocuments(jobId) {
       return scope.transaction(async (tx) => {
         // By issue time, then type, then number by its period and sequence
@@ -316,6 +320,11 @@ export function createIssuedDocumentService({
           .sort((a, b) => new Date(a.issuedAt) - new Date(b.issuedAt)
             || a.documentType.localeCompare(b.documentType)
             || compareDocumentNumbers(a.number, b.number));
+        const hashes = [...new Set(rows.map((row) => row.pdfSha256))];
+        const sizes = new Map(hashes.length
+          ? (await tx.select({ sha256: documentBlobs.sha256, byteLength: documentBlobs.byteLength }).from(documentBlobs)
+            .where(inArray(documentBlobs.sha256, hashes))).map((blob) => [blob.sha256, Number(blob.byteLength)])
+          : []);
         const events = await tx.select().from(documentEvents)
           .where(eq(documentEvents.jobId, String(jobId)))
           .orderBy(asc(documentEvents.at), asc(documentEvents.createdAt), asc(documentEvents.uid));
@@ -326,7 +335,7 @@ export function createIssuedDocumentService({
           (list || unattached).push(eventFromRow(event));
         }
         return {
-          documents: rows.map((row) => ({ ...documentFromRow(row), events: byDocument.get(row.uid) })),
+          documents: rows.map((row) => ({ ...documentFromRow(row), byteLength: sizes.get(row.pdfSha256) ?? null, events: byDocument.get(row.uid) })),
           unattachedEvents: unattached,
         };
       });

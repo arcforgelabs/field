@@ -17,7 +17,17 @@ import { loadQuoteRows, quoteReadsStatus, quoteRowsFromArtifact } from "./quotes
 import { createInvoiceRowService } from "./invoices/invoice-rows.js";
 import { createInvoiceRowRecorder, createUnavailableInvoiceRowRecorder, installInvoiceRowRecorder } from "./invoices/recorder.js";
 import { createInvoiceIssueService, createUnavailableInvoiceIssuer, installInvoiceIssuer } from "./invoices/issue.js";
-import { creditNoteAttachment } from "./invoices/credit-note-attachment.js";
+import { creditNoteAttachment, creditNoteNumberFor } from "./invoices/credit-note-attachment.js";
+import {
+  EMAIL_ATTACHMENT_LIMITS,
+  EmailAttachmentError,
+  assertEmailAttachmentLimits,
+  documentAttachmentRecord,
+  documentMimeAttachments,
+  loadDocumentAttachments,
+  parseDocumentRefs,
+} from "./documents/email-attachments.js";
+import { recordAttachedDocumentsEmailed } from "./documents/delivery.js";
 import { CREDIT_NOTE_ON_REISSUE_CHOICES, createBusinessSettingsService } from "./invoices/business-settings.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
@@ -1358,6 +1368,45 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max
 });
+
+// Email uploads: 10 MB each and at most 10 files, the email limits
+// (server/documents/email-attachments.js). Over a limit is a 413 with the
+// limit, before anything is prepared or sent.
+const emailUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: EMAIL_ATTACHMENT_LIMITS.maxUploadBytes, files: EMAIL_ATTACHMENT_LIMITS.maxAttachments },
+});
+function emailUploads(req, res, next) {
+  emailUpload.array("attachments", EMAIL_ATTACHMENT_LIMITS.maxAttachments)(req, res, (error) => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError) {
+      const tooBig = error.code === "LIMIT_FILE_SIZE";
+      return res.status(413).json({
+        error: tooBig
+          ? `each upload can be at most ${EMAIL_ATTACHMENT_LIMITS.maxUploadBytes / (1024 * 1024)} MB`
+          : `an email can carry at most ${EMAIL_ATTACHMENT_LIMITS.maxAttachments} attachments`,
+        code: tooBig ? "EMAIL_UPLOAD_TOO_LARGE" : "EMAIL_TOO_MANY_ATTACHMENTS",
+        limitBytes: tooBig ? EMAIL_ATTACHMENT_LIMITS.maxUploadBytes : undefined,
+        limit: tooBig ? undefined : EMAIL_ATTACHMENT_LIMITS.maxAttachments,
+      });
+    }
+    return next(error);
+  });
+}
+
+// The issue service in the caller's organisation, for attaching Field
+// documents by uid; null without a database (attaching is then refused, 503).
+function emailDocumentService(req) {
+  try {
+    return createIssuedDocumentService({ db: getDb(), orgUid: requestOrgUid(req), ...(issuedDocumentBlobs ? { blobs: issuedDocumentBlobs } : {}) });
+  } catch {
+    return issuedDocumentRecorder.service || null;
+  }
+}
+
+function emailAttachmentErrorBody(error) {
+  return { error: error.message, code: error.code, ...(error.details || {}) };
+}
 
 app.post("/api/jobs/manual", requireAuth, async (req, res) => {
   try {
@@ -2961,10 +3010,20 @@ async function processScheduledEmail(record) {
         additionalAttachments: record.loadedAttachments || [],
         scheduledEmailId: record.id,
         scheduledAt: record.scheduledAt,
+        // The recorded references: read again, and refused for review if
+        // their bytes changed or they were credited or voided since.
+        documents: payload.documents || [],
       });
     });
   }
 
+  // Read again at dispatch, as recorded when the email was written.
+  const loadedDocuments = await loadDocumentAttachments({
+    service: issuedDocumentRecorder.service || null,
+    jobId: job.meta.id,
+    refs: payload.documents || [],
+    meta: normalizeJobMeta(job.meta),
+  });
   const result = await sendJobEmail({
     config,
     user,
@@ -2975,8 +3034,9 @@ async function processScheduledEmail(record) {
     subject: payload.subject,
     customBody: payload.customBody || null,
     themeFontFamily: payload.themeFontFamily || null,
-    additionalAttachments: record.loadedAttachments || [],
+    additionalAttachments: [...documentMimeAttachments(loadedDocuments), ...(record.loadedAttachments || [])],
   });
+  await recordAttachedDocumentsEmailed({ jobId: job.meta.id, attachments: loadedDocuments, result, user });
   await appendSentEmailArchive({
     jobDir: job.dir,
     record: {
@@ -3004,7 +3064,7 @@ async function processScheduledEmail(record) {
   return result;
 }
 
-app.post("/api/jobs/:id/email-quote", requireAuth, upload.array("attachments", 8), async (req, res) => {
+app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res) => {
   const job = await findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "not found" });
 
@@ -3027,9 +3087,33 @@ app.post("/api/jobs/:id/email-quote", requireAuth, upload.array("attachments", 8
   if (!to) return res.status(400).json({ error: "recipient email required" });
 
   try {
+    // Field documents attached by uid (`documents: [{ uid }]`).
+    const documentService = emailDocumentService(req);
+    const documentRefs = parseDocumentRefs(payload?.documents);
     if (payload?.attachCreditNote === true && documentType === "invoice") {
-      additionalAttachments.push(await creditNoteAttachment({ jobDir: job.dir, milestoneIndex: payload?.milestoneIndex ?? null, issuedDocuments: issuedDocumentRecorder.service || null }));
+      // "Also attach the adjustment note" (#45): the credit note's issued
+      // document by uid when the database has it (it then gets its own
+      // emailed event), else its stored bytes as before.
+      const number = await creditNoteNumberFor({ jobDir: job.dir, milestoneIndex: payload?.milestoneIndex ?? null });
+      const issued = number && documentService
+        ? await documentService.findIssuedDocument({ documentType: "credit_note", number }).catch(() => null)
+        : null;
+      if (issued) {
+        if (!documentRefs.includes(issued.uid)) documentRefs.push(issued.uid);
+      } else {
+        additionalAttachments.push(await creditNoteAttachment({ jobDir: job.dir, milestoneIndex: payload?.milestoneIndex ?? null, issuedDocuments: issuedDocumentRecorder.service || null }));
+      }
     }
+    // Read and checked now, so a bad reference or an email over the limits
+    // is refused before anything is queued, prepared or sent.
+    const loadedDocuments = await loadDocumentAttachments({
+      service: documentService,
+      jobId: job.meta.id,
+      refs: documentRefs,
+      meta: normalizeJobMeta(job.meta),
+    });
+    assertEmailAttachmentLimits({ documents: loadedDocuments, uploads: additionalAttachments });
+    const documentRecords = loadedDocuments.map(documentAttachmentRecord);
     if (payload?.scheduledAt) {
       assertAllowedQuoteRecipients({ config, emails: to, label: "recipient" });
       assertAllowedQuoteRecipients({ config, emails: cc, label: "cc", required: false });
@@ -3048,6 +3132,7 @@ app.post("/api/jobs/:id/email-quote", requireAuth, upload.array("attachments", 8
         themeFontFamily: payload?.themeFontFamily ?? null,
         subject: payload?.subject ?? null,
         attachmentFilename: payload?.attachmentFilename ?? null,
+        documents: documentRecords,
       };
       const scheduledEmail = payload?.draftId
         ? await rescheduleEmailDraft({
@@ -3092,6 +3177,7 @@ app.post("/api/jobs/:id/email-quote", requireAuth, upload.array("attachments", 8
           themeFontFamily: payload?.themeFontFamily ?? null,
           subject: payload?.subject ?? null,
           attachmentFilename: payload?.attachmentFilename ?? null,
+          documents: documentRecords,
         },
         snapshot,
         attachments: additionalAttachments,
@@ -3125,10 +3211,15 @@ app.post("/api/jobs/:id/email-quote", requireAuth, upload.array("attachments", 8
         subjectOverride: payload?.subject ?? null,
         attachmentFilename: payload?.attachmentFilename ?? null,
         additionalAttachments,
+        documents: documentRefs,
+        documentService,
       });
     });
     res.json({ ok: true, result });
   } catch (err) {
+    if (err instanceof EmailAttachmentError) {
+      return res.status(err.statusCode).json(emailAttachmentErrorBody(err));
+    }
     console.error(`[email-quote] ${job.meta.id} failed: ${err.message}`);
     const isAuthExpired = !hasServiceAccountGmail(config, { user: req.caller })
       && (/invalid_grant/i.test(err.message) || /not configured for quote sending/i.test(err.message));
@@ -3139,7 +3230,7 @@ app.post("/api/jobs/:id/email-quote", requireAuth, upload.array("attachments", 8
   }
 });
 
-app.post("/api/jobs/:id/email", requireAuth, upload.array("attachments", 8), async (req, res) => {
+app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
   const job = await findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "not found" });
 
@@ -3162,6 +3253,15 @@ app.post("/api/jobs/:id/email", requireAuth, upload.array("attachments", 8), asy
   if (!subject) return res.status(400).json({ error: "email subject required" });
 
   try {
+    const documentService = emailDocumentService(req);
+    const loadedDocuments = await loadDocumentAttachments({
+      service: documentService,
+      jobId: job.meta.id,
+      refs: parseDocumentRefs(payload?.documents),
+      meta: normalizeJobMeta(job.meta),
+    });
+    assertEmailAttachmentLimits({ documents: loadedDocuments, uploads: additionalAttachments });
+    const documentRecords = loadedDocuments.map(documentAttachmentRecord);
     if (payload?.scheduledAt) {
       assertAllowedQuoteRecipients({ config, emails: to, label: "recipient" });
       assertAllowedQuoteRecipients({ config, emails: cc, label: "cc", required: false });
@@ -3175,6 +3275,7 @@ app.post("/api/jobs/:id/email", requireAuth, upload.array("attachments", 8), asy
         customBody,
         themeFontFamily: payload?.themeFontFamily ?? null,
         documentType: "email",
+        documents: documentRecords,
       };
       const scheduledEmail = payload?.draftId
         ? await rescheduleEmailDraft({
@@ -3212,6 +3313,7 @@ app.post("/api/jobs/:id/email", requireAuth, upload.array("attachments", 8), asy
           customBody,
           themeFontFamily: payload?.themeFontFamily ?? null,
           documentType: "email",
+          documents: documentRecords,
         },
         attachments: additionalAttachments,
         updatedBy: scheduledEmailActor(req.caller),
@@ -3230,8 +3332,9 @@ app.post("/api/jobs/:id/email", requireAuth, upload.array("attachments", 8), asy
       subject,
       customBody,
       themeFontFamily: payload?.themeFontFamily ?? null,
-      additionalAttachments,
+      additionalAttachments: [...documentMimeAttachments(loadedDocuments), ...additionalAttachments],
     });
+    await recordAttachedDocumentsEmailed({ jobId: job.meta.id, attachments: loadedDocuments, result, user: req.caller });
     await appendSentEmailArchive({
       jobDir: job.dir,
       record: {
@@ -3256,6 +3359,9 @@ app.post("/api/jobs/:id/email", requireAuth, upload.array("attachments", 8), asy
     });
     res.json({ ok: true, result });
   } catch (err) {
+    if (err instanceof EmailAttachmentError) {
+      return res.status(err.statusCode).json(emailAttachmentErrorBody(err));
+    }
     console.error(`[job-email] ${job.meta.id} failed: ${err.message}`);
     const isAuthExpired = !hasServiceAccountGmail(config, { user: req.caller })
       && (/invalid_grant/i.test(err.message) || /not configured for job email sending/i.test(err.message));
