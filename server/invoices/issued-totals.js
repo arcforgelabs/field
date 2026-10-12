@@ -35,7 +35,8 @@ export function extractInvoicePdfFacts(bytes) {
     return null;
   }
   const at = (pattern) => runs.findIndex((run) => pattern.test(run));
-  const numberAt = at(/^Invoice$/);
+  // "Invoice" on PDFs drawn before tax invoices (#47), "Tax invoice" since.
+  const numberAt = at(/^(Tax )?invoice$/i);
   const contractAt = at(/^Contract value\b/);
   return {
     totals: claimTotals(runs),
