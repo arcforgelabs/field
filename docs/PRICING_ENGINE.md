@@ -614,9 +614,20 @@ Rules:
   event (`bytesMatchIssued: false`).
 - **The byte store is an interface.** `server/documents/blob-store.js` is the
   only code that touches `document_blobs`, through `put(bytes) → sha256`
-  and `get(sha256) → bytes`. Decided 2026-10-12 (#178): bytes stay in
-  `document_blobs` for now; Cloudflare R2 with a bucket lock is an opt-in
-  replacement behind the same two calls (#240), without touching the rows.
+  and `get(sha256) → bytes`.
+- **A locked R2 replica (#240, built, migration `0012_document_replicas`).**
+  PostgreSQL stays the store of record. With `FIELD_DOCUMENT_REPLICA=r2`,
+  each blob is copied after its issue transaction commits to a Cloudflare R2
+  bucket with a bucket lock, at `<org_uid>/<sha256>`
+  (`server/documents/replicator.js`). The copy is create-only: HEAD first, an
+  object with the same size and hash counts as done, different bytes are an
+  integrity alarm, never an overwrite. A scheduler tick retries with backoff
+  and backfills older blobs a few a minute. `document_blob_replicas` records
+  `r2_replicated_at`, attempts and the last error code per blob. Reads stay on
+  PostgreSQL and fall back to R2, hash-checked, only when PostgreSQL cannot
+  give the bytes. `npm run documents:verify-r2` checks every issued document
+  is in the bucket with its hash. Operating it: `docs/REPLIT.md` "Issued
+  documents in R2".
 
 These tables replace `quote-issuance.json` and its `issued-documents/`
 folder, the issued-PDF fields on `milestone-invoices/state.json`, the

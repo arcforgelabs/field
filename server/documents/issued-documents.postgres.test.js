@@ -14,6 +14,21 @@ import { MIGRATIONS_FOLDER, queryRows, schema } from "../db-runtime/index.js";
 import { startTestPostgres, testPostgresMode } from "../db-runtime/test-postgres.js";
 import { DEFAULT_ORG_UID, inspectRowSecurity, withOrg } from "../db-runtime/tenancy.js";
 import { createIssuedDocumentService } from "./issued-documents.js";
+import { createDocumentReplicator } from "./replicator.js";
+
+// An object store in memory that never replaces an object (like a locked bucket).
+function memoryStore() {
+  const objects = new Map();
+  return {
+    bucket: "memory",
+    objects,
+    async head(key) { const o = objects.get(key); return o ? { size: o.bytes.length, sha256: o.sha256 } : null; },
+    async get(key) { return objects.get(key)?.bytes ?? null; },
+    async putIfAbsent(key, bytes, { sha256 }) { if (objects.has(key)) return { created: false }; objects.set(key, { bytes, sha256 }); return { created: true }; },
+    async checkBucket() { return { ok: true }; },
+  };
+}
+const quietLogger = { error() {}, warn() {}, log() {} };
 
 const ORG_B = "org_01TESTSECONDORGANISATION0";
 const enabled = testPostgresMode().kind !== "none";
@@ -75,8 +90,43 @@ test("as a table owner without CREATEROLE: isolation, immutability and bytes rou
     await rejects(withOrg(db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update issued_documents set number = 'X' where uid = ${document.uid}`)), /append-only/);
     await rejects(withOrg(db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`delete from document_events`)), /append-only/);
     await rejects(db.execute(sql`select count(*) from issued_documents`), /field\.org_uid is not set/);
+
+    // The R2 replica's record (#240, migration 0012) holds the same way.
+    const store = memoryStore();
+    const replicator = createDocumentReplicator({ db, orgUid: DEFAULT_ORG_UID, store, logger: quietLogger, paceMs: 0 });
+    assert.deepEqual((await replicator.tick()).map((result) => result.outcome), ["replicated"]);
+    assert.ok(store.objects.has(`${DEFAULT_ORG_UID}/${document.pdfSha256}`));
+    const [rowB] = await withOrg(db, ORG_B, (tx) => queryRows(sql`select count(*)::int as n from document_blob_replicas`, tx));
+    assert.equal(rowB.n, 0);
+    await rejects(withOrg(db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update document_blob_replicas set attempts = 9`)), /already replicated/);
+    await rejects(withOrg(db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`delete from document_blob_replicas`)), /delete refused/);
   } finally {
     await admin.unsafe(`drop database if exists ${database} with (force)`);
     await admin.unsafe(`drop role if exists ${role}`);
   }
+});
+
+test("through SET ROLE field_app: the replica record is readable, insertable and updatable while pending, never deletable", { skip: !enabled && "set FIELD_DB_TEST_DOCKER=1 or FIELD_DB_TEST_DATABASE_URL" }, async () => {
+  const { db } = connect(server.url);
+  await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  const mode = await inspectRowSecurity(db);
+  assert.equal(mode.via, "set-role");
+  const service = createIssuedDocumentService({ db, orgUid: DEFAULT_ORG_UID });
+  const { document } = await service.recordIssuedDocument({
+    jobId: "job-pg-role", documentType: "quote", number: "EQ-PG-ROLE v1", quoteVersion: 1, pdfBytes: Buffer.from("%PDF-1.4\nfield_app\n%%EOF\n"),
+    issuedAt: "2026-10-12T00:00:00.000Z", source: "live",
+  });
+  const store = memoryStore();
+  let down = true;
+  const flaky = { ...store, async head(key) { if (down) throw Object.assign(new Error("down"), { code: "R2_UNREACHABLE" }); return store.head(key); } };
+  let clock = Date.parse("2026-10-12T01:00:00.000Z");
+  const replicator = createDocumentReplicator({ db, orgUid: DEFAULT_ORG_UID, store: flaky, now: () => new Date(clock), logger: quietLogger, paceMs: 0 });
+  assert.equal((await replicator.tick())[0].outcome, "failed", "pending: inserted with its error");
+  down = false;
+  clock += 60_000;
+  assert.equal((await replicator.tick())[0].outcome, "replicated", "pending: updated to replicated");
+  const [row] = await withOrg(db, DEFAULT_ORG_UID, (tx) => queryRows(sql`select attempts, last_error, r2_replicated_at from document_blob_replicas where sha256 = ${document.pdfSha256}`, tx));
+  assert.equal(row.attempts, 2);
+  assert.equal(row.last_error, null);
+  await rejects(withOrg(db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`delete from document_blob_replicas`)), /permission denied|delete refused/);
 });

@@ -1183,3 +1183,42 @@ export const quoteLines = pgTable(
 export type Quote = typeof quotes.$inferSelect;
 export type QuoteSection = typeof quoteSections.$inferSelect;
 export type QuoteLine = typeof quoteLines.$inferSelect;
+
+// The R2 replica of issued document bytes (#240; docs/REPLIT.md "Issued
+// documents in R2"). PostgreSQL stays the store of record: document_blobs is
+// written in the issue transaction as before, and after it commits the bytes
+// are copied to a locked R2 bucket at `<org_uid>/<sha256>`. One row per blob
+// that replication has tried: when it landed (`r2_replicated_at`), how many
+// attempts it took, when the next one is due, and the last error as a short
+// code (never a message, so no credential can end up here). A blob with no
+// row, or a row with no `r2_replicated_at`, is pending. Written only by
+// server/documents/replicator.js. Migration 0012 refuses DELETE, TRUNCATE
+// and any UPDATE of a row already replicated.
+
+export const documentBlobReplicas = pgTable(
+  "document_blob_replicas",
+  {
+    orgUid: orgUid(),
+    sha256: text("sha256").notNull(),
+    r2ReplicatedAt: timestamp("r2_replicated_at", { withTimezone: true, mode: "date" }),
+    attempts: integer("attempts").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true, mode: "date" }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "date" }),
+    /** A short code (R2_UNREACHABLE, R2_OBJECT_MISMATCH, ...), never a message. */
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgUid, t.sha256] }),
+    foreignKey({
+      name: "document_blob_replicas_blob_fk",
+      columns: [t.orgUid, t.sha256],
+      foreignColumns: [documentBlobs.orgUid, documentBlobs.sha256],
+    }),
+    index("document_blob_replicas_pending_idx").on(t.orgUid, t.nextAttemptAt).where(sql`${t.r2ReplicatedAt} is null`),
+    check("document_blob_replicas_attempts_check", sql`${t.attempts} >= 0`),
+    check("document_blob_replicas_last_error_check", sql`${t.lastError} is null or ${t.lastError} ~ '^[A-Z0-9_]{1,64}$'`),
+    tenantIsolation("document_blob_replicas"),
+  ],
+);
