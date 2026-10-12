@@ -13,7 +13,8 @@ function walk(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...walk(path));
-    else if (entry.name.endsWith(".js")) files.push(path);
+    // Test files never load at boot, so what they import need not be in the image.
+    else if (entry.name.endsWith(".js") && !entry.name.endsWith(".test.js")) files.push(path);
   }
   return files;
 }

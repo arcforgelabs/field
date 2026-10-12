@@ -28,6 +28,9 @@ import {
   parseDocumentRefs,
 } from "./documents/email-attachments.js";
 import { recordAttachedDocumentsEmailed } from "./documents/delivery.js";
+import { applyMergeFields, applyMergeFieldsToText } from "../shared/email-templates.js";
+import { buildEmailMergeValues } from "./email-merge-fields.js";
+import { jobQuoteForEmail, registerEmailComposeRoutes } from "./email-compose-routes.js";
 import { CREDIT_NOTE_ON_REISSUE_CHOICES, createBusinessSettingsService } from "./invoices/business-settings.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
@@ -3024,6 +3027,13 @@ async function processScheduledEmail(record) {
     refs: payload.documents || [],
     meta: normalizeJobMeta(job.meta),
   });
+  const merge = buildEmailMergeValues({
+    meta: normalizeJobMeta(job.meta),
+    quote: await jobQuoteForEmail(job),
+    config,
+    user,
+    attachmentNames: [...loadedDocuments.map((document) => document.filename), ...(record.loadedAttachments || []).map((file) => file.filename)],
+  });
   const result = await sendJobEmail({
     config,
     user,
@@ -3031,8 +3041,8 @@ async function processScheduledEmail(record) {
     to: payload.to,
     cc: payload.cc || [],
     bcc: payload.bcc || [],
-    subject: payload.subject,
-    customBody: payload.customBody || null,
+    subject: applyMergeFieldsToText(payload.subject, merge, { final: true }),
+    customBody: payload.customBody ? applyMergeFields(payload.customBody, merge, { final: true }) : null,
     themeFontFamily: payload.themeFontFamily || null,
     additionalAttachments: [...documentMimeAttachments(loadedDocuments), ...(record.loadedAttachments || [])],
   });
@@ -3322,6 +3332,13 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
       });
       return res.json({ ok: true, result: sent.result, scheduledEmail: sent.scheduledEmail });
     }
+    const merge = buildEmailMergeValues({
+      meta: normalizeJobMeta(job.meta),
+      quote: await jobQuoteForEmail(job),
+      config,
+      user: req.caller,
+      attachmentNames: [...loadedDocuments.map((document) => document.filename), ...additionalAttachments.map((file) => file.filename)],
+    });
     const result = await sendJobEmail({
       config,
       user: req.caller,
@@ -3329,8 +3346,8 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
       to,
       cc,
       bcc,
-      subject,
-      customBody,
+      subject: applyMergeFieldsToText(subject, merge, { final: true }),
+      customBody: customBody ? applyMergeFields(customBody, merge, { final: true }) : customBody,
       themeFontFamily: payload?.themeFontFamily ?? null,
       additionalAttachments: [...documentMimeAttachments(loadedDocuments), ...additionalAttachments],
     });
@@ -4320,6 +4337,7 @@ app.post("/api/jobs/:id/quote/catalog-changes/apply", requireAuth, async (req, r
 // Issued documents by uid: GET /api/documents/:uid/pdf and
 // GET /api/jobs/:id/documents (server/documents/routes.js).
 registerIssuedDocumentRoutes(app, { requireAuth, getDb, requestOrgUid, findJob, blobs: issuedDocumentBlobs });
+registerEmailComposeRoutes(app, { requireAuth, findJob, config, dataDir: DATA_DIR, normalizeJobMeta, documentServiceFor: emailDocumentService });
 
 // What each customer was sent, newest last.
 app.get("/api/jobs/:id/quote-snapshots", requireAuth, async (req, res) => {

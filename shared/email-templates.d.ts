@@ -24,3 +24,17 @@ export function renderEmailTemplate(
     businessName?: string;
   },
 ): StoredEmailTemplate;
+
+export type EmailMergeField = { key: string; label: string };
+export const EMAIL_MERGE_FIELDS: readonly EmailMergeField[];
+export const EMAIL_MERGE_FIELD_KEYS: readonly string[];
+export const DEFAULT_EMAIL_SIGNATURE_HTML: string;
+export type EmailMergeValues = Record<string, string | null | undefined>;
+
+export function renderComposerTemplate<T extends { html?: string; subject?: string }>(
+  template: T,
+  values?: EmailMergeValues,
+): T & { subject: string; html: string };
+export function renderSignature(signatureHtml: string | null | undefined, values?: EmailMergeValues): string;
+export function applyMergeFields(html: string, values?: EmailMergeValues, options?: { final?: boolean }): string;
+export function applyMergeFieldsToText(text: string, values?: EmailMergeValues, options?: { final?: boolean }): string;

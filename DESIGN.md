@@ -107,7 +107,7 @@ Every page starts with the page header (`.fx-ph`): breadcrumb or title, status, 
 
 `client/src/components/shell/ui.css` holds the app's primitives, prefixed `fx-`: page header, buttons (`fx-btn`, `--primary`, `--ghost`, `--danger`, `--sm`, `--icon`), segmented control (`fx-seg`, a raised white thumb on a tinted track, never a filled block), inputs, filter box, status pills (`fx-status--*`) and dots, summary tiles (`fx-strip`), board lanes and cards, tables, tabs, notices, the line editor (`fx-lines`, `fx-cell`), popovers and menus, dialogs, the palette and toasts, and the kit parts (sheet, bulk bar, badge, switch, affix input, skeleton). The catalogue adds filter chips (`fx-chip`) and the wide item sheet. `menu.tsx` is the anchored menu; `shell-context.ts` gives pages `newQuote()` and `toast(message, undo)`.
 
-The older kit in `client/src/components/field/` (`Button`, `DataTable`, `SideDrawer`, …) still serves the supplier price-list import and email screens; its buttons and badges follow the same sentence-case, soft look. New screens use the `fx-` primitives.
+The older kit in `client/src/components/field/` (`Button`, `DataTable`, `SideDrawer`, …) still serves the supplier price-list import; its buttons and badges follow the same sentence-case, soft look. New screens use the `fx-` primitives.
 
 Motion is short and informative: menus and dialogs fade up in about 120ms, board cards lift slightly on hover, a newly added quote row flashes the accent tint once. `prefers-reduced-motion` turns it off.
 
@@ -116,6 +116,10 @@ Motion is short and informative: menus and dialogs fade up in about 120ms, board
 The quote is a table: sections as header rows with their subtotal, items as rows (description, quantity, unit, rate, cost and margin when shown, amount), kits collapsed to one row with a disclosure for their parts. Each section ends with an add box: typing searches the catalogue, Enter adds the highlighted item and focuses its quantity; Enter on text with no match adds a one-off line. Row actions (move, move to section, fix the price, hide the price, leave out of the total, reset to catalogue, duplicate, remove) live in the row's ⋯ menu, which appears on hover. Removing shows an Undo toast; ⌘Z and ⇧⌘Z undo and redo.
 
 A rate changed from the catalogue's shows in the warning colour with the catalogue rate on hover. Fixed prices, hidden prices and optional rows carry a small text tag. Scope of works, the payment schedule (share, amount, due days) and validity sit below the table. Drafts save about a second after the last change; the header shows Editing, Saving…, Saved or Not saved. A sent version is read-only with a single "Edit as new version" action.
+
+## Email composer
+
+`/jobs/:id/email-editor` (`client/src/features/job-detail/email-composer-page.tsx`) follows Gmail's patterns in Field's look. The composer is one card in the working column: From, then To with Cc and Bcc on request, as chips that show the name and the address (an incomplete address stays as a red chip with the reason under the row, and Send stays disabled), the subject, the body and the attachment tray. Send sits at the card's bottom left with a menu for Schedule send; Ctrl/⌘ Enter sends, Ctrl/⌘ Shift C and B add Cc and Bcc. The body is plain rich text only (bold, italic, underline, lists, links): no font pickers, because the business's identity is on the document. Merge fields show a dotted underline while composing and are plain in the sent email. The rail shows the customer preview, built by the server with the code that sends, and the job's scheduled emails and drafts. On a phone the composer is full-screen: Send is the round button in the top bar, the menu holds Schedule send, Preview and Discard, Cc and Bcc fold behind a chevron, attachments are a strip under the subject, formatting sits at the bottom and the attachment picker is a bottom sheet.
 
 ## Catalogue
 

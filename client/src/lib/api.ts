@@ -117,6 +117,39 @@ export type JobDocumentsResponse = {
   notIssued?: NotIssuedDocument[];
 };
 
+export type EmailTemplateSource = { id: string; name: string; description: string; subject: string; html: string };
+export type EmailMergeValues = Record<string, string | null>;
+
+/** What the composer reads for one send (GET /api/jobs/:id/email-context). */
+export type EmailContext = {
+  ok: true;
+  jobId: string;
+  documentType: "quote" | "invoice" | "receipt" | null;
+  milestoneIndex: number | null;
+  from: { name: string | null; email: string | null };
+  defaultSubject: string;
+  templates: EmailTemplateSource[];
+  mergeValues: EmailMergeValues;
+  mergeFields: Array<{ key: string; label: string; value: string | null }>;
+  signature: { html: string; isDefault: boolean } | null;
+  jobContacts: Array<{ email: string; name: string; source: "job" | "sent" }>;
+  deliveryPolicy: { mode: "live" | "allowlist" | "disabled"; allowedRecipients?: string[] };
+};
+
+/** What a send would produce (POST /api/jobs/:id/email-preview). */
+export type EmailPreview = {
+  ok: true;
+  subject: string;
+  html: string;
+  text: string;
+  from: { name: string | null; email: string | null };
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  attachments: Array<{ filename: string; source: "main" | "document" | "upload"; byteLength?: number | null; number?: string | null; documentType?: string | null }>;
+  pending: string[];
+};
+
 /** The email limits the server holds (server/documents/email-attachments.js). */
 export const EMAIL_ATTACHMENT_LIMITS = {
   maxAttachments: 10,
@@ -567,6 +600,34 @@ export const api = {
         ...documents,
       }),
     });
+  },
+  emailContext(id: string, params: { documentType?: string | null; milestoneIndex?: number | null; version?: string | null }) {
+    const search = new URLSearchParams();
+    if (params.documentType) search.set("documentType", params.documentType);
+    if (params.milestoneIndex != null) search.set("milestoneIndex", String(params.milestoneIndex));
+    if (params.version) search.set("version", params.version);
+    return request<EmailContext>(`/api/jobs/${id}/email-context${search.toString() ? `?${search}` : ""}`);
+  },
+  emailPreview(id: string, body: {
+    documentType?: string | null;
+    milestoneIndex?: number | null;
+    version?: string | null;
+    subject?: string | null;
+    customBody?: string | null;
+    to?: string[];
+    cc?: string[];
+    bcc?: string[];
+    documents?: Array<{ uid: string }>;
+    uploads?: Array<{ filename: string; byteLength: number }>;
+    attachmentFilename?: string | null;
+  }, init?: { signal?: AbortSignal }) {
+    return request<EmailPreview>(`/api/jobs/${id}/email-preview`, { method: "POST", body: JSON.stringify(body), signal: init?.signal });
+  },
+  emailSignature() {
+    return request<{ ok: true; signature: { html: string; isDefault: boolean; updatedAt: string | null } }>("/api/settings/email-signature");
+  },
+  saveEmailSignature(html: string) {
+    return request<{ ok: true; signature: { html: string; isDefault: boolean; updatedAt: string | null } }>("/api/settings/email-signature", { method: "PUT", body: JSON.stringify({ html }) });
   },
   /** The job's issued documents (503 without a database: no picker then). */
   jobDocuments(id: string) {

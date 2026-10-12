@@ -141,6 +141,34 @@ same job, and uploads, in that order.
   `notIssued`: the job's draft milestone invoices, which cannot be attached
   until they are issued.
 
+## The composer
+
+The email page (`/jobs/:id/email-editor`) keeps no defaults of its own. It
+reads `GET /api/jobs/:id/email-context`: the templates (with their
+placeholders), the merge-field values, the default subject, the signed-in
+person's signature, the job's own people for the To, Cc and Bcc suggestions
+(its contact, then everyone the job already emailed; Google Contacts follow),
+the sender and the delivery policy.
+
+- **Merge fields** are defined once, in `shared/email-templates.js`
+  (`EMAIL_MERGE_FIELDS`), and their values are worked out by the server
+  (`server/email-merge-fields.js`): customer name, job, site address,
+  document number, amount due, due date, the invoice a replacement replaces,
+  the adjustment note number, the attachment list, the sender's name and the
+  business name. In the body a field is `<span data-merge="key">`. When the
+  email is built, the server fills every field again with its own value, so
+  an invoice issued by the send carries the number it was just given, and a
+  field with no value is left empty rather than sent as a placeholder.
+- **Signatures** belong to each person (Settings > Email, `GET`/`PUT
+  /api/settings/email-signature`, kept in `email-signatures.json` in the data
+  directory). Without one the default sign-off is used. Templates end before
+  the sign-off.
+- **Preview.** `POST /api/jobs/:id/email-preview` takes the same body as a
+  send and returns the subject, HTML and attachment list the send would
+  produce, from the same functions (`composeDocumentEmail`,
+  `composeJobEmail`). It calls no Gmail and issues nothing. A draft invoice's
+  number shows as "[number when issued]" until the send issues it.
+
 ## Message-ID
 
 Every document send carries a stable `Message-ID: <field-<attempt>@<host>>`,

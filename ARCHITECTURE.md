@@ -65,7 +65,7 @@ built on it live in `components/shell/ui.css` (see `DESIGN.md`).
 | --- | --- | --- |
 | `/jobs` | Pipeline: what needs doing, then jobs as a board by stage or a list | `features/jobs/jobs-page.tsx` |
 | `/jobs/:id` | One job: the quote editor or its invoices, notes, and a summary rail | `features/job/job-page.tsx` |
-| `/jobs/:id/email-editor` | Compose and send a quote, invoice or receipt | `features/job-detail/quote-email-page.tsx` |
+| `/jobs/:id/email-editor` | Compose and send a quote, invoice, receipt or job email | `features/job-detail/email-composer-page.tsx` |
 | `/invoices` | Every milestone invoice across jobs, with payments | `features/invoices/invoices-page.tsx` |
 | `/pricing/*` | The catalogue: price book, item editor, categories, imports, health | `features/pricing/` |
 | `/settings` | Account (Clerk's own screens in Clerk mode), team, terms, appearance | `features/settings/settings-page.tsx` |

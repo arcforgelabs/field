@@ -14,7 +14,7 @@ import { configureBusinessProfile, getQuoteCatalog, getQuoteCatalogsForAuthority
 import { generateQuotePdfBuffer, resolveDocumentBusiness } from "./quote-artifacts.js";
 import { partiesDetails } from "./documents/job-sources.js";
 import { buildDocumentEmailText } from "./send-quote-email.js";
-import { renderEmailTemplate, DEFAULT_EMAIL_TEMPLATES } from "../shared/email-templates.js";
+import { renderEmailTemplate, renderSignature, DEFAULT_EMAIL_TEMPLATES } from "../shared/email-templates.js";
 
 // Placeholder values only: never a real business's details.
 const CONFIGURED = {
@@ -114,9 +114,12 @@ test("the plain-text email and stock signatures speak for the profile's trading 
   assert.match(text, /Regards,\nAcme Landscapes/);
   assert.doesNotMatch(text, /Your Business|Catalogue Name/);
 
+  // Templates end before the sign-off; the signature (the operator's own, or
+  // the default) signs with the business name the server supplies.
   const template = DEFAULT_EMAIL_TEMPLATES.quote[0];
-  assert.match(renderEmailTemplate(template, { clientName: "Pat", businessName: "Acme <Landscapes>" }).html, /Regards,<br\/>Acme &lt;Landscapes&gt;<\/p>/);
-  assert.match(renderEmailTemplate(template, { clientName: "Pat" }).html, /Regards,<br\/><\/p>/, "no invented name");
+  assert.doesNotMatch(renderEmailTemplate(template, { clientName: "Pat", businessName: "Acme <Landscapes>" }).html, /Regards/);
+  assert.match(renderSignature(null, { senderName: "Pat Operator", businessName: "Acme <Landscapes>" }), /Regards,<br\/><span data-merge="senderName">Pat Operator<\/span><br\/><span data-merge="businessName">Acme &lt;Landscapes&gt;<\/span><\/p>/);
+  assert.doesNotMatch(renderSignature(null, { senderName: "Pat Operator" }), /Your Business|Catalogue Name/, "no invented name");
 });
 
 // ── The trading name is optional: the legal name stands in for it ──
