@@ -496,9 +496,9 @@ deployment Configuration is written into `.replit` and committed.
 | `SENTRY_FEEDBACK` | Unset: on. `0` hides the "Report a problem" button |
 | `SENTRY_VERIFY` | `1` for one publish only: boot sends `Field Sentry verification (server)`. Remove it at the next publish, or every restart sends another |
 
-During a Sentry trial (no volume limit) set `SENTRY_TRACES_SAMPLE_RATE` and
-`SENTRY_REPLAYS_SESSION_SAMPLE_RATE` to `1` to see everything; delete both
-when the trial ends, and the defaults above apply.
+The defaults are sized for the free plan from the start, including during a
+Sentry trial, so nothing needs changing when a trial ends. Raise the rates
+only on a paid plan.
 
 If the workspace also gets `SENTRY_DSN` (Replit's Secrets page feeds both),
 its events are tagged `replit-workspace`, never `production`, as long as
