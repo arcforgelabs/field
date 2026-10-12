@@ -11,9 +11,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
-import { MIGRATIONS_FOLDER, queryRows, schema } from "./index.js";
+import { MIGRATIONS_FOLDER, migratePostgresDatabase, queryRows, schema } from "./index.js";
 import { startTestPostgres, testPostgresMode } from "./test-postgres.js";
 import { DEFAULT_ORG_UID, assertRowSecurity, inspectRowSecurity, withOrg } from "./tenancy.js";
 
@@ -86,7 +85,7 @@ async function provesIsolation(db, uids) {
 test("owner without CREATEROLE: the migration applies and FORCE ROW LEVEL SECURITY isolates organisations", { skip: !enabled && "set FIELD_DB_TEST_DOCKER=1 or FIELD_DB_TEST_DATABASE_URL" }, async () => {
   const owner = await ownerDatabase({ createRole: false });
   try {
-    await migrate(owner.db, { migrationsFolder: MIGRATIONS_FOLDER });
+    await migratePostgresDatabase(owner.db);
     const mode = await assertRowSecurity(owner.db);
     assert.equal(mode.superuser, false);
     assert.equal(mode.bypassRls, false);
@@ -100,7 +99,7 @@ test("owner without CREATEROLE: the migration applies and FORCE ROW LEVEL SECURI
 test("owner with CREATEROLE (Neon's neondb_owner): field_app is created and every organisation transaction runs as it", { skip: !enabled && "set FIELD_DB_TEST_DOCKER=1 or FIELD_DB_TEST_DATABASE_URL" }, async () => {
   const owner = await ownerDatabase({ createRole: true });
   try {
-    await migrate(owner.db, { migrationsFolder: MIGRATIONS_FOLDER });
+    await migratePostgresDatabase(owner.db);
     const mode = await inspectRowSecurity(owner.db);
     // field_app may predate this database on a shared server; then the owner
     // may not be able to join it and FORCE carries isolation instead.
@@ -131,7 +130,7 @@ test("owner with CREATEROLE (Neon's neondb_owner): field_app is created and ever
     const [after] = await owner.client`select (select count(*) from items)::int as items, (select count(*) from pg_roles where rolname = 'field_app')::int as app_role`;
     assert.equal(after.items, 1);
     if (testPostgresMode().kind === "docker") assert.equal(after.app_role, 0, "the owner that created field_app drops it");
-    await migrate(owner.db, { migrationsFolder: MIGRATIONS_FOLDER });
+    await migratePostgresDatabase(owner.db);
     assert.equal((await inspectRowSecurity(owner.db)).enforced, true);
   } finally {
     await owner.drop();

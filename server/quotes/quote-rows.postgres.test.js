@@ -8,9 +8,8 @@ import { randomBytes } from "node:crypto";
 import { after, before, test } from "node:test";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
-import { MIGRATIONS_FOLDER, queryRows, schema } from "../db-runtime/index.js";
+import { migratePostgresDatabase, queryRows, schema } from "../db-runtime/index.js";
 import { startTestPostgres, testPostgresMode } from "../db-runtime/test-postgres.js";
 import { DEFAULT_ORG_UID, inspectRowSecurity, withOrg } from "../db-runtime/tenancy.js";
 import { mapQuoteArtifact } from "./from-artifact.js";
@@ -57,7 +56,7 @@ test("as a table owner without CREATEROLE: rows round-trip, other organisations 
     url.username = role;
     url.pathname = `/${database}`;
     const { db } = connect(url.toString());
-    await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+    await migratePostgresDatabase(db);
     assert.equal((await inspectRowSecurity(db)).enforced, true);
     await db.execute(sql`insert into organizations (uid, name, slug) values (${ORG_B}, 'Second Org', 'second')`);
 
