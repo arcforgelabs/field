@@ -29,10 +29,12 @@ import {
 import { resolveActiveJobGeneration, resolveWritableJobGeneration, runAtomicJobGeneration } from "./job-generation.js";
 import { isIssuedQuoteVersion } from "./quote-pricing-attestation.js";
 import { findAnyIssuedDocument, readQuoteIssuanceLedger } from "./quote-issuance.js";
+import { applyBusinessProfileOverride, configuredTradingName } from "./business-profile.js";
 
 const QUOTE_VERSIONS_DIR = "quote-versions";
 
-// ── Business details — fallback defaults, overridden by quoteCatalog.businessProfile ──
+// ── Business details — fallback defaults, overridden by quoteCatalog.businessProfile,
+// and both by the installation's configured businessProfile (server/business-profile.js) ──
 const BUSINESS_DEFAULTS = {
   tradingName: "Your Business",
   legalName: "Your Business Pty Ltd",
@@ -56,6 +58,10 @@ export function resolveDocumentBusiness(quote) {
 }
 
 function resolveBusiness(quote) {
+  return applyBusinessProfileOverride(resolveCatalogBusiness(quote));
+}
+
+function resolveCatalogBusiness(quote) {
   const profile = quote?.quoteCatalog?.businessProfile;
   if (!profile) return BUSINESS_DEFAULTS;
   if (quote?.quoteCatalog?.id === "field-verification") {
@@ -1132,7 +1138,7 @@ function renderHeader(doc, {
 
   // Business name block
   doc.fillColor(C.dark).font("Helvetica-Bold").fontSize(22);
-  doc.text(deliveryDefaults.issuerName || biz.tradingName, M, 30);
+  doc.text(configuredTradingName() || deliveryDefaults.issuerName || biz.tradingName, M, 30);
 
   doc.font("Helvetica").fontSize(9).fillColor(C.muted);
   const bizY = 56;
@@ -1839,7 +1845,7 @@ function renderPageFooter(doc, quoteRef) {
   const savedBottom = doc.page.margins.bottom;
   doc.page.margins.bottom = 0;
   doc.font("Helvetica").fontSize(7).fillColor(C.light);
-  const bizName = doc._footerBizName || BUSINESS_DEFAULTS.tradingName;
+  const bizName = doc._footerBizName || applyBusinessProfileOverride(BUSINESS_DEFAULTS).tradingName;
   doc.text(`${bizName}  ·  ${quoteRef}`, M, footerY, { width: CW, align: "center", lineBreak: false });
   doc.page.margins.bottom = savedBottom;
   doc.y = savedY;

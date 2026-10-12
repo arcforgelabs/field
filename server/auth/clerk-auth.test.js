@@ -500,6 +500,46 @@ test("an owner can add someone ahead of time; they link on first verified sign-i
   assert.equal((await call("POST", "/api/users", { session: owner, body: { email: "crew@example.com" } })).status, 409);
 });
 
+// ── The first owner of a fresh installation ──────────────────────
+// There is no implicit bootstrap user: a new Clerk installation gets its first
+// owner from config bootstrapUsers (imported once, as owner), or, with nobody
+// configured, through break-glass approval of the first person who signs in.
+async function freshInstallation(t, config) {
+  const fresh = await mkdtemp(join(tmpdir(), "field-clerk-fresh-"));
+  t.after(() => rm(fresh, { recursive: true, force: true }));
+  await users.initUsers(fresh);
+  for (const user of users.resolveBootstrapUsers({ config, authToken: "fixture-auth-token" })) await users.ensureUser(user);
+  await setup(t);
+}
+
+test("a fresh installation's first owner comes from bootstrapUsers in config", async (t) => {
+  await freshInstallation(t, { bootstrapUsers: [{ email: "First.Owner@Example.com", name: "First Owner", role: "admin" }] });
+  const row = await fieldRow("first.owner@example.com");
+  assert.equal(row.role, "owner");
+  assert.equal(row.status, "active");
+  ctx.directory.set("user_first", clerkUser("user_first", "first.owner@example.com"));
+  const jobs = await call("GET", "/api/jobs", { session: sessionToken("user_first") });
+  assert.equal(jobs.status, 200);
+  assert.equal(jobs.body.caller.fieldRole, "owner");
+});
+
+test("with nobody configured, nobody gets in until break-glass approves the first owner", async (t) => {
+  await freshInstallation(t, {});
+  assert.deepEqual(await listFieldUsers(ctx.db), [], "no placeholder account is created");
+  ctx.directory.set("user_first", clerkUser("user_first", "first.owner@example.com"));
+  const session = sessionToken("user_first");
+  const blocked = await call("GET", "/api/jobs", { session });
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.body.code, "field_access_pending");
+  const row = await fieldRow("first.owner@example.com");
+  const approved = await call("POST", `/api/users/${row.id}/approve`, { headers: { [BREAK_GLASS_HEADER]: BREAK_GLASS_KEY }, body: { role: "owner" } });
+  assert.equal(approved.status, 200);
+  assert.equal(approved.body.user.role, "owner");
+  const jobs = await call("GET", "/api/jobs", { session });
+  assert.equal(jobs.status, 200);
+  assert.equal(jobs.body.caller.fieldRole, "owner");
+});
+
 // ── Owner MFA gate ───────────────────────────────────────────────
 test("owner-only actions need the owner's session to have passed a second factor", async () => {
   const withoutMfa = await signInOwner({ mfa: false });

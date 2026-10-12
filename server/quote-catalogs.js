@@ -9,6 +9,12 @@ import {
   resolveQuoteCatalogId,
 } from "./quote-catalog-ids.js";
 import { loadAssemblies } from "./catalog/assemblies.js";
+import {
+  applyBusinessProfileOverride,
+  configuredTradingName,
+  hasBusinessProfileOverride,
+  setBusinessProfileOverride,
+} from "./business-profile.js";
 import { assertAssemblyModeContract } from "./assembly-modes.js";
 import { CATALOG_UNIT_DEFINITIONS, normalizeCatalogUnit } from "../shared/catalog-units.js";
 
@@ -38,6 +44,21 @@ let COMMERCIAL_AUTHORITY_STATUS = {
   mode: "disabled",
   refreshedAt: new Date().toISOString(),
 };
+
+/**
+ * Sets this installation's configured business profile (config
+ * `businessProfile`, server/business-profile.js) and re-applies it to every
+ * quote catalogue, so quote builds and new quote snapshots carry it. The next
+ * authority refresh re-projects the price catalogue over the updated base.
+ */
+export function configureBusinessProfile(raw) {
+  const configured = setBusinessProfileOverride(raw);
+  QUOTE_CATALOGS = cloneQuoteCatalogs(LOCAL_QUOTE_CATALOGS);
+  if (COMMERCIAL_AUTHORITY_STATUS?.catalogEtag) {
+    COMMERCIAL_AUTHORITY_STATUS = { ...COMMERCIAL_AUTHORITY_STATUS, catalogEtag: null };
+  }
+  return configured;
+}
 
 export function listQuoteCatalogs() {
   return Object.values(QUOTE_CATALOGS).map((quoteCatalog) => ({
@@ -288,8 +309,18 @@ function loadQuoteCatalogs() {
 
 function cloneQuoteCatalogs(quoteCatalogs) {
   return Object.fromEntries(
-    Object.entries(quoteCatalogs || {}).map(([id, quoteCatalog]) => [id, structuredClone(quoteCatalog)])
+    Object.entries(quoteCatalogs || {}).map(([id, quoteCatalog]) => [id, withConfiguredBusinessProfile(structuredClone(quoteCatalog))])
   );
+}
+
+// The configured business profile over the catalogue's (a no-op when none is
+// configured). Its trading name is also the issuer printed on documents.
+function withConfiguredBusinessProfile(quoteCatalog) {
+  if (!hasBusinessProfileOverride()) return quoteCatalog;
+  quoteCatalog.businessProfile = applyBusinessProfileOverride(quoteCatalog.businessProfile || null);
+  const tradingName = configuredTradingName();
+  if (tradingName) quoteCatalog.deliveryDefaults = { ...(quoteCatalog.deliveryDefaults || {}), issuerName: tradingName };
+  return quoteCatalog;
 }
 
 function normalizeQuoteCatalog(raw) {

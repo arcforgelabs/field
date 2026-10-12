@@ -37,6 +37,8 @@ type QuoteEmailEditorProps = {
   attachments?: File[];
   onAttachmentsChange?: (attachments: File[]) => void;
   fullPage?: boolean;
+  /** The business name the signature button signs with. */
+  signatureName?: string;
 };
 
 const FONT_SIZES = ["13px", "14px", "16px", "18px", "20px", "24px"];
@@ -101,6 +103,7 @@ export function QuoteEmailEditor({
   attachments = [],
   onAttachmentsChange,
   fullPage = false,
+  signatureName = "Your Business",
 }: QuoteEmailEditorProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -196,7 +199,9 @@ export function QuoteEmailEditor({
   }
 
   function insertSignature() {
-    editor?.chain().focus().insertContent("<p>Regards,<br/>Your Business</p>").run();
+    const name = (signatureName.trim() || "Your Business")
+      .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    editor?.chain().focus().insertContent(`<p>Regards,<br/>${name}</p>`).run();
   }
 
   function handleAttachFiles(files: FileList | null) {

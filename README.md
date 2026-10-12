@@ -76,9 +76,65 @@ For a real installation:
 2. Create your price catalogue: import a legacy SQLite catalogue with
    `npm run catalog:import-legacy -- <catalog.db>`, or create items through
    the price book once Field is running.
-3. Configure sign-in (`docs/CLERK_SIGN_IN.md`), email sending
+3. Set your business profile in config (below), not in the catalogue file.
+4. Name your first owner: list them in `bootstrapUsers` (below).
+5. Configure sign-in (`docs/CLERK_SIGN_IN.md`), email sending
    (`docs/GMAIL_SENDING.md`) and, if agents will drive Field, MCP
    (`docs/REMOTE_MCP.md`). `config.json.example` shows every config key.
+
+### Business profile
+
+Your trading name, legal name, ABN, address, phone, email and bank account
+go in config as `businessProfile`, in the same shape as the quote catalogue's
+(see `config.json.example`). On Replit or Docker, put it in the
+`FIELD_CONFIG_JSON` secret so real details never enter the repository:
+
+```json
+{
+  "businessProfile": {
+    "tradingName": "Your Business",
+    "legalName": "Your Business Pty Ltd",
+    "abn": "00 000 000 000",
+    "address": "1 Example Street, Exampleton SA 5000",
+    "phone": "08 0000 0000",
+    "email": "accounts@example.com",
+    "paymentMethods": {
+      "bankTransfer": { "accountName": "Your Business Pty Ltd", "bsb": "000-000", "accountNumber": "00000000", "bank": "Your bank" }
+    }
+  }
+}
+```
+
+It is merged over the catalogue's profile: a field left out keeps the
+catalogue's value, and an empty string clears it. Field applies it to the
+quote catalogue (so every new quote records it), to quote, invoice and receipt
+PDFs, to issued-document records, and to email: the plain-text body, the
+sender-name fallback and the stock signatures sign with its trading name,
+which is also the issuer printed at the top of each document. A document
+already sent is a stored file and never changes. An unknown field or a
+non-string value stops Field at boot with a message naming the field (never
+its value). The boot log says `[field] business profile: configured in ...`
+when one is set.
+
+### First owner
+
+There is no built-in account. List your first owner in `bootstrapUsers`:
+
+```json
+{ "bootstrapUsers": [{ "email": "owner@example.com", "name": "Owner", "role": "admin" }] }
+```
+
+- With password sign-in (`FIELD_AUTH` unset) that person signs in with the
+  `authToken` as their password (or the `password` you give them), then
+  manages the rest in Settings > People.
+- With Clerk sign-in (`FIELD_AUTH=clerk`) the first boot copies them into
+  PostgreSQL as an `owner`, and they link on their first verified Clerk sign-in.
+  This import happens only while the organisation has no members; an
+  installation that already has people (any upgrade) keeps its PostgreSQL
+  record and never re-imports.
+- With nobody listed, everyone who signs in waits as `pending` until an owner
+  approves them. Approve the first owner with the break-glass key
+  (`docs/CLERK_SIGN_IN.md`, "First owner").
 
 ## Development
 

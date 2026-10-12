@@ -1166,6 +1166,8 @@ export interface UiConfig {
   deploymentTheme: string;
   workerDisplayName: string;
   assistantDisplayName: string;
+  /** The business stock email signatures sign with (config businessProfile, else the quote catalogue's). */
+  businessName?: string;
 }
 
 export interface SoilDump {
