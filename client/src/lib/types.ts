@@ -139,7 +139,37 @@ export interface InvoiceRevision {
   supersededQuoteVersion: number | null;
   supersededAt: string | null;
   supersededByRevisionNumber: number | null;
+  /** The credit note that credited this revision when it was replaced (step 4b). */
+  creditNote?: CreditNote | null;
+  /** On a replacement: the credit note that made way for it. */
+  creditNoteNumber?: string | null;
   current?: boolean;
+}
+
+/** Whether an invoice returned to draft and reissued with different content is credited first (#28). */
+export type CreditNoteOnReissue = "when-emailed" | "always" | "never";
+
+export interface InvoicingSettings {
+  ok: boolean;
+  creditNoteOnReissue: CreditNoteOnReissue;
+  updatedAt: string | null;
+  updatedBy: string | null;
+  choices: Array<{ value: CreditNoteOnReissue; label: string; description: string }>;
+}
+
+/** A credit (adjustment) note against an issued invoice, as the job records it. */
+export interface CreditNote {
+  number: string;
+  reason: string | null;
+  issuedAt: string | null;
+  issuedBy: string | null;
+  subtotal: number;
+  gst: number;
+  total: number;
+  currency: string;
+  replacementInvoiceNumber: string | null;
+  pdfPath: string | null;
+  pdfSha256: string | null;
 }
 
 export interface MilestoneInvoice {

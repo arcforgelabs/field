@@ -39,6 +39,7 @@ Current invariants:
 - `meta.invoicePaidAmount` is the **next-open milestone** paid amount (contextual). Use `meta.totalInvoicePaidAmount` for job-level running totals.
 - Marking a milestone as sent or paid makes that milestone prefix immutable for schedule edits. Later milestones can still be reshaped against the remaining percentage until they are also sent or paid.
 - `mark unsent` and `mark unpaid` are explicit undo paths. Both return the milestone to `draft`, clear the sent/paid lock fields, and release that milestone prefix for schedule edits again.
+- An issued invoice is never revised in place. To correct one after an approved change, credit and reissue it (`field credit-invoice`, or "Credit and reissue" in the job's invoices): a credit note (`CN-YYYY-M-N`, an adjustment note PDF with the reason) credits it in full and a new invoice is issued in its place; payments move to the new invoice. `revise-invoice` is the older name of the same command. An invoice marked not sent or unpaid and then issued again with different content is credited first only as the account setting says (Settings, "Quotes and invoices": by default only if Field emailed it). When emailing the replacement, the operator can tick "Also attach the adjustment note".
 - The presentation organizer is one persisted tree with `group` and `source` nodes.
 - Every source node carries a canonical `origin` (`engine` | `manual` | `generated`) and `pricingMode` (`engine` | `manual` | `allocated`). The legacy `sourceKind` field (`customer_schedule_item` | `manual` | `generated_component`) is kept in lock-step for backward compatibility. New code should prefer `origin` / `pricingMode`.
 - Generated sub-items are materialized into standard `source` nodes with `origin: "generated"`, `pricingMode: "allocated"`.
@@ -175,6 +176,7 @@ field update-milestone <jobId> <milestone-number> [--status draft|authorised|pai
 field record-milestone-payment <jobId> <milestone-number> <amount> [--date YYYY-MM-DD] [--reference text] [--method text]
 field mark-milestone-unpaid <jobId> 2
 field mark-milestone-unsent <jobId> 2
+field credit-invoice <jobId> 2 --reason "approved variation" [--version vNNN] [--expect-revision N]
 ```
 
 Milestone numbering in the CLI is human-facing:

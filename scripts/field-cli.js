@@ -1076,7 +1076,9 @@ const commands = {
     }
   },
 
-  async "revise-invoice"(args) {
+  // Step 4b (#28): an issued invoice is credited with a credit note and
+  // reissued, never revised in place. `revise-invoice` is the older name.
+  async "credit-invoice"(args) {
     const reason = trimText(parseFlag(args, "--reason"));
     const version = trimText(parseFlag(args, "--version"));
     const expectedRevision = trimText(parseFlag(args, "--expect-revision"));
@@ -1084,21 +1086,27 @@ const commands = {
       flagsWithValue: ["--reason", "--version", "--expect-revision"],
     });
     if (!id || !milestoneNumberRaw || !reason) {
-      throw new Error("usage: revise-invoice <id> <milestone-number> --reason \"why\" [--version vNNN] [--expect-revision N]");
+      throw new Error("usage: credit-invoice <id> <milestone-number> --reason \"why\" [--version vNNN] [--expect-revision N]");
     }
     const milestoneIndex = parseMilestoneNumber(milestoneNumberRaw);
-    const result = await requestJson("POST", `${jobPath(id)}/milestones/${milestoneIndex}/revise`, {
+    const result = await requestJson("POST", `${jobPath(id)}/milestones/${milestoneIndex}/credit-and-reissue`, {
       body: {
         reason,
         ...(version ? { quoteVersion: version } : {}),
         ...(expectedRevision ? { expectedRevisionNumber: expectedRevision } : {}),
       },
     });
-    const revision = result?.revision || {};
-    console.log(`Issued ${revision.invoiceNumber} (revision ${revision.revisionNumber})`);
-    console.log(`  supersedes: ${revision.supersedesInvoiceNumber || "-"}`);
-    console.log(`  total: ${formatMoney(revision.supersededTotal)} -> ${formatMoney(revision.total)}`);
-    console.log(`  reason: ${revision.revisionReason || reason}`);
+    const invoice = result?.invoice || result?.revision || {};
+    const creditNote = result?.creditNote || null;
+    if (creditNote) console.log(`Credited ${invoice.supersedesInvoiceNumber || "-"} with ${creditNote.number} (${formatMoney(creditNote.total)})`);
+    console.log(`Issued ${invoice.invoiceNumber} in its place`);
+    console.log(`  total: ${formatMoney(invoice.supersededTotal)} -> ${formatMoney(invoice.total)}`);
+    console.log(`  reason: ${creditNote?.reason || invoice.revisionReason || reason}`);
+  },
+
+  async "revise-invoice"(args) {
+    console.error("revise-invoice is now credit-invoice: the invoice is credited with a credit note and reissued");
+    return commands["credit-invoice"](args);
   },
 
   async "update-milestone"(args) {
@@ -1326,7 +1334,9 @@ Milestones:
   generate-milestones <id> [--schedule <file-or-inline-json>]
   update-milestone <id> <milestone-number> [--status draft|authorised|paid] [--due-date YYYY-MM-DD]
   list-invoice-revisions <id> <milestone-number>
-  revise-invoice <id> <milestone-number> --reason "why" [--version vNNN] [--expect-revision N]
+  credit-invoice <id> <milestone-number> --reason "why" [--version vNNN] [--expect-revision N]
+                       credit an issued invoice with a credit note and issue its replacement
+                       (revise-invoice is the older name)
   record-milestone-payment <id> <milestone-number> <amount> [--date YYYY-MM-DD] [--reference text] [--method text]
   mark-milestone-unpaid <id> <milestone-number>
   mark-milestone-unsent <id> <milestone-number>

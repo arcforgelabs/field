@@ -82,8 +82,10 @@ test("as a table owner without CREATEROLE: rows round-trip, other organisations 
     assert.deepEqual((await a.readJob(revised.jobId)).invoices.map((invoice) => [invoice.number, invoice.status]), [
       ["EI-2605-04-M1", "credited"], ["EI-2605-04-M1-R2", "issued"], ["EI-2605-04-M2", "draft"],
     ]);
+    // A revision made in place before credit notes gets none (#28).
+    assert.deepEqual((await a.readJob(revised.jobId)).creditNotes, []);
 
-    assert.deepEqual(await b.readJob(paid.jobId), { milestones: [], invoices: [], payments: [], receipts: [] });
+    assert.deepEqual(await b.readJob(paid.jobId), { milestones: [], invoices: [], creditNotes: [], payments: [], allocations: [], receipts: [] });
     const [seen] = await withOrg(db, ORG_B, (tx) => queryRows(sql`select (select count(*) from invoices)::int as i, (select count(*) from invoice_lines)::int as l, (select count(*) from payments)::int as p, (select count(*) from receipts)::int as r`, tx));
     assert.deepEqual(seen, { i: 0, l: 0, p: 0, r: 0 });
     // The owner itself is filtered (FORCE) and cannot change what was issued (triggers).

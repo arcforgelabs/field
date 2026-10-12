@@ -17,6 +17,8 @@ import { loadQuoteRows, quoteReadsStatus, quoteRowsFromArtifact } from "./quotes
 import { createInvoiceRowService } from "./invoices/invoice-rows.js";
 import { createInvoiceRowRecorder, createUnavailableInvoiceRowRecorder, installInvoiceRowRecorder } from "./invoices/recorder.js";
 import { createInvoiceIssueService, createUnavailableInvoiceIssuer, installInvoiceIssuer } from "./invoices/issue.js";
+import { creditNoteAttachment } from "./invoices/credit-note-attachment.js";
+import { CREDIT_NOTE_ON_REISSUE_CHOICES, createBusinessSettingsService } from "./invoices/business-settings.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
 // A job detail's quote read from its rows (#10), kept beside the detail object.
@@ -124,7 +126,7 @@ import {
   readJobQuoteCatalogChanges,
   recordJobMilestonePayment,
   regenerateRecordingQuote,
-  reviseJobMilestoneInvoice,
+  creditAndReissueJobMilestoneInvoice,
   sendJobQuote,
   setJobPipelineStage,
   updateJobMilestone,
@@ -1266,6 +1268,30 @@ async function loadTerms() {
 async function saveTerms(terms) {
   await writeFile(TERMS_PATH, JSON.stringify(terms, null, 2));
 }
+
+// Business settings (business_settings, #28): whether an invoice returned to
+// draft and reissued with different content is credited first. Everyone can
+// read it; an owner changes it.
+const businessSettings = deploymentOrg ? createBusinessSettingsService({ db: getDb(), orgUid: deploymentOrg.uid }) : null;
+
+app.get("/api/settings/invoicing", requireAuth, async (_req, res) => {
+  if (!businessSettings) return res.status(503).json({ error: "business settings need the database, which this server does not have" });
+  try {
+    res.json({ ok: true, ...(await businessSettings.get()), choices: CREDIT_NOTE_ON_REISSUE_CHOICES });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+app.put("/api/settings/invoicing", requireAuth, requireAdmin, async (req, res) => {
+  if (!businessSettings) return res.status(503).json({ error: "business settings need the database, which this server does not have" });
+  try {
+    const actor = req.caller?.id || req.caller?.email || req.caller?.name || null;
+    res.json({ ok: true, ...(await businessSettings.update({ creditNoteOnReissue: req.body?.creditNoteOnReissue }, { actor })), choices: CREDIT_NOTE_ON_REISSUE_CHOICES });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
 
 app.get("/api/terms", requireAuth, async (_req, res) => {
   res.json({ ok: true, terms: await loadTerms() });
@@ -2974,6 +3000,9 @@ app.post("/api/jobs/:id/email-quote", requireAuth, upload.array("attachments", 8
   if (!to) return res.status(400).json({ error: "recipient email required" });
 
   try {
+    if (payload?.attachCreditNote === true && documentType === "invoice") {
+      additionalAttachments.push(await creditNoteAttachment({ jobDir: job.dir, milestoneIndex: payload?.milestoneIndex ?? null, issuedDocuments: issuedDocumentRecorder.service || null }));
+    }
     if (payload?.scheduledAt) {
       assertAllowedQuoteRecipients({ config, emails: to, label: "recipient" });
       assertAllowedQuoteRecipients({ config, emails: cc, label: "cc", required: false });
@@ -3314,13 +3343,16 @@ app.get("/api/jobs/:id/milestones/:index/revisions", requireAuth, async (req, re
   }
 });
 
-app.post("/api/jobs/:id/milestones/:index/revise", requireAuth, async (req, res) => {
+// Credit an issued invoice and issue its replacement (step 4b). `/revise` is
+// the older name of the same action: an issued invoice is never revised in
+// place any more.
+async function creditAndReissueRoute(req, res) {
   const job = await findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "not found" });
 
   try {
-    const result = await runExclusiveJobMutation(job.meta.id, "revise milestone invoice", async () => {
-      return await runAtomicJobGeneration(job.dir, async (stagedJobDir) => reviseJobMilestoneInvoice({
+    const result = await runExclusiveJobMutation(job.meta.id, "credit and reissue milestone invoice", async () => {
+      return await runAtomicJobGeneration(job.dir, async (stagedJobDir) => creditAndReissueJobMilestoneInvoice({
         jobDir: stagedJobDir,
         meta: await readNormalizedJobMeta(stagedJobDir) || normalizeJobMeta(job.meta),
         config,
@@ -3336,6 +3368,8 @@ app.post("/api/jobs/:id/milestones/:index/revise", requireAuth, async (req, res)
     const detail = buildClientJobDetail(await loadJobDetail({ ...job, meta: result.meta }));
     res.json({
       ok: true,
+      creditNote: result.creditNote,
+      invoice: result.invoice,
       revision: result.revision,
       paymentSchedule: result.paymentSchedule || detail.meta?.paymentSchedule || null,
       milestones: result.milestoneInvoices || detail.meta?.milestoneInvoices || [],
@@ -3344,7 +3378,9 @@ app.post("/api/jobs/:id/milestones/:index/revise", requireAuth, async (req, res)
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
-});
+}
+app.post("/api/jobs/:id/milestones/:index/credit-and-reissue", requireAuth, creditAndReissueRoute);
+app.post("/api/jobs/:id/milestones/:index/revise", requireAuth, creditAndReissueRoute);
 
 app.post("/api/jobs/:id/milestones/migrate", requireAuth, async (req, res) => {
   const job = await findJob(req.params.id);

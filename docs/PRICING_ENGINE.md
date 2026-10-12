@@ -22,9 +22,10 @@ totals, the job's totals and the API and MCP customer pricing are read from
 those rows, while the files are still written alongside. Phase 3 step 4a
 is built too (#27): every job's payment schedule, milestone invoices,
 payments and receipts are also written as rows and checked against what was
-issued. Step 4b part one is built too (#28): invoices are issued from the
-issue service, with `INV-YYYY-M-N` numbers allocated in the issue
-transaction (see "Phase 3, step by step").
+issued. Step 4b parts one and two are built too (#28): invoices are issued from
+the issue service, with `INV-YYYY-M-N` numbers allocated in the issue
+transaction, and an issued invoice is corrected by a credit note and a new
+invoice (see "Phase 3, step by step").
 
 The owner's six decisions of 2026-10-12 (from the document audit) are
 recorded where they change the design: credit notes ("Invoices and
@@ -615,7 +616,7 @@ differences:**
   milestone's share of the quote ex GST, against the quote. Today's PDF also
   prints the quote's schedule, which is the quote's rows.
 - `credit_notes` and `credit_note_lines` exist with their checks and
-  triggers. Nothing writes them until step 4b.
+  triggers. Step 4b writes them (see "How step 4b credits an invoice").
 - `payments` belong to the invoice they were recorded against
   (`sourceInvoiceNumber`), keep `voided_at`, `void_reason` and
   `voided_by`, and are never deleted. A payment the files drop ("mark
@@ -710,7 +711,10 @@ today, and what moves next, is under Phases.
 ### Business settings
 
 `business_settings` (one row) holds the business name, ABN, bank details,
-default terms, quote validity days and numbering prefixes. All of these come
+default terms, quote validity days and numbering prefixes. **Built so far
+(migration `0016_business_settings`, #28):** one row per organisation with
+`credit_note_on_reissue` (see "How step 4b credits an invoice"); the rest is
+still config. All of these come
 out of `quote-catalogs/embark-default.json5`, whose `gstRate` is replaced by
 item tax codes.
 
@@ -952,7 +956,7 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 3, part two | Quote reads from rows (#10): display columns (migration 0011); the quote PDF, the quote email's totals, the job's cached totals and the job detail's customer pricing (client and MCP) come from the rows; editor saves carry `If-Match` | Built |
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
 | 4a | Invoices, payments and receipts as rows (#27): `payment_milestones`, `invoices`, `invoice_lines`, `payments`, `receipts`, and the shape of `credit_notes` (migration 0013); dual-write after every committed milestone change; a backfill verified against what was issued | Built |
-| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Part one built (issue service, migration 0014); credit notes and claim lines next |
+| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Parts one and two built (issue service, migration 0014; credit notes, migrations 0015 and 0016); claim lines next |
 | 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Later |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
@@ -1162,3 +1166,72 @@ number and bytes now come from PostgreSQL.
 - **Invoice rows.** The row the issue writes is mapped exactly as the job's
   files map it afterwards (`mapInvoiceForIssue`), so the dual-write finds it
   unchanged and only fills its links.
+
+How step 4b credits an invoice (#28, part two; migration
+`0015_credit_notes`). An issued invoice is never revised in place.
+
+- **Credit and reissue.** The operator credits an issued invoice with a
+  reason ("Credit and reissue" in the job's invoices, `field credit-invoice`,
+  `POST /api/jobs/:id/milestones/:index/credit-and-reissue`; `/revise` and
+  `revise-invoice` are the older names). Field mints the next revision from
+  the current quote, then the issue service, in one transaction under the
+  issue lock: allocates `CN-YYYY-M-N` (counter `credit_note`) and
+  `INV-YYYY-M-N`; renders and stores the credit note's PDF and the new
+  invoice's; writes the `credit_notes` row (the credited invoice in full, its
+  lines each pointing at the invoice line they credit, the reason, who did
+  it, `replacement_invoice_uid`) and the new invoice
+  (`supersedes_invoice_uid`); sets the credited invoice to `credited`; adds a
+  `credited` event to its issued document; and moves its payments.
+- **The credit note PDF** is an adjustment note: titled "Adjustment note",
+  the supplier and ABN, the recipient (always printed; the ATO requires it
+  where the original was $1,000 or more), date and number, the original
+  invoice and job reference, the reason, the amount of the adjustment and the
+  GST adjustment, and the price difference between the original invoice and
+  its replacement. Its line says what it credits in plain words ("Credit of
+  INV-2026-10-1: Deposit: 50% of the quoted price"), with the quote on a
+  quieter line ("Quote EQ-2610-03, accepted 14 September 2026"; "revision 2"
+  only when the customer was sent more than one version, and never "v1";
+  `server/invoices/customer-wording.js`). Credit notes are numbered
+  `CN-YYYY-M-N`, the month not zero-padded (`CN-2026-1-1`). The replacement invoice prints "Replaces" and "Credit
+  note".
+- **Payments move as allocations.** A payment is never changed: a
+  `payment_allocations` row (append-only) moves it from the credited
+  invoice to the replacement. The invoice that holds a payment is the
+  `to_invoice_uid` of its latest allocation, else the invoice it was recorded
+  against, and an invoice's `amount_paid` is the active payments it holds.
+- **Revisions made in place before credit notes** (`-R<k>`) stay as issued
+  (owner's decision, 2026-10-13). No credit note is invented for them: no
+  client was ever issued a credit note, and an invented one would not match
+  the accounts in Xero. The superseded revision's invoice row is `credited`
+  with the note "Revised in place before credit notes: superseded by
+  <number>. No credit note was issued." Its payments stay on the invoice
+  they were recorded against; the backfill reports each as a
+  `payment-on-superseded` warning and changes nothing. Credit notes apply
+  from this release on.
+- **An invoice returned to draft and reissued** (decided 2026-10-13). When
+  an invoice is marked not sent or unpaid and then issued again with
+  different content, it gets a new number, and the account setting
+  `creditNoteOnReissue` (`business_settings`, migration
+  `0016_business_settings`; Settings, "Quotes and invoices") decides
+  whether the issue service credits the old one first, in the same
+  transaction:
+  - `when-emailed` (the default, best practice): only when Field has
+    evidence the customer was sent it through Field: an `emailed` event on
+    its issued document, or a delivered send record (a `sent` quote
+    snapshot of it). With no such evidence it was never delivered, so it is
+    left void and reissued under a new number with no credit note;
+  - `always`: a credit note every time;
+  - `never`: never a credit note; the old invoice stays void.
+
+  The issue service reads the setting and the evidence inside its
+  transaction. **"Credit and reissue" always makes a credit note, whatever
+  the setting says**: that action is the operator saying the customer has
+  the invoice. Issuing the same content again still restores the invoice
+  it was, under its number, with no credit note.
+- **Sending the replacement.** A credit note is not emailed on its own. Its
+  stored PDF is an issued document of the job (`GET /api/jobs/:id/documents`,
+  `GET /api/documents/:uid/pdf`). When the replacement invoice is emailed,
+  the email editor offers "Also attach the adjustment note": ticked, the
+  credit note's stored bytes go with the invoice (`attachCreditNote` on
+  `POST /api/jobs/:id/email-quote`). Attaching other Field documents is
+  part of the email editor's redesign.
