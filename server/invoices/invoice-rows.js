@@ -185,7 +185,6 @@ function creditNoteFromRow(row, lines = []) {
     invoiceUid: row.invoiceUid,
     replacementInvoiceUid: row.replacementInvoiceUid,
     status: row.status,
-    origin: row.origin,
     reason: row.reason,
     issuedAt: iso(row.issuedAt),
     issuedOn: row.issuedOn,
@@ -387,7 +386,6 @@ export async function insertCreditNoteRow(tx, { jobId, creditNote, invoiceUid, r
     taxTotalReason: totals.taxTotalReason,
     reference: creditNote.reference || null,
     replacementInvoiceUid: replacementInvoiceUid || null,
-    origin: creditNote.origin || "issued",
     createdAt: at,
     createdBy: creditNote.createdBy || actor,
     updatedAt: at,
@@ -506,7 +504,8 @@ export function createInvoiceRowService({ db, orgUid = undefined, now = () => ne
     for (const line of lineRows) linesByInvoice.get(line.invoiceUid).push(line);
     const paymentRows = await tx.select().from(payments).where(eq(payments.jobId, jobId)).orderBy(asc(payments.recordedAt));
     const receiptRows = await tx.select().from(receipts).where(eq(receipts.jobId, jobId)).orderBy(asc(receipts.issuedAt));
-    const creditNoteRows = await tx.select().from(creditNotes).where(eq(creditNotes.jobId, jobId)).orderBy(asc(creditNotes.issuedAt), asc(creditNotes.number));
+    const creditNoteRows = (await tx.select().from(creditNotes).where(eq(creditNotes.jobId, jobId)))
+      .sort((a, b) => new Date(a.issuedAt) - new Date(b.issuedAt) || compareDocumentNumbers(a.number, b.number));
     const creditLineRows = creditNoteRows.length
       ? await tx.select().from(creditNoteLines).where(inArray(creditNoteLines.creditNoteUid, creditNoteRows.map((row) => row.uid))).orderBy(asc(creditNoteLines.sortOrder))
       : [];

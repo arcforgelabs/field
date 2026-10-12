@@ -67,7 +67,9 @@ describe("invoice-row backfill", () => {
     assert.deepEqual(report.mismatches, []);
     assert.deepEqual(report.errors, []);
     assert.deepEqual(report.byStatus, { issued: 6, draft: 5, paid: 1, credited: 2 });
-    assert.deepEqual(report.warnings, [], "every issued invoice was read back from a PDF");
+    // Every issued invoice was read back from a PDF; the one warning is the
+    // payment on the deposit revised in place, which stays where it was recorded.
+    assert.deepEqual(report.warnings.map((warning) => [warning.jobId, warning.kind, warning.number]), [["job-revised-paid", "payment-on-superseded", "EI-2605-07-M1"]]);
     for (const entry of report.entries) {
       for (const invoice of entry.invoices.filter((candidate) => candidate.status !== "draft")) {
         const printed = invoice.issued.find((copy) => copy.source === "revision-pdf")?.totals;
@@ -88,14 +90,14 @@ describe("invoice-row backfill", () => {
 
     const report = await backfillInvoiceRows({ dataDir, service, issuedDocuments: documents });
     assert.deepEqual(report.actions, { written: 7 });
-    // The two revisions made in place get their credit notes, and the
-    // payment the credited deposit held moves to its replacement.
+    // No credit note is invented for the revisions made in place, and no
+    // payment moves.
     assert.deepEqual(report.written, {
       milestones: { created: 12 },
       invoices: { created: 14 },
-      creditNotes: { created: 2 },
+      creditNotes: {},
       payments: { created: 3 },
-      allocations: { created: 1 },
+      allocations: {},
       receipts: { created: 1 },
     });
     const paid = await service.readJob("job-paid");
@@ -105,7 +107,7 @@ describe("invoice-row backfill", () => {
 
     const again = await backfillInvoiceRows({ dataDir, service, issuedDocuments: documents });
     assert.deepEqual(again.actions, { unchanged: 7 });
-    assert.deepEqual(again.written, { milestones: { unchanged: 12 }, invoices: { unchanged: 14 }, creditNotes: { unchanged: 2 }, payments: { unchanged: 3 }, allocations: {}, receipts: { unchanged: 1 } });
+    assert.deepEqual(again.written, { milestones: { unchanged: 12 }, invoices: { unchanged: 14 }, creditNotes: {}, payments: { unchanged: 3 }, allocations: {}, receipts: { unchanged: 1 } });
   });
 
   test("a planted mismatch and an over-claim are refused with both numbers, and nothing is written for them", async () => {

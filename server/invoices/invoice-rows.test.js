@@ -97,40 +97,25 @@ describe("invoice rows", () => {
     const byNumber = Object.fromEntries(invoices.map((invoice) => [invoice.number, invoice]));
     assert.deepEqual(Object.keys(byNumber).sort(), ["EI-2605-04-M1", "EI-2605-04-M1-R2", "EI-2605-04-M2"]);
     assert.deepEqual([byNumber["EI-2605-04-M1"].status, byNumber["EI-2605-04-M1"].total, byNumber["EI-2605-04-M1"].revision], ["credited", "110.00", 1]);
-    assert.match(byNumber["EI-2605-04-M1"].note, /credited by CN-EI-2605-04-M1 .*replaced by EI-2605-04-M1-R2/);
+    assert.match(byNumber["EI-2605-04-M1"].note, /Revised in place before credit notes: superseded by EI-2605-04-M1-R2\. No credit note was issued\./);
     assert.ok(byNumber["EI-2605-04-M1"].supersededAt);
     const r2 = byNumber["EI-2605-04-M1-R2"];
     assert.deepEqual([r2.status, r2.total, r2.revision, r2.supersedesInvoiceUid, r2.revisionReason], ["issued", "165.00", 2, byNumber["EI-2605-04-M1"].uid, "Approved variation"]);
-    // The credit note recorded for it: in full, issued, naming the replacement.
-    const { creditNotes } = await a.readJob(jobId);
-    assert.deepEqual(creditNotes.map((note) => [note.number, note.status, note.origin, note.invoiceUid, note.replacementInvoiceUid, note.total, note.reason, note.issuedDocumentUid]), [
-      ["CN-EI-2605-04-M1", "issued", "revision-migration", byNumber["EI-2605-04-M1"].uid, r2.uid, "110.00", "Approved variation", null],
-    ]);
-    assert.equal(creditNotes[0].lines[0].invoiceLineUid, byNumber["EI-2605-04-M1"].lines[0].uid);
-    const again = await a.writeJob({ jobId, mapped });
-    assert.deepEqual(again.creditNotes, { created: 0, unchanged: 1 });
-    // An issued credit note never changes, and is never deleted.
-    await rejects(asOrg(t.db, ORG_A, sql`update credit_notes set total = 0, subtotal = 0, tax_total = 0`), /was issued: change refused/);
-    await rejects(asOrg(t.db, ORG_A, sql`delete from credit_notes`), /was issued: delete refused/);
+    // No credit note is invented for a revision made in place before them.
+    const { creditNotes, allocations } = await a.readJob(jobId);
+    assert.deepEqual([creditNotes, allocations], [[], []]);
   });
 
-  test("a payment on a credited invoice moves to its replacement, as an allocation", async () => {
+  test("a payment on an invoice revised in place before credit notes stays where it was recorded", async () => {
     const { jobId, mapped } = jobs.revisedPaid;
     const first = await a.writeJob({ jobId, mapped });
-    assert.equal(first.allocations.created, 1);
+    assert.equal(first.allocations.created, 0);
     const { invoices, payments, allocations, creditNotes } = await a.readJob(jobId);
     const byNumber = Object.fromEntries(invoices.map((invoice) => [invoice.number, invoice]));
-    const credited = byNumber["EI-2605-07-M1"];
-    const replacement = byNumber["EI-2605-07-M1-R2"];
-    assert.equal(payments[0].invoiceUid, credited.uid, "the payment keeps the invoice it was recorded against");
-    assert.deepEqual(allocations.map((allocation) => [allocation.paymentUid, allocation.fromInvoiceUid, allocation.toInvoiceUid, allocation.creditNoteUid, allocation.amount]), [
-      [payments[0].uid, credited.uid, replacement.uid, creditNotes[0].uid, payments[0].amount],
-    ]);
-    assert.deepEqual([credited.amountPaid, replacement.amountPaid], ["0.00", payments[0].amount]);
-    const again = await a.writeJob({ jobId, mapped });
-    assert.equal(again.allocations.created, 0, "a payment moves once");
-    await rejects(asOrg(t.db, ORG_A, sql`delete from payment_allocations`), /append-only: delete refused|permission denied for table payment_allocations/);
-    await rejects(asOrg(t.db, ORG_A, sql`update payment_allocations set amount = 1`), /append-only: update refused|permission denied for table payment_allocations/);
+    assert.deepEqual([creditNotes, allocations], [[], []]);
+    assert.equal(payments[0].invoiceUid, byNumber["EI-2605-07-M1"].uid);
+    assert.deepEqual([byNumber["EI-2605-07-M1"].amountPaid, byNumber["EI-2605-07-M1-R2"].amountPaid], ["50.00", "0.00"]);
+    assert.ok(mapped.warnings.some((warning) => warning.kind === "payment-on-superseded" && warning.number === "EI-2605-07-M1"));
   });
 
   test("a voided payment keeps its row with voided_at; a payment the files drop is voided, never deleted", async () => {

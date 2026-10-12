@@ -59,6 +59,7 @@ import { issuedDocumentRecorder } from "./documents/recorder.js";
 import { invoiceRevisionDetails, partiesDetails } from "./documents/job-sources.js";
 import { creditIssueKey, invoiceIssueKey, invoiceIssuer, mapCreditNoteForIssue, mapInvoiceForIssue } from "./invoices/issue.js";
 import { quoteTaxRatePercent } from "./quotes/from-artifact.js";
+import { claimDescription, customerQuoteReference, quoteReferenceLine } from "./invoices/customer-wording.js";
 import { applyQuoteCatalogChanges, computeQuoteCatalogChanges, upgradeOrganizerCatalogLinks } from "./quote-catalog-sync.js";
 import {
   buildQuoteDeliveryAttempt,
@@ -1061,15 +1062,24 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
     // Credit the revision it replaces, in full, and issue this one in its
     // place. Mapped as the files will map it once credited: the replaced
     // revision superseded by this one.
-    const asCredited = toCredit.whenToCredit === "always" ? mapped : {
+    // (Its number is allocated in the issue; "pending" stands in for it.)
+    const asCredited = {
       ...mapped,
       milestoneInvoices: normalizeStoredMilestoneInvoices(current.map((other) => (other.milestoneIndex === entry.milestoneIndex
-        ? { ...other, revisionHistory: other.revisionHistory.map((historical) => (historical.revisionNumber === credited.revisionNumber ? { ...historical, supersededByRevisionNumber: revision.revisionNumber } : historical)) }
+        ? {
+            ...other,
+            revisionHistory: other.revisionHistory.map((historical) => (historical.revisionNumber === credited.revisionNumber
+              ? { ...historical, supersededByRevisionNumber: revision.revisionNumber, creditNote: { number: "pending", reason: revision.revisionReason || null } }
+              : historical)),
+          }
         : other))),
     };
     const creditedInvoice = mapInvoiceForIssue({ ...asCredited, number: credited.invoiceNumber });
     const creditNote = mapCreditNoteForIssue({ ...asCredited, creditedNumber: credited.invoiceNumber });
     const reason = revision.revisionReason || "Credited and reissued";
+    // What the adjustment note prints for the line it credits: plain words,
+    // and the quote it claimed against (customer-wording.js).
+    const creditedQuote = await customerQuoteReference({ jobDir, meta, milestone: entry, quote, quoteVersion: credited.quoteVersion });
     const result = await invoiceIssuer().creditAndReissue({
       jobId,
       idempotencyKey: creditIssueKey({
@@ -1096,7 +1106,11 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
           reason,
           currency: credited.currency || "AUD",
           ...moneyOf(credited),
-          lines: creditNote.lines.map((line) => ({ name: line.name, ...moneyOf(credited) })),
+          lines: creditNote.lines.map(() => ({
+            name: `Credit of ${credited.invoiceNumber}: ${claimDescription(entry)}`,
+            detail: quoteReferenceLine(creditedQuote),
+            ...moneyOf(credited),
+          })),
         },
         credited: { number: credited.invoiceNumber, issuedAt: credited.issuedAt, ...moneyOf(credited) },
         replacement: { number: invoiceNumber, ...moneyOf(revision) },

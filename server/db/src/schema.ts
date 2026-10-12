@@ -1256,9 +1256,6 @@ export const INVOICE_STATUSES = ["draft", "issued", "paid", "void", "credited"] 
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 export const CREDIT_NOTE_STATUSES = ["draft", "issued", "void"] as const;
 export type CreditNoteStatus = (typeof CREDIT_NOTE_STATUSES)[number];
-/** `issued`: issued by the issue service with its own PDF. `revision-migration`: recorded for an invoice revised in place before credit notes (no PDF was ever sent). */
-export const CREDIT_NOTE_ORIGINS = ["issued", "revision-migration"] as const;
-export type CreditNoteOrigin = (typeof CREDIT_NOTE_ORIGINS)[number];
 export const RECEIPT_STATUSES = ["issued", "void"] as const;
 export type ReceiptStatus = (typeof RECEIPT_STATUSES)[number];
 export const INVOICE_LINE_TYPES = ["claim", "item", "custom", "note"] as const;
@@ -1469,9 +1466,9 @@ export const invoiceLines = pgTable(
  * A credit (adjustment) note against one issued invoice (step 4b, #28). An
  * issued invoice is never revised in place: it is credited in full by a
  * credit note, and replaced by a new invoice (`replacement_invoice_uid`).
- * Issued ones are numbered CN-YYYY-MM-N from document_number_counters with
- * their own PDF; those recorded for revisions made before credit notes are
- * `revision-migration` and have no PDF.
+ * Numbered CN-YYYY-M-N from document_number_counters, with their own PDF.
+ * Credit notes apply from step 4b on: an invoice revised in place before
+ * them has none (owner's decision, 2026-10-13).
  */
 export const creditNotes = pgTable(
   "credit_notes",
@@ -1497,8 +1494,7 @@ export const creditNotes = pgTable(
     reference: text("reference"),
     /** The invoice issued in place of the one credited. */
     replacementInvoiceUid: text("replacement_invoice_uid"),
-    origin: text("origin").$type<CreditNoteOrigin>().notNull().default("issued"),
-    /** The issue service's idempotency key; null on a `revision-migration` note. */
+    /** The issue service's idempotency key. */
     issueKey: text("issue_key"),
     createdAt: createdAt(),
     createdBy: text("created_by"),
@@ -1536,8 +1532,7 @@ export const creditNotes = pgTable(
     check("credit_notes_total_check", sql`${t.total} = ${t.subtotal} + ${t.taxTotal} and ${t.total} >= 0`),
     check("credit_notes_tax_total_source_check", sql`${t.taxTotalSource} in ('computed','printed') and (${t.taxTotalSource} = 'computed' or ${t.taxTotalReason} is not null)`),
     check("credit_notes_version_check", sql`${t.version} > 0`),
-    check("credit_notes_origin_check", sql`${t.origin} in ('issued','revision-migration')`),
-    check("credit_notes_issue_check", sql`${t.issueKey} is null or (${t.origin} = 'issued' and ${t.issuedAt} is not null and ${t.number} ~ '^CN-[0-9]{4}-[0-9]{2}-[1-9][0-9]*$')`),
+    check("credit_notes_issue_check", sql`${t.issueKey} is null or (${t.issuedAt} is not null and ${t.number} ~ '^CN-[0-9]{4}-([1-9]|1[0-2])-[1-9][0-9]*$')`),
     tenantIsolation("credit_notes"),
   ],
 );

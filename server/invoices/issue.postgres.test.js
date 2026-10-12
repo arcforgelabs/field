@@ -68,7 +68,7 @@ test("through SET ROLE field_app: the issue allocates, stores and writes with th
     invoice: { ...invoice(), revision: 2 },
     render: async (number) => Buffer.from(`%PDF-1.4\n${number}\n%%EOF\n`),
   });
-  assert.match(credited.creditNote.number, /^CN-\d{4}-\d{2}-1$/);
+  assert.match(credited.creditNote.number, /^CN-\d{4}-([1-9]|1[0-2])-1$/);
   const [moved] = await withOrg(db, DEFAULT_ORG_UID, (tx) => queryRows(sql`select (select count(*) from payment_allocations)::int as allocations, (select amount_paid from invoices where uid = ${credited.invoice.invoiceUid}) as paid`, tx));
   assert.deepEqual(moved, { allocations: 1, paid: "50.00" });
 });

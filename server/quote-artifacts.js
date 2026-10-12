@@ -988,8 +988,8 @@ async function renderQuotePdfBuffer({
  * the original invoice and the adjusted price.
  *
  *   creditNote   { number, issuedAt, reason, currency, lines: [{ name,
- *                subtotal, gst, total }], subtotal, gst, total } (credited,
- *                positive)
+ *                detail (a quieter second line), subtotal, gst, total }],
+ *                subtotal, gst, total } (credited, positive)
  *   credited     { number, issuedAt, subtotal, gst, total } the original
  *   replacement  { number, subtotal, gst, total } the invoice issued in its place
  */
@@ -1090,6 +1090,11 @@ export async function generateCreditNotePdfBuffer({
       const rowY = doc.y;
       doc.font("Helvetica").fontSize(9).fillColor(C.body);
       doc.text(line.name, cols.item + 6, rowY + 2, { width: cols.exGst - cols.item - 16 });
+      if (line.detail) {
+        doc.font("Helvetica").fontSize(8.5).fillColor(C.muted);
+        doc.text(line.detail, cols.item + 6, doc.y + 1, { width: cols.exGst - cols.item - 16 });
+        doc.font("Helvetica").fontSize(9).fillColor(C.body);
+      }
       const height = Math.max(doc.y - rowY, 14);
       doc.text(formatMoney(-line.subtotal, currency), cols.exGst, rowY + 2, { width: cols.gst - cols.exGst - 8, align: "right", lineBreak: false });
       doc.text(formatMoney(-line.gst, currency), cols.gst, rowY + 2, { width: cols.incGst - cols.gst - 8, align: "right", lineBreak: false });

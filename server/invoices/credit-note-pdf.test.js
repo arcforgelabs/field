@@ -32,7 +32,7 @@ test("an adjustment note prints everything the ATO asks of one", async () => {
       subtotal: 1000,
       gst: 100,
       total: 1100,
-      lines: [{ name: "Credit of INV-2026-10-1: Deposit, 50 % of EQ-2610-04 v1", subtotal: 1000, gst: 100, total: 1100 }],
+      lines: [{ name: "Credit of INV-2026-10-1: Deposit: 50% of the quoted price", detail: "Quote EQ-2610-04, accepted 1 October 2026", subtotal: 1000, gst: 100, total: 1100 }],
     },
     credited: { number: "INV-2026-10-1", issuedAt: "2026-10-01T02:00:00.000Z", subtotal: 1000, gst: 100, total: 1100 },
     replacement: { number: "INV-2026-10-2", subtotal: 1100, gst: 110, total: 1210 },
@@ -51,6 +51,9 @@ test("an adjustment note prints everything the ATO asks of one", async () => {
   has("Job reference: JOB-2610-04");
   has("Replaced by: INV-2026-10-2");
   has("Approved variation: rock clause on the north bench");
+  has("Credit of INV-2026-10-1: Deposit: 50% of the quoted price");
+  has("Quote EQ-2610-04, accepted 1 October 2026");
+  assert.ok(!runs.some((run) => / v\d\b/.test(run)), "no bare quote version");
   has("Adjustment (ex GST)");
   has("GST adjustment");
   has("-$100.00");

@@ -1187,24 +1187,27 @@ How step 4b credits an invoice (#28, part two; migration
   where the original was $1,000 or more), date and number, the original
   invoice and job reference, the reason, the amount of the adjustment and the
   GST adjustment, and the price difference between the original invoice and
-  its replacement. The replacement invoice prints "Replaces" and "Credit
+  its replacement. Its line says what it credits in plain words ("Credit of
+  INV-2026-10-1: Deposit: 50% of the quoted price"), with the quote on a
+  quieter line ("Quote EQ-2610-03, accepted 14 September 2026"; "revision 2"
+  only when the customer was sent more than one version, and never "v1";
+  `server/invoices/customer-wording.js`). Credit notes are numbered
+  `CN-YYYY-M-N`, the month not zero-padded (`CN-2026-1-1`). The replacement invoice prints "Replaces" and "Credit
   note".
 - **Payments move as allocations.** A payment is never changed: a
   `payment_allocations` row (append-only) moves it from the credited
   invoice to the replacement. The invoice that holds a payment is the
   `to_invoice_uid` of its latest allocation, else the invoice it was recorded
   against, and an invoice's `amount_paid` is the active payments it holds.
-- **Revisions made in place before credit notes** (`-R<k>`) are recorded the
-  same way, without a document: a credit note `CN-<superseded number>`,
-  origin `revision-migration`, no PDF and no number from the sequence (it was
-  never issued to the customer), plus the allocations. The boot data
-  migration `2026-10-12-credit-notes-for-revisions` does it for every job,
-  through the invoice-row sync with `verifyIssued`: both invoices are checked
-  against their stored revisions and, to the cent, the totals their PDFs
-  printed, before anything is written. A job that fails is listed and
-  written nothing, and the migration is not recorded, so it runs again at
-  the next boot. `npm run data:migrate -- --dry-run` shows what it would
-  record. The dual-write records the same for any job on its next change.
+- **Revisions made in place before credit notes** (`-R<k>`) stay as issued
+  (owner's decision, 2026-10-13). No credit note is invented for them: no
+  client was ever issued a credit note, and an invented one would not match
+  the accounts in Xero. The superseded revision's invoice row is `credited`
+  with the note "Revised in place before credit notes: superseded by
+  <number>. No credit note was issued." Its payments stay on the invoice
+  they were recorded against; the backfill reports each as a
+  `payment-on-superseded` warning and changes nothing. Credit notes apply
+  from this release on.
 - **An invoice returned to draft and reissued** (decided 2026-10-13). When
   an invoice is marked not sent or unpaid and then issued again with
   different content, it gets a new number, and the account setting

@@ -34,10 +34,10 @@ import { createPostgresBlobStore, DocumentBytesError, sha256Hex } from "../docum
 import { newDocumentEventUid, newDocumentUid } from "../documents/uid.js";
 import { mapMilestoneState } from "./from-milestones.js";
 import { allocateCreditedPayments, insertCreditNoteRow, insertIssuedInvoiceRow, isIssuedInvoice, refreshAmountsPaid } from "./invoice-rows.js";
-import { formatCreditNoteNumber, formatInvoiceNumber, invoicePeriod } from "./numbers.js";
+import { formatSequenceNumber, invoicePeriod } from "./numbers.js";
 import { readCreditNoteOnReissue } from "./business-settings.js";
 
-export { CREDIT_NOTE_NUMBER_PATTERN, INVOICE_NUMBER_PATTERN, formatCreditNoteNumber, formatInvoiceNumber, invoicePeriod, isSequenceInvoiceNumber } from "./numbers.js";
+export { CREDIT_NOTE_NUMBER_PATTERN, INVOICE_NUMBER_PATTERN, SEQUENCE_PREFIXES, formatCreditNoteNumber, formatInvoiceNumber, formatSequenceNumber, invoicePeriod, isSequenceInvoiceNumber } from "./numbers.js";
 
 const { invoices, creditNotes, issuedDocuments, documentEvents, documentNumberCounters, paymentMilestones, quotes, quoteSnapshots } = schema;
 
@@ -143,7 +143,11 @@ export function createInvoiceIssueService({
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey(scope.orgUid)}))`);
   }
 
-  async function allocate(tx, documentType, period, at) {
+  // The next number of a document type's series (numbers.js
+  // SEQUENCE_PREFIXES) for the issue time's month. Inside the issue
+  // transaction only: a failed issue rolls it back, so there are no gaps.
+  async function allocate(tx, documentType, issuedDate, at) {
+    const period = invoicePeriod(issuedDate);
     const [counter] = await tx.insert(documentNumberCounters)
       .values({ documentType, period, lastValue: 1, createdAt: at, updatedAt: at })
       .onConflictDoUpdate({
@@ -151,7 +155,7 @@ export function createInvoiceIssueService({
         set: { lastValue: sql`${documentNumberCounters.lastValue} + 1`, updatedAt: at },
       })
       .returning();
-    return counter.lastValue;
+    return formatSequenceNumber(documentType, period, counter.lastValue);
   }
 
   // The bytes, the issued document and its `issued` event.
@@ -201,8 +205,7 @@ export function createInvoiceIssueService({
   // returns, without the replay flag.
   async function issueInvoiceNow(tx, { jobId, key, reference, issuedDate, actor, invoice, details, render, supersedesInvoiceUid = null, eventData = {} }) {
     const at = now();
-    const period = invoicePeriod(issuedDate);
-    const number = formatInvoiceNumber(period, await allocate(tx, "invoice", period, at));
+    const number = await allocate(tx, "invoice", issuedDate, at);
     const stored = await storeDocument(tx, {
       jobId,
       documentType: "invoice",
@@ -313,7 +316,7 @@ export function createInvoiceIssueService({
     /**
      * Correct an issued invoice (step 4b): credit it in full with a credit
      * (adjustment) note, then issue the invoice that replaces it, in ONE
-     * transaction. The note takes CN-YYYY-MM-N and the invoice INV-YYYY-MM-N,
+     * transaction. The note takes CN-YYYY-M-N and the invoice INV-YYYY-M-N,
      * each from its own counter; both are rendered once and stored with their
      * `issued` events; the credited invoice gets a `credited` event (reason,
      * who, the note and its replacement) and the status `credited`; and every
@@ -398,11 +401,10 @@ export function createInvoiceIssueService({
           return { replayed: false, creditNote: null, invoice: issued, decision };
         }
 
-        const period = invoicePeriod(input.issuedDate);
-        const noteNumber = formatCreditNoteNumber(period, await allocate(tx, "credit_note", period, at));
+        const noteNumber = await allocate(tx, "credit_note", input.issuedDate, at);
         // The replacement's number is allocated before either is rendered, so
         // each document can name the other.
-        const invoiceNumber = formatInvoiceNumber(period, await allocate(tx, "invoice", period, at));
+        const invoiceNumber = await allocate(tx, "invoice", input.issuedDate, at);
         const noteStored = await storeDocument(tx, {
           jobId: input.jobId,
           documentType: "credit_note",
@@ -443,7 +445,7 @@ export function createInvoiceIssueService({
 
         const creditNoteUid = await insertCreditNoteRow(tx, {
           jobId: input.jobId,
-          creditNote: { ...creditNote, number: noteNumber, reason: why, origin: "issued", issuedAt: input.issuedDate.toISOString(), reference: input.reference, createdBy: input.actor },
+          creditNote: { ...creditNote, number: noteNumber, reason: why, issuedAt: input.issuedDate.toISOString(), reference: input.reference, createdBy: input.actor },
           invoiceUid: creditedRow.uid,
           replacementInvoiceUid: invoiceUid,
           issueKey: input.key,

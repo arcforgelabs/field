@@ -4309,7 +4309,7 @@ test("reissued after a return to draft: credited when it was emailed, not when i
   try {
     const emailed = await reissue("job-reissue-emailed", { email: true });
     assert.notEqual(emailed.current.invoiceNumber, emailed.issued.invoiceNumber);
-    assert.match(emailed.previous.creditNote?.number || "", /^CN-\d{4}-\d{2}-[1-9]\d*$/, "the emailed invoice is credited");
+    assert.match(emailed.previous.creditNote?.number || "", /^CN-\d{4}-([1-9]|1[0-2])-[1-9]\d*$/, "the emailed invoice is credited");
     assert.equal(emailed.previous.creditNote.reason, "Reissued after the invoice was returned to draft");
     assert.equal(emailed.previous.supersededByRevisionNumber, emailed.current.revisionNumber);
     assert.equal(emailed.current.issuedRevision.creditNoteNumber, emailed.previous.creditNote.number);
@@ -4451,7 +4451,7 @@ test("creditAndReissueJobMilestoneInvoice credits the issued invoice with a cred
     // The credit note: from its own sequence, crediting the original in
     // full, with the reason and who did it, and its own stored PDF.
     const note = revised.creditNote;
-    assert.match(note.number, /^CN-\d{4}-\d{2}-[1-9]\d*$/);
+    assert.match(note.number, /^CN-\d{4}-([1-9]|1[0-2])-[1-9]\d*$/);
     assert.deepEqual([note.reason, note.issuedBy, note.subtotal, note.gst, note.total, note.replacementInvoiceNumber], ["Approved rock clause variation on the north bench", "Alex", 100, 10, 110, revisedNumber]);
     assert.deepEqual(current.revisionHistory[0].creditNote, note);
     assert.equal(current.issuedRevision.creditNoteNumber, note.number);

@@ -222,8 +222,8 @@ describe("invoice-row dual-write", () => {
       const byNumber = Object.fromEntries(state.read.invoices.map((invoice) => [invoice.number, invoice]));
       assert.deepEqual([byNumber[deposit.invoiceNumber].status, byNumber[deposit.invoiceNumber].amountPaid], ["credited", "0.00"]);
       assert.deepEqual([byNumber[replacement.invoiceNumber].status, byNumber[replacement.invoiceNumber].amountPaid], ["issued", "550.00"]);
-      assert.deepEqual(state.read.creditNotes.map((note) => [note.number, note.origin, note.invoiceUid, note.replacementInvoiceUid]), [
-        [replacement.issuedRevision.creditNoteNumber, "issued", byNumber[deposit.invoiceNumber].uid, byNumber[replacement.invoiceNumber].uid],
+      assert.deepEqual(state.read.creditNotes.map((note) => [note.number, note.invoiceUid, note.replacementInvoiceUid]), [
+        [replacement.issuedRevision.creditNoteNumber, byNumber[deposit.invoiceNumber].uid, byNumber[replacement.invoiceNumber].uid],
       ]);
       assert.equal(state.read.allocations.length, 1);
 

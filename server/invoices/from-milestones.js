@@ -4,11 +4,11 @@
 //   milestone              -> payment_milestones (sort_order = its index)
 //   issued revision        -> an issued invoice, its number exactly as issued
 //     current                 issued, or paid when the milestone is paid
-//     superseded by a          credited, with the credit note that credited
-//     revision                 it in full and names its replacement (step 4b,
-//                              #28): the note issued with it, or for a
-//                              revision made in place before credit notes,
-//                              one recorded now (CN-<its number>, no PDF)
+//     superseded by a          credited. Since step 4b (#28) with the credit
+//     revision                 note that credited it in full and names its
+//                              replacement; one revised in place before
+//                              credit notes keeps its status and gets no
+//                              credit note (owner's decision, 2026-10-13)
 //     retired by unsend or     void (re-issuing the same content restores
 //     mark unpaid              that number, so the void row is it)
 //   issued, from before    -> an issued invoice from the stored record
@@ -33,7 +33,6 @@
 import { listInvoiceRevisions } from "../invoice-revisions.js";
 import { isMilestoneInvoiceIssued, isMilestonePaymentVoided } from "../job-documents.js";
 import { centsToText, fixed, quoteTotals, toCents } from "../quotes/totals.js";
-import { revisionCreditNoteNumber } from "./numbers.js";
 
 function text(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -239,13 +238,15 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
     for (const revision of revisions.filter((entry) => !entry.current)) {
       const superseded = revision.supersededByRevisionNumber != null;
       const successor = revisions.find((entry) => entry.revisionNumber === revision.supersededByRevisionNumber);
-      const creditNumber = revision.creditNote?.number || revisionCreditNoteNumber(revision.invoiceNumber);
+      const replacedBy = successor?.invoiceNumber || `revision ${revision.supersededByRevisionNumber}`;
       const invoice = fromRevision(revision, superseded
         ? { status: "credited", note: revision.creditNote
-          ? `Credited by ${creditNumber} and replaced by ${successor?.invoiceNumber || `revision ${revision.supersededByRevisionNumber}`}.`
-          : `Revised in place before credit notes: credited by ${creditNumber} (recorded, never issued as a document) and replaced by ${successor?.invoiceNumber || `revision ${revision.supersededByRevisionNumber}`}.` }
+          ? `Credited by ${revision.creditNote.number} and replaced by ${replacedBy}.`
+          : `Revised in place before credit notes: superseded by ${replacedBy}. No credit note was issued.` }
         : { status: "void", note: "Returned to draft after it was issued (unsent, or marked unpaid). Re-issuing the same content restores this number." });
-      if (invoice && superseded && successor) credited.push({ invoice, revision, successor, number: creditNumber });
+      // Only a credit note that was issued (step 4b on) is a row: none is
+      // invented for a revision made in place before credit notes.
+      if (invoice && superseded && successor && revision.creditNote) credited.push({ invoice, revision, successor, number: revision.creditNote.number });
     }
 
     const paid = state.status === "paid";
@@ -340,8 +341,7 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
         invoiceKey: invoice.key,
         replacementKey: successor.invoiceNumber,
         milestoneKey,
-        origin: note ? "issued" : "revision-migration",
-        reason: text(note?.reason) || text(successor.revisionReason) || "Revised in place before credit notes",
+        reason: text(note?.reason) || text(successor.revisionReason) || "Credited and reissued",
         createdBy: text(note?.issuedBy) || text(successor.revisedBy),
         issuedAt,
         issuedOn: issuedAt.slice(0, 10),
@@ -392,8 +392,9 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
       if (!voided) {
         activeSum += toCents(row.amount);
         lastActive = row;
-        if (current && invoice !== current && invoice.status !== "credited") {
-          warnings.push({ kind: "payment-on-superseded", milestone: index, number: invoice.number, reason: `payment ${row.amount} was recorded against ${invoice.number}, which ${current.number} replaced, and was not credited, so it stays on ${invoice.number}` });
+        // A credit note moves the payment to the replacement (payment_allocations).
+        if (current && invoice !== current && !credited.some((entry) => entry.invoice === invoice)) {
+          warnings.push({ kind: "payment-on-superseded", milestone: index, number: invoice.number, reason: `payment ${row.amount} was recorded against ${invoice.number}, which ${current.number} replaced without a credit note; it stays on ${invoice.number}, where it was recorded` });
         }
       }
     }

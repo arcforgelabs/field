@@ -15,6 +15,7 @@ import { createBusinessSettingsService } from "./business-settings.js";
 import {
   createInvoiceIssueService,
   createUnavailableInvoiceIssuer,
+  formatCreditNoteNumber,
   formatInvoiceNumber,
   invoiceIssueKey,
   invoiceIssuer,
@@ -216,16 +217,16 @@ describe("invoice issue service", () => {
       ...overrides,
     });
     const result = await credit();
-    assert.match(result.creditNote.number, new RegExp(`^CN-${period}-\\d+$`));
-    assert.match(result.invoice.number, new RegExp(`^INV-${period}-\\d+$`));
+    assert.ok(result.creditNote.number.startsWith(formatCreditNoteNumber(period, 1).replace(/1$/, "")), result.creditNote.number);
+    assert.ok(result.invoice.number.startsWith(formatInvoiceNumber(period, 1).replace(/1$/, "")), result.invoice.number);
     assert.deepEqual(result.creditNote.pdfBytes, Buffer.from(`%PDF-1.4\nAdjustment note ${result.creditNote.number} -> ${result.invoice.number}\n%%EOF\n`), "each document names the other");
 
     const read = await createInvoiceRowService({ db: t.db, orgUid: ORG_A }).readJob("job-credit");
     const credited = read.invoices.find((invoice) => invoice.number === original.number);
     const replacement = read.invoices.find((invoice) => invoice.number === result.invoice.number);
     assert.deepEqual([credited.status, credited.amountPaid, replacement.status, replacement.amountPaid, replacement.supersedesInvoiceUid], ["credited", "0.00", "issued", "200.00", credited.uid]);
-    assert.deepEqual(read.creditNotes.map((note) => [note.number, note.origin, note.reason, note.createdBy, note.total, note.invoiceUid, note.replacementInvoiceUid, note.issuedDocumentUid]), [
-      [result.creditNote.number, "issued", "Approved variation: rock clause", "user-2", "440.00", credited.uid, replacement.uid, result.creditNote.issuedDocumentUid],
+    assert.deepEqual(read.creditNotes.map((note) => [note.number, note.reason, note.createdBy, note.total, note.invoiceUid, note.replacementInvoiceUid, note.issuedDocumentUid]), [
+      [result.creditNote.number, "Approved variation: rock clause", "user-2", "440.00", credited.uid, replacement.uid, result.creditNote.issuedDocumentUid],
     ]);
     assert.deepEqual(read.allocations.map((allocation) => [allocation.fromInvoiceUid, allocation.toInvoiceUid, allocation.amount]), [[credited.uid, replacement.uid, "200.00"]]);
     const documents = createIssuedDocumentService({ db: t.db, orgUid: ORG_A });

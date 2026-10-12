@@ -6,8 +6,9 @@ SET LOCAL lock_timeout = '10s';
 -- issued invoice is corrected by a credit (adjustment) note that credits it
 -- in full and names the invoice issued in its place; payments the credited
 -- invoice held move to that invoice as allocations. Additive: credit_notes
--- (0013) gains the replacement invoice, where the note came from and the
--- issue service's idempotency key; payment_allocations is new.
+-- (0013) gains the replacement invoice and the issue service's idempotency
+-- key; payment_allocations is new. Credit notes apply from this release on:
+-- invoices revised in place before it get none.
 --
 -- Hand-ordered from drizzle-kit's output (each table before the keys that
 -- point at it), then FORCE ROW LEVEL SECURITY, the append-only trigger and
@@ -33,7 +34,6 @@ CREATE TABLE "payment_allocations" (
 --> statement-breakpoint
 ALTER TABLE "payment_allocations" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "credit_notes" ADD COLUMN "replacement_invoice_uid" text;--> statement-breakpoint
-ALTER TABLE "credit_notes" ADD COLUMN "origin" text DEFAULT 'issued' NOT NULL;--> statement-breakpoint
 ALTER TABLE "credit_notes" ADD COLUMN "issue_key" text;--> statement-breakpoint
 ALTER TABLE "payment_allocations" ADD CONSTRAINT "payment_allocations_org_uid_organizations_uid_fk" FOREIGN KEY ("org_uid") REFERENCES "public"."organizations"("uid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payment_allocations" ADD CONSTRAINT "payment_allocations_payment_fk" FOREIGN KEY ("org_uid","payment_uid") REFERENCES "public"."payments"("org_uid","uid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -55,8 +55,7 @@ ALTER TABLE "invoices" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "credit_notes" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
 CREATE UNIQUE INDEX "credit_notes_org_issue_key" ON "credit_notes" USING btree ("org_uid","issue_key");--> statement-breakpoint
 CREATE UNIQUE INDEX "credit_notes_org_invoice_key" ON "credit_notes" USING btree ("org_uid","invoice_uid") WHERE "credit_notes"."status" = 'issued';--> statement-breakpoint
-ALTER TABLE "credit_notes" ADD CONSTRAINT "credit_notes_origin_check" CHECK ("credit_notes"."origin" in ('issued','revision-migration'));--> statement-breakpoint
-ALTER TABLE "credit_notes" ADD CONSTRAINT "credit_notes_issue_check" CHECK ("credit_notes"."issue_key" is null or ("credit_notes"."origin" = 'issued' and "credit_notes"."issued_at" is not null and "credit_notes"."number" ~ '^CN-[0-9]{4}-[0-9]{2}-[1-9][0-9]*$'));--> statement-breakpoint
+ALTER TABLE "credit_notes" ADD CONSTRAINT "credit_notes_issue_check" CHECK ("credit_notes"."issue_key" is null or ("credit_notes"."issued_at" is not null and "credit_notes"."number" ~ '^CN-[0-9]{4}-([1-9]|1[0-2])-[1-9][0-9]*$'));--> statement-breakpoint
 CREATE POLICY "payment_allocations_tenant_isolation" ON "payment_allocations" AS PERMISSIVE FOR ALL TO public USING (org_uid = (select field_org_uid())) WITH CHECK (org_uid = (select field_org_uid()));
 --> statement-breakpoint
 ALTER TABLE "payment_allocations" FORCE ROW LEVEL SECURITY;
