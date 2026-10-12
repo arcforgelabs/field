@@ -255,6 +255,25 @@ applies a migration only when its journal timestamp is later than the last
 one applied.
 `rollback/0009_issued_documents.down.sql` reverses it; run it before 0008's.
 
+### Quote rows
+
+`0010_quote_rows` (#241; design in `docs/PRICING_ENGINE.md` "Quotes and
+invoices") adds three tenant tables: `quotes` (one row per quote version,
+`qte_…`, unique per job and version, linked to the issued document it was
+sent as), `quote_sections` (`qsc_…`) and `quote_lines` (`qln_…`). Totals
+are `numeric(12,2)`; unit sell, unit cost and quantity `numeric(12,4)`,
+`numeric(12,4)` and `numeric(14,4)`. A `computed` line total must equal
+round(quantity × unit sell, 2) (a `CHECK`); a `printed` one needs its
+reason. Once a quote is sent, accepted or declined, or has a send
+time, triggers refuse any change to its sections and lines, its money,
+customer and wording, setting it back to draft and deleting it, for the
+owner as well as `field_app`; `TRUNCATE` is always refused. `field_app` may
+read and write the rows otherwise. Only `server/quotes/` reads or writes
+them; nothing in the app reads them yet.
+`rollback/0010_quote_rows.down.sql` reverses it (the backfill rebuilds the
+rows after 0010 is applied again, since the job files still hold every
+quote); run it before 0009's.
+
 ### Adding tables
 
 A tenant table gets `orgUid: orgUid()` and `tenantIsolation("<table>")` in

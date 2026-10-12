@@ -250,6 +250,7 @@ describe("issued documents", () => {
 describe("migration 0009 rollback", () => {
   const TAG = "0009_issued_documents";
   let before0009;
+  let upTo0009;
 
   // Everything about the public schema a migration can change, as sorted text.
   async function schemaShape(db) {
@@ -265,24 +266,35 @@ describe("migration 0009 rollback", () => {
     return parts.flat().map((row) => row.x).sort();
   }
 
-  before(() => {
-    // Every migration except 0009: the database as it was before it.
-    before0009 = mkdtempSync(join(tmpdir(), "field-before-0009-"));
-    cpSync(MIGRATIONS_FOLDER, before0009, { recursive: true });
-    const journalPath = join(before0009, "meta", "_journal.json");
+  // The migrations up to and including `last`: later ones (0010 onwards) have
+  // their own rollbacks, which run before 0009's.
+  function migrationsThrough(last, prefix) {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    cpSync(MIGRATIONS_FOLDER, dir, { recursive: true });
+    const journalPath = join(dir, "meta", "_journal.json");
     const journal = JSON.parse(readFileSync(journalPath, "utf8"));
-    journal.entries = journal.entries.filter((entry) => entry.tag !== TAG);
+    for (const entry of journal.entries.filter((e) => e.idx > last)) rmSync(join(dir, `${entry.tag}.sql`));
+    journal.entries = journal.entries.filter((entry) => entry.idx <= last);
     writeFileSync(journalPath, JSON.stringify(journal));
-    rmSync(join(before0009, `${TAG}.sql`));
+    return dir;
+  }
+
+  before(() => {
+    // The database as it was before 0009, and as 0009 left it.
+    before0009 = migrationsThrough(8, "field-before-0009-");
+    upTo0009 = migrationsThrough(9, "field-upto-0009-");
   });
-  after(() => rmSync(before0009, { recursive: true, force: true }));
+  after(() => {
+    rmSync(before0009, { recursive: true, force: true });
+    rmSync(upTo0009, { recursive: true, force: true });
+  });
 
   test("the rollback script returns the schema to before 0009, and 0009 applies again", async () => {
     const client = new PGlite();
     const reference = new PGlite();
     try {
       const db = drizzle(client, { schema });
-      await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+      await migrate(db, { migrationsFolder: upTo0009 });
       await createIssuedDocumentService({ db, orgUid: ORG_A }).recordIssuedDocument(quoteInput());
       await client.exec(`begin; ${readFileSync(join(MIGRATIONS_FOLDER, "..", "rollback", `${TAG}.down.sql`), "utf8")}; commit;`);
       await migrate(drizzle(reference, { schema }), { migrationsFolder: before0009 });

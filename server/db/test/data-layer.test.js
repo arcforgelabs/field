@@ -174,9 +174,14 @@ test("generated migrations: the DEL-75 toolchain proof, durable storage, the pri
   for (const table of ["items", "item_prices", "item_components", "units", "unit_aliases", "item_unit_conversions", "catalog_history", "catalog_meta"]) {
     assert.match(catalogueSql, new RegExp(`CREATE TABLE "${table}"`));
   }
+  // Document tables arrive only by an approved, named step: quotes as rows
+  // (#241, migration 0010). Anything else that looks like one is a mistake.
+  const approved = new Map([["quotes", "0010_quote_rows.sql"]]);
   for (const name of migrationFiles) {
     const migration = readFileSync(resolve(migrationFolder, name), "utf8");
-    assert.doesNotMatch(migration, /CREATE TABLE "[^"]*\b(quote|document|invoice|outbox|customer)s?\b/i, `${name} creates a quote or customer table`);
+    for (const match of migration.matchAll(/CREATE TABLE "([^"]*\b(?:quote|document|invoice|outbox|customer)s?\b[^"]*)"/gi)) {
+      assert.equal(approved.get(match[1]), name, `${name} creates a quote or customer table (${match[1]})`);
+    }
   }
 });
 

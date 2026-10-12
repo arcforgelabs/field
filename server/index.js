@@ -11,6 +11,8 @@ import { createQuoteSnapshotStore, createUnavailableQuoteSnapshotStore } from ".
 import { createIssuedDocumentService } from "./documents/issued-documents.js";
 import { createIssuedDocumentRecorder, createUnavailableIssuedDocumentRecorder, installIssuedDocumentRecorder } from "./documents/recorder.js";
 import { registerIssuedDocumentRoutes } from "./documents/routes.js";
+import { createQuoteRowService } from "./quotes/quote-rows.js";
+import { createQuoteRowRecorder, createUnavailableQuoteRowRecorder, installQuoteRowRecorder } from "./quotes/recorder.js";
 import { startDurableStorage } from "./storage/durable-store.js";
 import { heldDataMigrations, runDataMigrations } from "./data-migrations/index.js";
 import { registerSqliteImage } from "./storage/durable-hooks.js";
@@ -183,7 +185,7 @@ import {
 } from "./quote-internal-breakdown.js";
 import { buildWallZoneRenderPayloadForJob, readWallZones } from "./wall-zones.js";
 import { runExclusiveJobMutation } from "./job-mutation-guard.js";
-import { resolveActiveJobGeneration, runAtomicJobGeneration } from "./job-generation.js";
+import { installJobGenerationCommitListener, resolveActiveJobGeneration, runAtomicJobGeneration } from "./job-generation.js";
 import {
   findIssuedQuoteVersion,
   readIssuedQuoteArtifact,
@@ -448,6 +450,24 @@ try {
   issuedDocumentRecorder = createUnavailableIssuedDocumentRecorder(reason);
 }
 installIssuedDocumentRecorder(issuedDocumentRecorder);
+
+// Quote rows (#241): every committed change to a job's quote versions is also
+// written as quotes, quote_sections and quote_lines rows, checked against the
+// totals Field shows. The job files stay the source of truth: a failure is
+// logged and shown in /api/storage/status, never turned into a failed save.
+let quoteRowRecorder;
+try {
+  quoteRowRecorder = createQuoteRowRecorder({
+    service: createQuoteRowService({ db: getDb(), orgUid: deploymentOrg?.uid }),
+    issuedDocuments: issuedDocumentRecorder.service || null,
+  });
+} catch (err) {
+  const reason = err.code === "FIELD_NO_DATABASE" ? "no database configured" : err.message;
+  console.warn(`[quote-rows] ${reason}: quote rows are not recorded in PostgreSQL (the job files still hold them)`);
+  quoteRowRecorder = createUnavailableQuoteRowRecorder(reason);
+}
+installQuoteRowRecorder(quoteRowRecorder);
+installJobGenerationCommitListener((jobDir) => quoteRowRecorder.syncJob(jobDir, { reason: "job generation committed" }));
 
 // Initialize field database (SQLite — jobs + evidence tracking)
 let fieldDb = null;
@@ -906,6 +926,7 @@ app.get("/api/storage/status", requireAuth, requireAdmin, (_req, res) => {
   res.json({
     ...(durableStorage ? durableStorage.status() : { enabled: false }),
     issuedDocuments: issuedDocumentRecorder.status(),
+    quoteRows: quoteRowRecorder.status(),
   });
 });
 

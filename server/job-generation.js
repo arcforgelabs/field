@@ -788,6 +788,26 @@ export async function withJobGenerationLock(jobDir, operation, { timeoutMs = 30_
   }
 }
 
+// One listener told about every committed generation, after its post-commit
+// callbacks and still under the job's generation lock, so it reads exactly
+// what was committed. The server installs the quote-row dual-write here
+// (server/quotes/recorder.js, #241). A listener failure is logged and never
+// turns a committed change into a failed one.
+let generationCommitListener = null;
+
+export function installJobGenerationCommitListener(listener) {
+  generationCommitListener = typeof listener === "function" ? listener : null;
+}
+
+async function notifyGenerationCommitted(jobDir) {
+  if (!generationCommitListener) return;
+  try {
+    await generationCommitListener(jobDir);
+  } catch (error) {
+    console.warn(`[job-generation] commit listener failed for ${jobDir}: ${error.message}`);
+  }
+}
+
 export async function runAtomicJobGeneration(jobDir, operation, options = {}) {
   const { flush = true, ...lockOptions } = options;
   return withJobGenerationLock(jobDir, async () => {
@@ -797,6 +817,7 @@ export async function runAtomicJobGeneration(jobDir, operation, options = {}) {
       const result = await operation(stagedJobDir);
       await publishStagedJobGeneration({ jobDir, stagedJobDir, flush });
       await flushStagedPostCommit(stagedJobDir, jobDir);
+      await notifyGenerationCommitted(jobDir);
       return result;
     } catch (error) {
       STAGED_POST_COMMIT.delete(stagedJobDir);
