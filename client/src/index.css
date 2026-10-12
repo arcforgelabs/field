@@ -1,0 +1,186 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+    /* shadcn's tokens follow the active design system (shared/themes.js). */
+    --background: var(--t-bg);
+    --foreground: var(--t-text);
+    --card: var(--t-s1);
+    --card-foreground: var(--t-text);
+    --popover: var(--t-paper);
+    --popover-foreground: var(--t-text);
+    --primary: var(--t-primary);
+    --primary-foreground: var(--t-on-primary);
+    --secondary: var(--t-s2);
+    --secondary-foreground: var(--t-text);
+    --muted: var(--t-s2);
+    --muted-foreground: var(--t-dim);
+    --accent: var(--t-brand);
+    --accent-foreground: var(--t-brand-ink);
+    --destructive: var(--t-danger);
+    --border: var(--t-brd);
+    --input: var(--t-stroke-color);
+    --ring: var(--t-ring);
+    --chart-1: oklch(0.809 0.105 251.813);
+    --chart-2: oklch(0.623 0.214 259.815);
+    --chart-3: oklch(0.546 0.245 262.881);
+    --chart-4: oklch(0.488 0.243 264.376);
+    --chart-5: oklch(0.424 0.199 265.638);
+    --radius: var(--t-radius);
+    --sidebar: var(--t-s1);
+    --sidebar-foreground: var(--t-text);
+    --sidebar-primary: var(--t-primary);
+    --sidebar-primary-foreground: var(--t-on-primary);
+    --sidebar-accent: var(--t-s2);
+    --sidebar-accent-foreground: var(--t-text);
+    --sidebar-border: var(--t-brd);
+    --sidebar-ring: var(--t-ring);
+}
+
+@theme inline {
+    --font-sans: var(--t-body, 'Inter Variable', system-ui, sans-serif);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+    -webkit-font-smoothing: antialiased;
+    touch-action: pan-x pan-y;
+    -webkit-text-size-adjust: 100%;
+  }
+  /* Prevent iOS Safari auto-zoom on input focus (font-size < 16px triggers zoom) */
+  @supports (-webkit-touch-callout: none) {
+    input, textarea, select {
+      font-size: 16px !important;
+    }
+  }
+}
+
+/* ═══ SCOPE TEXTAREA — auto-grow + themed scrollbar ═══ */
+.scope-textarea {
+  scrollbar-width: thin;
+  scrollbar-color: var(--t-brd-hi, rgba(255,255,255,.16)) transparent;
+}
+.scope-textarea::-webkit-scrollbar {
+  width: 6px;
+}
+.scope-textarea::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 999px;
+}
+.scope-textarea::-webkit-scrollbar-thumb {
+  background: var(--t-brd-hi, rgba(255,255,255,.16));
+  border-radius: 999px;
+}
+.scope-textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--t-accent, #00c2a8);
+}
+
+@container (max-width: 520px) {
+  .catalog-component-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .catalog-component-row__controls {
+    justify-self: stretch !important;
+  }
+}
+
+/* ═══ DESIGN SYSTEMS ═══
+   The --t-* tokens for every theme family, light and dark, come from
+   shared/themes.js: main.tsx injects them as [data-theme][data-mode] rules,
+   index.html picks the family and mode before first paint, and ThemeProvider
+   keeps them (plus any accent override) on <html>. See DESIGN.md. */
+
+/* ═══ THEMED SCROLLBARS ═══ */
+[data-theme] {
+  scrollbar-width: thin;
+  scrollbar-color: var(--t-brd-hi, rgba(255,255,255,.16)) transparent;
+}
+[data-theme] ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+[data-theme] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-theme] ::-webkit-scrollbar-thumb {
+  background: var(--t-brd-hi, rgba(255,255,255,.16));
+  border-radius: 999px;
+}
+[data-theme] ::-webkit-scrollbar-thumb:hover {
+  background: var(--t-accent, #00c2a8);
+}
+[data-theme] ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ═══ FIELD GLOBAL STYLES ═══ */
+@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
+@keyframes vi-blink { 0%, 100% { opacity: 1 } 50% { opacity: .2 } }
+@keyframes vi-nudge { 0%, 100% { transform: translateX(0) } 50% { transform: translateX(-4px) } }
+@keyframes vi-trash { 0% { transform: scale(1.4); opacity: .8 } 50% { transform: scale(1); opacity: 1 } 100% { transform: scale(.7) translateY(6px); opacity: 0 } }
+@keyframes vi-hold-pop { 0% { transform: scale(.88) } 65% { transform: scale(1.07) } 100% { transform: scale(1) } }
+@keyframes vi-hold-breathe { 0%, 100% { transform: scale(1) } 50% { transform: scale(1.03) } }
+@keyframes vi-lock-breathe { 0%, 100% { transform: scale(1) } 50% { transform: scale(1.02) translateY(-1px) } }
+@keyframes vi-icon-float { 0%, 100% { transform: translateY(-1px) } 50% { transform: translateY(-2px) } }
+@keyframes co-open { from { opacity: 0; transform: scale(.88) translateY(8px) } to { opacity: 1; transform: scale(1) translateY(0) } }
+@keyframes fco-msg { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: translateY(0) } }
+@keyframes fc-fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+@keyframes reingest-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .75 } }
+@keyframes menu-slide-in { from { transform: translateX(100%) } to { transform: translateX(0) } }
+@keyframes dash-slide-in { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }

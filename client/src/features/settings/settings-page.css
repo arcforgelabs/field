@@ -1,0 +1,48 @@
+/* Settings: the hint text the appearance and people sections share. The
+   page layout itself uses the shell's .fx-set classes (components/shell/ui.css). */
+.settings__hint { margin: 0; font-size: 13px; line-height: 1.5; color: var(--t-dim); }
+
+/* Appearance: mode, design system and accent colour. */
+.appearance__group { display: flex; flex-direction: column; gap: 8px; }
+.appearance__group + .appearance__group { margin-top: 10px; }
+.appearance__heading { font-size: 13px; font-weight: 600; color: var(--t-text); }
+.appearance__themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 8px; }
+.appearance__theme {
+  display: flex; flex-direction: column; align-items: stretch; gap: 3px; padding: 6px 6px 8px; text-align: left;
+  background: var(--t-paper); color: var(--t-text); cursor: pointer;
+  border: 1px solid var(--t-brd); border-radius: var(--t-radius-lg, 0);
+  font-family: var(--t-body);
+}
+.appearance__theme:hover { border-color: var(--t-brd-hi); }
+.appearance__theme[aria-checked="true"] { border-color: var(--t-accent); box-shadow: inset 0 0 0 1px var(--t-accent); }
+.appearance__theme:focus-visible, .appearance__accent:focus-visible { outline: 3px solid var(--t-ring, var(--t-brand)); outline-offset: 2px; }
+.appearance__preview {
+  position: relative; display: flex; flex-direction: column; gap: 4px; height: 56px; padding: 0 0 6px; margin-bottom: 4px; overflow: hidden;
+  border: 1px solid rgba(127,127,127,.25); border-radius: var(--t-radius, 0);
+}
+.appearance__preview-bar { display: block; height: 12px; margin-bottom: 4px; }
+.appearance__preview-type { display: block; margin-left: 8px; font-size: 22px; line-height: 1; letter-spacing: -.01em; }
+.appearance__preview-side { position: absolute; left: 0; top: 0; bottom: 0; width: 12px; border-right: 1px solid rgba(127,127,127,.25); }
+.appearance__preview-line { display: block; height: 4px; width: 62%; margin-left: 8px; opacity: .85; }
+.appearance__preview-line--short { width: 38%; opacity: .45; }
+.appearance__preview-chips { position: absolute; right: 6px; bottom: 6px; display: flex; gap: 4px; }
+.appearance__preview-chips span { display: block; width: 16px; height: 10px; }
+.appearance__theme-name { font-size: 13px; font-weight: 600; }
+.appearance__theme-desc { font-size: 11px; color: var(--t-dim); }
+.appearance__accents { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.appearance__accent-row { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Swatches are genuinely round things (DESIGN.md: Shape). */
+.appearance__accent {
+  width: 28px; height: 28px; padding: 0; border-radius: 50%; cursor: pointer;
+  border: 2px solid var(--t-bg); box-shadow: 0 0 0 1px var(--t-brd);
+  background: var(--t-s1); display: inline-flex; align-items: center; justify-content: center;
+}
+.appearance__accent[aria-checked="true"] { box-shadow: 0 0 0 2px var(--t-text); }
+.appearance__accent-default { width: 16px; height: 16px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1px rgba(127,127,127,.35); }
+/* The family's own accent: a labelled chip, set apart from the presets, so
+   the default (and the way back to it) is obvious. */
+.appearance__accent--default { width: auto; height: 28px; padding: 0 10px 0 6px; gap: 6px; border-radius: 999px; background: var(--t-paper); position: relative; margin-right: 13px; }
+.appearance__accent-default-label { font: 600 12px var(--t-body); color: var(--t-text); }
+.appearance__accent-divider { position: absolute; right: -11px; top: 4px; bottom: 4px; width: 1px; background: var(--t-brd); }
+.appearance__custom { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--t-dim); cursor: pointer; }
+.appearance__custom input { width: 32px; height: 28px; padding: 0; border: 1px solid var(--t-brd); border-radius: var(--t-radius, 0); background: transparent; cursor: pointer; }

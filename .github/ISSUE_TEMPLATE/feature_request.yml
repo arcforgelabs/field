@@ -1,0 +1,51 @@
+name: Feature request
+description: Propose a new capability or product improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read VISION.md first: it says what Field is for and what is out of scope.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One-line statement of the requested capability.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What pain this solves and why current behavior is insufficient.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Who is affected, how often, and what it costs them.
+    validations:
+      required: true
+  - type: dropdown
+    id: implementation_intent
+    attributes:
+      label: Do you plan to open a PR for this?
+      options:
+        - Yes, I plan to implement this myself
+        - Maybe, with maintainer guidance
+        - No, proposing the idea only
+    validations:
+      required: true

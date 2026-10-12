@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en" data-theme="beacon" data-mode="light">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/icon-192.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Field</title>
+    <script>
+      // Design system and light or dark before first paint (client/src/lib/color-mode.ts
+      // does the same, and corrects an unknown family once the app loads).
+      (function () {
+        var mode = "system";
+        var family = "beacon";
+        try {
+          var settings = JSON.parse(localStorage.getItem("fr_settings") || "{}");
+          mode = settings.colorMode || "system";
+          if (/^[a-z]{2,24}$/.test(settings.themeFamily || "")) family = settings.themeFamily;
+        } catch (e) {}
+        var dark = mode === "dark" || (mode !== "light" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        var root = document.documentElement;
+        root.setAttribute("data-theme", family);
+        root.setAttribute("data-mode", dark ? "dark" : "light");
+        if (dark) root.classList.add("dark");
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", dark ? "#000000" : "#ffffff");
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

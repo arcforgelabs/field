@@ -1,0 +1,17 @@
+.git
+.agents
+.codex
+.pixel-forge
+.playwright-mcp
+.run
+data
+memory
+lab
+node_modules
+client/node_modules
+server/db/dist
+config.json
+config.local.json
+service-account.json
+*.log
+*.example

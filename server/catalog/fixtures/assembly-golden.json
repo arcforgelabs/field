@@ -1,0 +1,963 @@
+{
+  "capturedFrom": "hardcoded recipes (52fc3e9)",
+  "cases": [
+    {
+      "name": "lawn option 12.5 m2",
+      "recipe": "lawn_option",
+      "lines": [
+        {
+          "itemCode": "TURF-SUPPLY-M2",
+          "quantity": 12.5,
+          "unit": "m2",
+          "unitPrice": 23.75,
+          "unitCost": 18.4
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 2.1739,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 0.625,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 9.318,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "TURF-SUPPLY-M2",
+          "quantity": 12.5,
+          "unit": "m2",
+          "unitPrice": 23.75,
+          "unitCost": 18.4
+        },
+        {
+          "itemCode": "SANDY-LOAM-M3",
+          "quantity": 1.5,
+          "unit": "m3",
+          "unitPrice": 92.5,
+          "unitCost": 66.75
+        }
+      ]
+    },
+    {
+      "name": "lawn option 23 m2",
+      "recipe": "lawn_option",
+      "lines": [
+        {
+          "itemCode": "TURF-SUPPLY-M2",
+          "quantity": 23,
+          "unit": "m2",
+          "unitPrice": 23.75,
+          "unitCost": 18.4
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 4,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 1.15,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 15.6421,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "TURF-SUPPLY-M2",
+          "quantity": 23,
+          "unit": "m2",
+          "unitPrice": 23.75,
+          "unitCost": 18.4
+        },
+        {
+          "itemCode": "SANDY-LOAM-M3",
+          "quantity": 2.76,
+          "unit": "m3",
+          "unitPrice": 92.5,
+          "unitCost": 66.75
+        }
+      ]
+    },
+    {
+      "name": "lawn option 80 m2 at 150mm loam",
+      "recipe": "lawn_option",
+      "lines": [
+        {
+          "itemCode": "TURF-SUPPLY-M2",
+          "quantity": 80,
+          "unit": "m2",
+          "unitPrice": 23.75,
+          "unitCost": 18.4
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 13.913,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 4,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 49.9725,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "TURF-SUPPLY-M2",
+          "quantity": 80,
+          "unit": "m2",
+          "unitPrice": 23.75,
+          "unitCost": 18.4
+        },
+        {
+          "itemCode": "SANDY-LOAM-M3",
+          "quantity": 14.4,
+          "unit": "m3",
+          "unitPrice": 92.5,
+          "unitCost": 66.75
+        }
+      ]
+    },
+    {
+      "name": "lawn option 233.3 m2 at 7.5 cm loam",
+      "recipe": "lawn_option",
+      "lines": [
+        {
+          "itemCode": "TURF-SUPPLY-M2",
+          "quantity": 233.3,
+          "unit": "m2",
+          "unitPrice": 23.75,
+          "unitCost": 18.4
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 40.5739,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 11.665,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 142.3033,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "TURF-SUPPLY-M2",
+          "quantity": 233.3,
+          "unit": "m2",
+          "unitPrice": 23.75,
+          "unitCost": 18.4
+        },
+        {
+          "itemCode": "SANDY-LOAM-M3",
+          "quantity": 20.997,
+          "unit": "m3",
+          "unitPrice": 92.5,
+          "unitCost": 66.75
+        }
+      ]
+    },
+    {
+      "name": "lawn rule 45 m2",
+      "recipe": "direct_pass_through",
+      "lines": [],
+      "materialOrders": [
+        {
+          "itemCode": "TURF-SUPPLY-M2",
+          "quantity": 45,
+          "unit": "m2",
+          "unitPrice": 23.75,
+          "unitCost": 18.4
+        },
+        {
+          "itemCode": "SANDY-LOAM-M3",
+          "quantity": 5.4,
+          "unit": "m3",
+          "unitPrice": 92.5,
+          "unitCost": 66.75
+        }
+      ]
+    },
+    {
+      "name": "lawn rule 61.25 m2 at 120 mm topsoil",
+      "recipe": "direct_pass_through",
+      "lines": [],
+      "materialOrders": [
+        {
+          "itemCode": "TURF-SUPPLY-M2",
+          "quantity": 61.25,
+          "unit": "m2",
+          "unitPrice": 23.75,
+          "unitCost": 18.4
+        },
+        {
+          "itemCode": "SANDY-LOAM-M3",
+          "quantity": 8.82,
+          "unit": "m3",
+          "unitPrice": 92.5,
+          "unitCost": 66.75
+        }
+      ]
+    },
+    {
+      "name": "irrigation battery 10 m2",
+      "recipe": "irrigation_option",
+      "lines": [
+        {
+          "itemCode": "IRRIGATION-CONTROLLER-BATTERY",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 640,
+          "unitCost": 512
+        },
+        {
+          "itemCode": "IRRIGATION-PIPE-FIXINGS-M2",
+          "quantity": 10,
+          "unit": "m2",
+          "unitPrice": 10.6,
+          "unitCost": 8.75
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 1.3333,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 0.6667,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 19.5158,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "IRRIGATION-CONTROLLER-BATTERY",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 640,
+          "unitCost": 512
+        },
+        {
+          "itemCode": "IRRIGATION-PIPE-FIXINGS-M2",
+          "quantity": 10,
+          "unit": "m2",
+          "unitPrice": 10.6,
+          "unitCost": 8.75
+        }
+      ]
+    },
+    {
+      "name": "irrigation mains 23 m2",
+      "recipe": "irrigation_option",
+      "lines": [
+        {
+          "itemCode": "IRRIGATION-CONTROLLER-MAINS",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 745,
+          "unitCost": 615
+        },
+        {
+          "itemCode": "IRRIGATION-PIPE-FIXINGS-M2",
+          "quantity": 23,
+          "unit": "m2",
+          "unitPrice": 10.6,
+          "unitCost": 8.75
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 1.3333,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 1.5333,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 2,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 22.6057,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "IRRIGATION-CONTROLLER-MAINS",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 745,
+          "unitCost": 615
+        },
+        {
+          "itemCode": "IRRIGATION-PIPE-FIXINGS-M2",
+          "quantity": 23,
+          "unit": "m2",
+          "unitPrice": 10.6,
+          "unitCost": 8.75
+        }
+      ]
+    },
+    {
+      "name": "irrigation mains without install 150 m2",
+      "recipe": "irrigation_option",
+      "lines": [
+        {
+          "itemCode": "IRRIGATION-CONTROLLER-MAINS",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 745,
+          "unitCost": 615
+        },
+        {
+          "itemCode": "IRRIGATION-PIPE-FIXINGS-M2",
+          "quantity": 150,
+          "unit": "m2",
+          "unitPrice": 10.6,
+          "unitCost": 8.75
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 1.3333,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 10,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 82.8597,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "IRRIGATION-CONTROLLER-MAINS",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 745,
+          "unitCost": 615
+        },
+        {
+          "itemCode": "IRRIGATION-PIPE-FIXINGS-M2",
+          "quantity": 150,
+          "unit": "m2",
+          "unitPrice": 10.6,
+          "unitCost": 8.75
+        }
+      ]
+    },
+    {
+      "name": "irrigation rule 37.5 m2",
+      "recipe": "irrigation_option",
+      "lines": [
+        {
+          "itemCode": "IRRIGATION-CONTROLLER-BATTERY",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 640,
+          "unitCost": 512
+        },
+        {
+          "itemCode": "IRRIGATION-PIPE-FIXINGS-M2",
+          "quantity": 37.5,
+          "unit": "m2",
+          "unitPrice": 10.6,
+          "unitCost": 8.75
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 1.3333,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 2.5,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 36.1228,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "IRRIGATION-CONTROLLER-BATTERY",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 640,
+          "unitCost": 512
+        },
+        {
+          "itemCode": "IRRIGATION-PIPE-FIXINGS-M2",
+          "quantity": 37.5,
+          "unit": "m2",
+          "unitPrice": 10.6,
+          "unitCost": 8.75
+        }
+      ]
+    },
+    {
+      "name": "drainage 3 m trench",
+      "recipe": "drainage_bundle",
+      "lines": [
+        {
+          "itemCode": "DRAIN-PIPE-M",
+          "quantity": 3,
+          "unit": "m",
+          "unitPrice": 22.4,
+          "unitCost": 14.2
+        },
+        {
+          "itemCode": "DRAIN-PIT",
+          "quantity": 1,
+          "unit": "each",
+          "unitPrice": 147.5,
+          "unitCost": 96
+        },
+        {
+          "itemCode": "DRAIN-GRAVEL-M",
+          "quantity": 3,
+          "unit": "m",
+          "unitPrice": 18.3,
+          "unitCost": 11.1
+        },
+        {
+          "itemCode": "clean-fill-disposal",
+          "quantity": 3,
+          "unit": "m",
+          "unitPrice": 14.5,
+          "unitCost": 9.25
+        },
+        {
+          "itemCode": "EXCAVATOR-HOUR",
+          "quantity": 0.4,
+          "unit": "hour",
+          "unitPrice": 310,
+          "unitCost": 180
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 0.6,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 11.9147,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "DRAIN-PIPE-M",
+          "quantity": 3,
+          "unit": "m",
+          "unitPrice": 22.4,
+          "unitCost": 14.2
+        },
+        {
+          "itemCode": "DRAIN-PIT",
+          "quantity": 1,
+          "unit": "each",
+          "unitPrice": 147.5,
+          "unitCost": 96
+        },
+        {
+          "itemCode": "DRAIN-GRAVEL-M",
+          "quantity": 3,
+          "unit": "m",
+          "unitPrice": 18.3,
+          "unitCost": 11.1
+        }
+      ]
+    },
+    {
+      "name": "drainage 10 m trench",
+      "recipe": "drainage_bundle",
+      "lines": [
+        {
+          "itemCode": "DRAIN-PIPE-M",
+          "quantity": 10,
+          "unit": "m",
+          "unitPrice": 22.4,
+          "unitCost": 14.2
+        },
+        {
+          "itemCode": "DRAIN-PIT",
+          "quantity": 1,
+          "unit": "each",
+          "unitPrice": 147.5,
+          "unitCost": 96
+        },
+        {
+          "itemCode": "DRAIN-GRAVEL-M",
+          "quantity": 10,
+          "unit": "m",
+          "unitPrice": 18.3,
+          "unitCost": 11.1
+        },
+        {
+          "itemCode": "clean-fill-disposal",
+          "quantity": 10,
+          "unit": "m",
+          "unitPrice": 14.5,
+          "unitCost": 9.25
+        },
+        {
+          "itemCode": "EXCAVATOR-HOUR",
+          "quantity": 1.3333,
+          "unit": "hour",
+          "unitPrice": 310,
+          "unitCost": 180
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 2,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 14.6019,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "DRAIN-PIPE-M",
+          "quantity": 10,
+          "unit": "m",
+          "unitPrice": 22.4,
+          "unitCost": 14.2
+        },
+        {
+          "itemCode": "DRAIN-PIT",
+          "quantity": 1,
+          "unit": "each",
+          "unitPrice": 147.5,
+          "unitCost": 96
+        },
+        {
+          "itemCode": "DRAIN-GRAVEL-M",
+          "quantity": 10,
+          "unit": "m",
+          "unitPrice": 18.3,
+          "unitCost": 11.1
+        }
+      ]
+    },
+    {
+      "name": "drainage 25.5 m trench",
+      "recipe": "drainage_bundle",
+      "lines": [
+        {
+          "itemCode": "DRAIN-PIPE-M",
+          "quantity": 25.5,
+          "unit": "m",
+          "unitPrice": 22.4,
+          "unitCost": 14.2
+        },
+        {
+          "itemCode": "DRAIN-PIT",
+          "quantity": 3,
+          "unit": "each",
+          "unitPrice": 147.5,
+          "unitCost": 96
+        },
+        {
+          "itemCode": "DRAIN-GRAVEL-M",
+          "quantity": 25.5,
+          "unit": "m",
+          "unitPrice": 18.3,
+          "unitCost": 11.1
+        },
+        {
+          "itemCode": "clean-fill-disposal",
+          "quantity": 25.5,
+          "unit": "m",
+          "unitPrice": 14.5,
+          "unitCost": 9.25
+        },
+        {
+          "itemCode": "EXCAVATOR-HOUR",
+          "quantity": 3.4,
+          "unit": "hour",
+          "unitPrice": 310,
+          "unitCost": 180
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 5.1,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 17.4463,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "DRAIN-PIPE-M",
+          "quantity": 25.5,
+          "unit": "m",
+          "unitPrice": 22.4,
+          "unitCost": 14.2
+        },
+        {
+          "itemCode": "DRAIN-PIT",
+          "quantity": 3,
+          "unit": "each",
+          "unitPrice": 147.5,
+          "unitCost": 96
+        },
+        {
+          "itemCode": "DRAIN-GRAVEL-M",
+          "quantity": 25.5,
+          "unit": "m",
+          "unitPrice": 18.3,
+          "unitCost": 11.1
+        }
+      ]
+    },
+    {
+      "name": "drainage 41 m trench with 2 pits",
+      "recipe": "drainage_bundle",
+      "lines": [
+        {
+          "itemCode": "DRAIN-PIPE-M",
+          "quantity": 41,
+          "unit": "m",
+          "unitPrice": 22.4,
+          "unitCost": 14.2
+        },
+        {
+          "itemCode": "DRAIN-PIT",
+          "quantity": 2,
+          "unit": "each",
+          "unitPrice": 147.5,
+          "unitCost": 96
+        },
+        {
+          "itemCode": "DRAIN-GRAVEL-M",
+          "quantity": 41,
+          "unit": "m",
+          "unitPrice": 18.3,
+          "unitCost": 11.1
+        },
+        {
+          "itemCode": "clean-fill-disposal",
+          "quantity": 41,
+          "unit": "m",
+          "unitPrice": 14.5,
+          "unitCost": 9.25
+        },
+        {
+          "itemCode": "EXCAVATOR-HOUR",
+          "quantity": 5.4667,
+          "unit": "hour",
+          "unitPrice": 310,
+          "unitCost": 180
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 8.2,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 24.9486,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "DRAIN-PIPE-M",
+          "quantity": 41,
+          "unit": "m",
+          "unitPrice": 22.4,
+          "unitCost": 14.2
+        },
+        {
+          "itemCode": "DRAIN-PIT",
+          "quantity": 2,
+          "unit": "each",
+          "unitPrice": 147.5,
+          "unitCost": 96
+        },
+        {
+          "itemCode": "DRAIN-GRAVEL-M",
+          "quantity": 41,
+          "unit": "m",
+          "unitPrice": 18.3,
+          "unitCost": 11.1
+        }
+      ]
+    },
+    {
+      "name": "drainage 17 m ag pipe with 4 pits",
+      "recipe": "drainage_bundle",
+      "lines": [
+        {
+          "itemCode": "DRAIN-PIPE-M",
+          "quantity": 17,
+          "unit": "m",
+          "unitPrice": 22.4,
+          "unitCost": 14.2
+        },
+        {
+          "itemCode": "DRAIN-PIT",
+          "quantity": 4,
+          "unit": "each",
+          "unitPrice": 147.5,
+          "unitCost": 96
+        },
+        {
+          "itemCode": "DRAIN-GRAVEL-M",
+          "quantity": 17,
+          "unit": "m",
+          "unitPrice": 18.3,
+          "unitCost": 11.1
+        },
+        {
+          "itemCode": "clean-fill-disposal",
+          "quantity": 17,
+          "unit": "m",
+          "unitPrice": 14.5,
+          "unitCost": 9.25
+        },
+        {
+          "itemCode": "EXCAVATOR-HOUR",
+          "quantity": 2.2667,
+          "unit": "hour",
+          "unitPrice": 310,
+          "unitCost": 180
+        },
+        {
+          "itemCode": "LABOURER-HOUR",
+          "quantity": 3.4,
+          "unit": "hour",
+          "unitPrice": 85,
+          "unitCost": 50
+        },
+        {
+          "itemCode": "VEHICLE-HOUR",
+          "quantity": 12.6307,
+          "unit": "hour",
+          "unitPrice": 95,
+          "unitCost": 55
+        },
+        {
+          "itemCode": "ADMIN-FEE",
+          "quantity": 1,
+          "unit": "job",
+          "unitPrice": 330,
+          "unitCost": 220
+        }
+      ],
+      "materialOrders": [
+        {
+          "itemCode": "DRAIN-PIPE-M",
+          "quantity": 17,
+          "unit": "m",
+          "unitPrice": 22.4,
+          "unitCost": 14.2
+        },
+        {
+          "itemCode": "DRAIN-PIT",
+          "quantity": 4,
+          "unit": "each",
+          "unitPrice": 147.5,
+          "unitCost": 96
+        },
+        {
+          "itemCode": "DRAIN-GRAVEL-M",
+          "quantity": 17,
+          "unit": "m",
+          "unitPrice": 18.3,
+          "unitCost": 11.1
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "name": "field",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "field": "./scripts/field-cli.js"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "FIELD_PGLITE=\"${FIELD_PGLITE:-1}\" node --watch server/index.js",
+    "dev:client": "cd client && npx vite",
+    "test": "npm run db:build && bash -lc 'find server scripts shared -name \"*.test.js\" -print0 | xargs -0 node --test'",
+    "test:client": "npm --prefix client test",
+    "build": "npm run db:build && npm run build:client",
+    "build:client": "cd client && npm ci --no-audit --no-fund && npm run build",
+    "db:typecheck": "tsc -p server/db/tsconfig.json --noEmit",
+    "db:build": "node server/db/clean-dist.js && tsc -p server/db/tsconfig.json",
+    "db:generate": "drizzle-kit generate --dialect=postgresql --schema=server/db/src/schema.ts --out=server/db/drizzle --name=toolchain_probe --prefix=index",
+    "db:check": "drizzle-kit check --config=server/db/drizzle.config.ts",
+    "db:check:ci": "npm run db:generate && npm run db:check && git diff --exit-code -- server/db/drizzle && test -z \"$(git ls-files --others --exclude-standard -- server/db/drizzle)\"",
+    "db:apply": "drizzle-kit migrate --config=server/db/drizzle.config.ts",
+    "db:smoke": "node scripts/db-smoke.js",
+    "db:studio": "drizzle-kit studio --config=server/db/drizzle.config.ts",
+    "db:test": "npm run db:build && node --test server/db/test/data-layer-mode.test.js server/db/test/data-layer.test.js",
+    "db:test:docker": "FIELD_DB_TEST_DOCKER=1 npm run db:test",
+    "qa:surveyor": "node scripts/surveyor/cli.js",
+    "qa:surveyor:smoke": "node scripts/surveyor/cli.js smoke --scenario server-boot-smoke",
+    "qa:quote-invoice-proof": "node scripts/quote-invoice-proof/run.mjs",
+    "install:cli": "node scripts/install-field-cli.js",
+    "auth:gmail": "node scripts/setup-gmail-oauth.js",
+    "catalog:import-legacy": "node scripts/catalog-import-legacy-cli.js",
+    "catalog:export": "node scripts/catalog-export-cli.js",
+    "catalog:price-gate": "node scripts/catalog-price-gate-cli.js",
+    "data:migrate": "node scripts/data-migrations-cli.js"
+  },
+  "dependencies": {
+    "@clerk/backend": "3.20.1",
+    "@clerk/express": "2.1.72",
+    "@electric-sql/pglite": "0.5.8",
+    "@sentry/node": "^10.75.0",
+    "better-sqlite3": "12.8.0",
+    "drizzle-orm": "0.45.2",
+    "express": "^5.1.0",
+    "googleapis": "^171.4.0",
+    "json5": "^2.2.3",
+    "mjml": "^4.18.0",
+    "multer": "^2.0.1",
+    "pdfkit": "^0.17.2",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "drizzle-kit": "0.31.10",
+    "typescript": "5.9.3"
+  }
+}

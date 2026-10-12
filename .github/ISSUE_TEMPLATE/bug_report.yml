@@ -1,0 +1,77 @@
+name: Bug report
+description: Report a defect in Field, including regressions, crashes and wrong output.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep every answer concise, reproducible and grounded in what you observed.
+        If a section cannot be answered from the evidence you have, write exactly `NOT_ENOUGH_INFO`.
+        One issue per report. Never paste customer data, credentials or tokens.
+  - type: dropdown
+    id: bug_type
+    attributes:
+      label: Bug type
+      options:
+        - Regression (worked before, now fails)
+        - Crash (process/app exits or hangs)
+        - Behavior bug (incorrect output/state without crash)
+        - Documentation (wrong, missing or unclear docs)
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One sentence stating what is broken.
+      placeholder: Sending a revised quote attaches the previous version's PDF.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a quote and send it.
+        2. Revise one line and send again.
+        3. Open the attached PDF.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Field version
+      description: The commit or release you ran.
+      placeholder: main @ abc1234
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: How Field runs (Docker, Replit, local dev), OS, browser, database.
+      placeholder: Docker, PostgreSQL 16, Chrome on Android
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots and evidence
+      description: Redact names, addresses, emails, prices and secrets first.
+      render: shell
+  - type: textarea
+    id: additional_information
+    attributes:
+      label: Additional information

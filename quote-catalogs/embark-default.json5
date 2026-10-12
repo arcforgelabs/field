@@ -1,0 +1,1095 @@
+{
+  // This file is the human-editable quote catalog metadata: rules, quantity
+  // rules and assemblies (recipes as data). It holds no prices: every rate
+  // comes from the PostgreSQL price catalogue (server/catalog), the only
+  // commercial authority. The units here are structure, not prices: the unit
+  // each rule measures its quantity in (`quantityUnit`) and each recipe
+  // component's quantity unit. Where the catalogue sells an item in another
+  // unit it must convert (server/catalog/units.js), or the rule or recipe
+  // fails closed naming the item and the health page reports it.
+  //
+  // This is a SAMPLE catalogue for a landscaping and earthworks business. The
+  // rules, quantity rules and assemblies show how Field structures a quote;
+  // the productivity factors in them are illustrative, and the business
+  // profile below is a placeholder. Replace both with your own before you
+  // send a quote. The item uids (cat_...) name price-catalogue items your
+  // installation creates; see README.md "Getting started".
+  "id": "embark-default",
+  "name": "Sample Catalogue",
+  "status": "staging-placeholder",
+  "currency": "AUD",
+  "gstRate": 0.1,
+  "hoursPerDay": 8,
+
+  // Business profile — the source of truth for identity and payment details.
+  // Not hardcoded in code. Each price list / client can override.
+  "businessProfile": {
+    "tradingName": "Your Business",
+    "legalName": "Your Business Pty Ltd",
+    "abn": "",
+    "address": "Your business address",
+    "phone": "",
+    "email": "quotes@example.com",
+    "paymentMethods": {
+      "bankTransfer": {
+        "accountName": "Your Business Pty Ltd",
+        "bsb": "000-000",
+        "accountNumber": "00000000",
+        "bank": "Your bank"
+      }
+    }
+  },
+  "executionProfile": {
+    "travelHoursPerDay": 1,
+    "tipTruckLoadMinutes": 30,
+    "tipTruckDumpMinutes": 15,
+    "defaultDumpDriveMinutesOneWay": 20,
+    "accessProfiles": {
+      "standard": {
+        "label": "Standard access",
+        "labourMultiplier": 1,
+        "machineMultiplier": 1,
+        "durationMultiplier": 1,
+        "overheadMultiplier": 1
+      },
+      "limited": {
+        "label": "Limited access",
+        "labourMultiplier": 1.2,
+        "machineMultiplier": 1.1,
+        "durationMultiplier": 1.15,
+        "overheadMultiplier": 1.1
+      },
+      "restricted": {
+        "label": "Restricted access",
+        "labourMultiplier": 1.5,
+        "machineMultiplier": 1.15,
+        "durationMultiplier": 1.35,
+        "overheadMultiplier": 1.15
+      },
+      "steep": {
+        "label": "Steep access",
+        "labourMultiplier": 1.3,
+        "machineMultiplier": 1.2,
+        "durationMultiplier": 1.25,
+        "overheadMultiplier": 1.1
+      }
+    }
+  },
+  "sourceNote": "Quote extraction metadata and presentation rules. Live prices and units are sourced from the price catalogue.",
+  // Rules added to every quote with scoped work, priced from their items.
+  "supportRuleCodes": ["site-establishment", "cleanup"],
+  "quantityRules": [
+    {
+      "code": "soil-dump-plan",
+      "stage": "candidate_groups",
+      "mode": "soil_dump_plan",
+      "soilRuleCode": "soil-removal",
+      "haulageRuleCode": "tip-truck",
+      "truckMassCapacityTonnes": 3.5,
+      "truckVolumeCapacityM3": 2.1875,
+      "loadingHoursPerLoad": 0.5,
+      "loaderRuleCode": "mini-loader-hour",
+      "disposalRuleCode": "unclean-fill-disposal",
+      "vehicleHourRuleCode": "vehicle-hour",
+      "vehicleKmRuleCode": "vehicle-km",
+      "defaultMeasurementDepthMetres": 0.1,
+      "multiSectionHaulageSection": "Soil haulage"
+    },
+    {
+      "code": "site-levelling-plan",
+      "stage": "candidate_groups",
+      "mode": "volume_from_section",
+      "sourceRuleCode": "soil-removal",
+      "sourceSectionPattern": "levell",
+      "outputRuleCode": "site-levelling"
+    },
+    {
+      "code": "concrete-removal-plan",
+      "stage": "candidate_groups",
+      "mode": "concrete_removal_plan",
+      "surfaceRuleCode": "concrete-surface-demolition",
+      "structureRuleCode": "concrete-structure-demolition",
+      "surfaceDepthMm": 100,
+      "structureDepthMm": 300,
+      "truckMassCapacityTonnes": 3,
+      "truckVolumeCapacityM3": 1.15,
+      "loadingHoursPerLoad": 1,
+      "loaderRuleCode": "mini-loader-hour",
+      "disposalRuleCode": "concrete-waste-disposal",
+      "vehicleHourRuleCode": "vehicle-hour",
+      "vehicleKmRuleCode": "vehicle-km",
+      "outputRuleCode": "concrete-removal",
+      "outputSection": "Concrete removal",
+      "haulageRuleCode": "tip-truck",
+      "haulageSection": "Concrete haulage"
+    },
+    {
+      "code": "imported-fill-demand",
+      "stage": "line_item",
+      "mode": "direct_material_order",
+      "appliesToRuleCodes": ["imported-fill"],
+      "outputItemUid": "cat_02e5e698d73441f7bc652ce1",
+      "outputItemCode": "imported-fill",
+      "outputLabel": "Imported fill / topping",
+      "outputUnit": "m3",
+      "quantityMultiplier": 1,
+      "descriptionTemplate": "Imported fill order for {quantity} m3."
+    },
+    {
+      "code": "lawn-bundle",
+      "stage": "line_item",
+      "mode": "lawn_bundle",
+      "appliesToRuleCodes": ["lawn-supply-prep-install"],
+      "assembly": "lawn-bundle"
+    },
+    {
+      "code": "irrigation-bundle",
+      "stage": "line_item",
+      "mode": "irrigation_bundle",
+      "appliesToRuleCodes": ["irrigation-system-install"],
+      "assembly": "irrigation-bundle"
+    },
+    {
+      "code": "site-levelling-recipe",
+      "stage": "line_item",
+      "mode": "volume_excavation",
+      "appliesToRuleCodes": ["site-levelling"],
+      "pricingDependencies": ["EXCAVATOR-HOUR", "KANGA-HOUR"],
+      "cutRatio": 0.75,
+      "fillRatio": 0.25,
+      "cutVolumePerHour": 2,
+      "fillVolumePerHour": 2,
+      "cutRuleCode": "excavator-hour",
+      "fillRuleCode": "mini-loader-hour"
+    },
+    {
+      "code": "retaining-wall-execution-recipe",
+      "stage": "line_item",
+      "mode": "per_unit_components",
+      "appliesToRuleCodes": ["retaining-wall"],
+      "pricingDependencies": [
+        "SLEEPER-KENSINGTON",
+        "STEEL-IBEAM-125-GALV",
+        "STEEL-CCHANNEL-125-GALV",
+        "CONCRETE-20KG-BAG",
+        "AGPIPE-BAY",
+        "FORTACON-BAY",
+        "GRAVEL-20MM",
+        "EXCAVATOR-HOUR",
+        "KANGA-HOUR",
+        "LABOURER-HOUR",
+        "WELDER-HOUR",
+        "VEHICLE-HOUR",
+        "VEHICLE-KM",
+        "SITE-ALLOWANCE-DAY",
+        "ADMIN-FEE",
+        "APC-DELIVERY-MINIMUM"
+      ],
+      "sourceNote": "Static price-list view of the retaining-wall quote rule. Exact sleeper, steel, drainage, and concrete materials are generated by the retaining_wall_exact engine from wall design.",
+      "balanceComponent": {
+        "code": "retaining-wall__materials-design-allowance",
+        "name": "Retaining wall materials/design allowance",
+        "unit": "m"
+      },
+      "components": [
+        { "ruleCode": "labourer-hour", "quantity": 0.8 },
+        { "ruleCode": "excavator-hour", "quantity": 0.2 }
+      ]
+    },
+    {
+      "code": "rock-wall-estimate-recipe",
+      "stage": "line_item",
+      "mode": "per_unit_components",
+      "appliesToRuleCodes": ["rock-wall"],
+      "pricingDependencies": ["BLUESTONE-LARGE", "EXCAVATOR-HOUR", "KANGA-HOUR", "LABOURER-HOUR"],
+      "sourceNote": "Static price-list view of the rock_wall_estimate engine defaults.",
+      "components": [
+        { "itemUid": "cat_81fc30336acf4184955b743f", "itemCode": "BLUESTONE-LARGE", "quantity": 1 },
+        { "ruleCode": "excavator-hour", "quantity": 0.35 },
+        { "ruleCode": "labourer-hour", "quantity": 0.45 }
+      ]
+    },
+    {
+      "code": "soil-removal-recipe",
+      "stage": "line_item",
+      "mode": "bulk_loading_disposal",
+      "appliesToRuleCodes": ["soil-removal"],
+      "pricingDependencies": ["KANGA-HOUR", "unclean-fill-disposal"],
+      "truckMassCapacityTonnes": 3.5,
+      "truckVolumeCapacityM3": 2.1875,
+      "loadingHoursPerLoad": 0.5,
+      "loaderRuleCode": "mini-loader-hour",
+      "disposalRuleCode": "unclean-fill-disposal"
+    },
+    {
+      "code": "tip-truck-haulage-recipe",
+      "stage": "line_item",
+      "mode": "haulage_trip",
+      "appliesToRuleCodes": ["tip-truck"],
+      "pricingDependencies": ["VEHICLE-HOUR", "VEHICLE-KM"],
+      "vehicleHourRuleCode": "vehicle-hour",
+      "vehicleKmRuleCode": "vehicle-km"
+    },
+    {
+      "code": "concrete-surface-demolition-recipe",
+      "stage": "line_item",
+      "mode": "concrete_surface_demolition",
+      "appliesToRuleCodes": ["concrete-surface-demolition"],
+      "pricingDependencies": ["EXCAVATOR-HOUR", "JACKHAMMER-HOUR"],
+      "areaPerHour": 15,
+      "maxDepthMm": 100,
+      "componentRuleCodes": ["excavator-hour", "jackhammer-hour"]
+    },
+    {
+      "code": "concrete-removal-recipe",
+      "stage": "line_item",
+      "mode": "bulk_loading_disposal",
+      "appliesToRuleCodes": ["concrete-removal"],
+      "pricingDependencies": ["KANGA-HOUR", "concrete-waste-disposal"],
+      "truckMassCapacityTonnes": 3,
+      "truckVolumeCapacityM3": 1.15,
+      "loadingHoursPerLoad": 1,
+      "loaderRuleCode": "mini-loader-hour",
+      "disposalRuleCode": "concrete-waste-disposal"
+    },
+    {
+      "code": "concrete-structure-demolition-recipe",
+      "stage": "line_item",
+      "mode": "concrete_structure_demolition",
+      "appliesToRuleCodes": ["concrete-structure-demolition"],
+      "pricingDependencies": ["EXCAVATOR-HOUR", "JACKHAMMER-HOUR"],
+      "areaPerHour": 7,
+      "maxDepthMm": 300,
+      "componentRuleCodes": ["excavator-hour", "jackhammer-hour"]
+    },
+    {
+      "code": "tree-supply-install-recipe",
+      "stage": "line_item",
+      "mode": "supply_install_bundle",
+      "appliesToRuleCodes": ["tree-supply-install"],
+      "pricingDependencies": ["LABOURER-HOUR", "VEHICLE-HOUR"],
+      "labourRuleCode": "labourer-hour",
+      "machineRuleCode": "vehicle-hour"
+    },
+    {
+      "code": "large-tree-supply-install-recipe",
+      "stage": "line_item",
+      "mode": "supply_install_bundle",
+      "appliesToRuleCodes": ["large-tree-supply-install"],
+      "pricingDependencies": ["LABOURER-HOUR", "VEHICLE-HOUR"],
+      "labourRuleCode": "labourer-hour",
+      "machineRuleCode": "vehicle-hour"
+    },
+    {
+      "code": "plant-supply-install-recipe",
+      "stage": "line_item",
+      "mode": "supply_install_bundle",
+      "appliesToRuleCodes": ["plant-supply-install"],
+      "pricingDependencies": ["LABOURER-HOUR"],
+      "labourRuleCode": "labourer-hour"
+    },
+    {
+      "code": "block-edging-supply-install-recipe",
+      "stage": "line_item",
+      "mode": "supply_install_bundle",
+      "appliesToRuleCodes": ["block-edging-supply-install"],
+      "pricingDependencies": ["LABOURER-HOUR", "KANGA-HOUR"],
+      "labourRuleCode": "labourer-hour",
+      "machineRuleCode": "kanga-hour"
+    }
+  ],
+  // Assemblies: the lawn, irrigation and drainage recipes as data
+  // (server/catalog/assemblies.js). Each component is a catalogue item by
+  // code with a quantity expression (numbers, params, vars, + - * /,
+  // parentheses, ceil/floor/round/min/max) in the unit stated; its price is
+  // the catalogue's, converted only where the catalogue allows (a per-tonne
+  // item cannot price a per-metre component). A `balance` component takes
+  // whatever charge is left of the quoted line (the delivery allowance).
+  // `tests` are worked examples checked when the catalog loads; golden
+  // fixtures (server/catalog/fixtures/assembly-golden.json) prove these
+  // reproduce the quantities of the hardcoded recipes they replace.
+  "assemblies": [
+    {
+      "code": "lawn-bundle",
+      "mode": "lawn_bundle",
+      "label": "Lawn supply, preparation and install",
+      "appliesToRuleCodes": ["lawn-supply-prep-install"],
+      "match": "lawn|turf|grass|sandy loam",
+      "params": [
+        { "name": "area_m2", "label": "Lawn area", "unit": "m2", "required": true, "min": 0 },
+        { "name": "loam_depth_m", "label": "Sandy loam depth", "unit": "m", "default": 0.1, "min": 0 }
+      ],
+      "vars": [
+        { "name": "install_hours_per_m2", "expr": "4 / 23" },
+        { "name": "reprep_hours_per_m2", "expr": "3 / 60" },
+        { "name": "loam_allowance", "expr": "1.2" },
+        { "name": "loam_base_m3", "expr": "round(area_m2 * loam_depth_m, 4)" }
+      ],
+      "components": [
+        { "key": "turf", "itemUid": "cat_abed8b64a7134cc8984ba864", "itemCode": "TURF-SUPPLY-M2", "label": "Turf Supply", "unit": "m2", "qty": "area_m2", "stock": true },
+        { "key": "install_labour", "itemUid": "cat_d14c246b2d4e4a3db3a33039", "itemCode": "LABOURER-HOUR", "label": "General Labourer Hour", "unit": "hour", "qty": "area_m2 * install_hours_per_m2" },
+        { "key": "reprep_labour", "itemUid": "cat_d14c246b2d4e4a3db3a33039", "itemCode": "LABOURER-HOUR", "label": "General Labourer Hour", "unit": "hour", "qty": "area_m2 * reprep_hours_per_m2" },
+        { "key": "delivery", "itemUid": "cat_68707fe551034fe888269864", "itemCode": "VEHICLE-HOUR", "label": "Vehicle/Truck Hour", "unit": "hour", "balance": true },
+        { "key": "admin", "itemUid": "cat_e0c1d03211434e06a105e7e2", "itemCode": "ADMIN-FEE", "label": "Admin Fee", "unit": "each", "qty": "1" },
+        { "key": "loam", "itemUid": "cat_cc04290e1dfc442aac1e39db", "itemCode": "SANDY-LOAM-M3", "label": "Sandy Loam", "unit": "m3", "qty": "round(loam_base_m3 * loam_allowance, 4)", "role": "material_order", "stock": true }
+      ],
+      "tests": [
+        { "name": "80 m2 at 150 mm loam", "params": { "area_m2": 80, "loam_depth_m": 0.15 }, "expected": { "turf": 80, "install_labour": 13.913, "reprep_labour": 4, "admin": 1, "loam": 14.4 } },
+        { "name": "23 m2 at the default depth", "params": { "area_m2": 23 }, "expected": { "turf": 23, "install_labour": 4, "reprep_labour": 1.15, "loam": 2.76 } }
+      ]
+    },
+    {
+      "code": "irrigation-bundle",
+      "mode": "irrigation_bundle",
+      "label": "Irrigation system supply and install",
+      "appliesToRuleCodes": ["irrigation-system-install"],
+      "match": "irrigation|sprinkler|controller|drip line",
+      "params": [
+        { "name": "area_m2", "label": "Irrigated area", "unit": "m2", "required": true, "min": 0 },
+        { "name": "controller", "label": "Controller option", "type": "enum", "options": ["battery", "mains", "mains_no_install"], "default": "battery" }
+      ],
+      "vars": [
+        { "name": "conduit_hours", "expr": "80 / 60" },
+        { "name": "pipe_install_hours_per_m2", "expr": "4 / 60" },
+        { "name": "mains_install_extra_hours", "expr": "2" }
+      ],
+      "components": [
+        { "key": "battery_controller", "itemUid": "cat_2dcbafbb1eb74b8f8443003c", "itemCode": "IRRIGATION-CONTROLLER-BATTERY", "label": "Battery Irrigation Controller", "unit": "each", "qty": "controller_battery", "omitWhenZero": true, "stock": true },
+        { "key": "mains_controller", "itemUid": "cat_35224fbbfd4845b090087895", "itemCode": "IRRIGATION-CONTROLLER-MAINS", "label": "Mains Irrigation Controller", "unit": "each", "qty": "controller_mains + controller_mains_no_install", "omitWhenZero": true, "stock": true },
+        { "key": "pipe_fixings", "itemUid": "cat_d5747ce2724f40fca28b61d9", "itemCode": "IRRIGATION-PIPE-FIXINGS-M2", "label": "Irrigation Pipe and Fixings", "unit": "m2", "qty": "area_m2", "stock": true },
+        { "key": "conduit_labour", "itemUid": "cat_d14c246b2d4e4a3db3a33039", "itemCode": "LABOURER-HOUR", "label": "General Labourer Hour", "unit": "hour", "qty": "conduit_hours" },
+        { "key": "pipe_labour", "itemUid": "cat_d14c246b2d4e4a3db3a33039", "itemCode": "LABOURER-HOUR", "label": "General Labourer Hour", "unit": "hour", "qty": "area_m2 * pipe_install_hours_per_m2" },
+        { "key": "wiring_labour", "itemUid": "cat_d14c246b2d4e4a3db3a33039", "itemCode": "LABOURER-HOUR", "label": "General Labourer Hour", "unit": "hour", "qty": "controller_mains * mains_install_extra_hours", "omitWhenZero": true },
+        { "key": "delivery", "itemUid": "cat_68707fe551034fe888269864", "itemCode": "VEHICLE-HOUR", "label": "Vehicle/Truck Hour", "unit": "hour", "balance": true },
+        { "key": "admin", "itemUid": "cat_e0c1d03211434e06a105e7e2", "itemCode": "ADMIN-FEE", "label": "Admin Fee", "unit": "each", "qty": "1" }
+      ],
+      "tests": [
+        { "name": "battery, 10 m2", "params": { "area_m2": 10, "controller": "battery" }, "expected": { "battery_controller": 1, "mains_controller": 0, "pipe_fixings": 10, "conduit_labour": 1.3333, "pipe_labour": 0.6667, "wiring_labour": 0, "admin": 1 } },
+        { "name": "mains, 23 m2", "params": { "area_m2": 23, "controller": "mains" }, "expected": { "battery_controller": 0, "mains_controller": 1, "pipe_labour": 1.5333, "wiring_labour": 2 } },
+        { "name": "mains without install, 150 m2", "params": { "area_m2": 150, "controller": "mains_no_install" }, "expected": { "mains_controller": 1, "pipe_labour": 10, "wiring_labour": 0 } }
+      ]
+    },
+    {
+      "code": "drainage-bundle",
+      "mode": "drainage_bundle",
+      "label": "Drainage trench, pipe and pits",
+      "appliesToRuleCodes": ["drainage", "stormwater", "stormwater-drainage"],
+      "match": "drainage|stormwater|\\bdrain\\b|trench|ag pipe|socked agg|junction pit",
+      "params": [
+        { "name": "length_m", "label": "Trench length", "unit": "m", "required": true, "min": 0 },
+        { "name": "explicit_pits", "label": "Pit count stated in the scope (1) or not (0)", "default": 0, "min": 0, "max": 1 },
+        { "name": "stated_pit_count", "label": "Pit count stated in the scope", "default": 0, "min": 0 }
+      ],
+      "vars": [
+        { "name": "pit_spacing_m", "expr": "10" },
+        { "name": "excavator_hours_per_m", "expr": "8 / 60" },
+        { "name": "labour_hours_per_m", "expr": "12 / 60" },
+        { "name": "pit_count", "expr": "explicit_pits * max(1, round(stated_pit_count)) + (1 - explicit_pits) * max(1, ceil(length_m / pit_spacing_m))" }
+      ],
+      "components": [
+        { "key": "pipe", "itemCode": "DRAIN-PIPE-M", "label": "Drainage Pipe", "unit": "m", "qty": "length_m", "stock": true },
+        { "key": "pit", "itemCode": "DRAIN-PIT", "label": "Stormwater Pit", "unit": "each", "qty": "pit_count", "stock": true },
+        { "key": "gravel", "itemCode": "DRAIN-GRAVEL-M", "label": "Drainage Gravel", "unit": "m", "qty": "length_m", "stock": true },
+        { "key": "disposal", "itemUid": "cat_2d051e7aa6d34a70b734182f", "itemCode": "clean-fill-disposal", "label": "Clean Fill Disposal", "unit": "m", "qty": "length_m" },
+        { "key": "excavator", "itemUid": "cat_8cb11ceea88e41159072f17e", "itemCode": "EXCAVATOR-HOUR", "label": "Excavator Hour (incl. operator)", "unit": "hour", "qty": "length_m * excavator_hours_per_m" },
+        { "key": "labour", "itemUid": "cat_d14c246b2d4e4a3db3a33039", "itemCode": "LABOURER-HOUR", "label": "General Labourer Hour", "unit": "hour", "qty": "length_m * labour_hours_per_m" },
+        { "key": "delivery", "itemUid": "cat_68707fe551034fe888269864", "itemCode": "VEHICLE-HOUR", "label": "Vehicle/Truck Hour", "unit": "hour", "balance": true },
+        { "key": "admin", "itemUid": "cat_e0c1d03211434e06a105e7e2", "itemCode": "ADMIN-FEE", "label": "Admin Fee", "unit": "each", "qty": "1" }
+      ],
+      "tests": [
+        { "name": "25.5 m, pits from spacing", "params": { "length_m": 25.5 }, "expected": { "pipe": 25.5, "pit": 3, "gravel": 25.5, "disposal": 25.5, "excavator": 3.4, "labour": 5.1, "admin": 1 } },
+        { "name": "41 m with 2 pits stated", "params": { "length_m": 41, "explicit_pits": 1, "stated_pit_count": 2 }, "expected": { "pit": 2, "excavator": 5.4667, "labour": 8.2 } },
+        { "name": "3 m still gets one pit", "params": { "length_m": 3 }, "expected": { "pit": 1 } }
+      ]
+    }
+  ],
+  "deliveryDefaults": {
+    "issuerName": "Your Business",
+    "validityDays": 14,
+    "paymentTerms": "10% deposit due upon acceptance of this quote to secure booking. 30% progress payment due upon commencement of works. Remaining balance due within 7 days of project completion.",
+    "footerNote": "This quote is based on the listed scope, rate card, and assumptions current at issue time."
+  },
+  "missingInputDefaults": {
+    "wall type/specification": {
+      "inputType": "select",
+      "defaultValue": "Standard concrete sleeper retaining wall construction.",
+      "quoteNote": "Priced as a standard concrete sleeper retaining wall system.",
+      "affectsPricing": true,
+      "alternatives": [
+        { "value": "Standard concrete sleeper retaining wall construction.", "label": "Concrete sleeper" },
+        { "value": "Treated timber sleeper retaining wall construction.", "label": "Timber sleeper" },
+        { "value": "Galvanised steel post and concrete sleeper system.", "label": "Steel post + concrete sleeper" },
+        { "value": "Rock or boulder retaining wall.", "label": "Rock / boulder wall" },
+        { "value": "Crib wall block system.", "label": "Crib block" }
+      ]
+    },
+    "retaining wall type/specification": {
+      "inputType": "select",
+      "defaultValue": "Standard concrete sleeper retaining wall construction.",
+      "quoteNote": "Priced as a standard concrete sleeper retaining wall system.",
+      "affectsPricing": true,
+      "alternatives": [
+        { "value": "Standard concrete sleeper retaining wall construction.", "label": "Concrete sleeper" },
+        { "value": "Treated timber sleeper retaining wall construction.", "label": "Timber sleeper" },
+        { "value": "Galvanised steel post and concrete sleeper system.", "label": "Steel post + concrete sleeper" },
+        { "value": "Rock or boulder retaining wall.", "label": "Rock / boulder wall" },
+        { "value": "Crib wall block system.", "label": "Crib block" }
+      ]
+    },
+    "wall height profile": {
+      "inputType": "select",
+      "defaultValue": "Assume a uniform retained height based on the stated wall height in the recording.",
+      "quoteNote": "Priced using a uniform wall profile rather than stepped or engineered height changes.",
+      "affectsPricing": true,
+      "alternatives": [
+        { "value": "Assume a uniform retained height based on the stated wall height in the recording.", "label": "Uniform height" },
+        { "value": "Stepped wall profile with height changes along the run.", "label": "Stepped profile" },
+        { "value": "Engineered height profile with structural certification.", "label": "Engineered profile" }
+      ]
+    },
+    "wall length": {
+      "inputType": "text",
+      "defaultValue": "Use the extracted wall length stated in the recording.",
+      "quoteNote": "Priced using the stated lineal metre length from the transcript.",
+      "affectsPricing": true
+    },
+    "site access constraints": {
+      "inputType": "select",
+      "defaultValue": "Assume standard site access with no unusual machinery, haulage, or handling constraints.",
+      "quoteNote": "No unusual access loading has been added unless separately noted.",
+      "affectsPricing": true,
+      "alternatives": [
+        { "value": "Assume standard site access with no unusual machinery, haulage, or handling constraints.", "label": "Standard access" },
+        { "value": "Limited access — mini excavator only, no truck entry to site.", "label": "Limited (mini excavator)" },
+        { "value": "Restricted access — hand carry materials, no machine access.", "label": "Restricted (hand carry)" },
+        { "value": "Steep site — additional machinery and safety requirements.", "label": "Steep site" }
+      ]
+    },
+    "set-out and establishment scope": {
+      "inputType": "select",
+      "defaultValue": "Allow one standard site establishment and set-out visit.",
+      "quoteNote": "Site establishment is assumed to be a standard single setup.",
+      "affectsPricing": true,
+      "alternatives": [
+        { "value": "Allow one standard site establishment and set-out visit.", "label": "Single setup" },
+        { "value": "Two-stage establishment — initial setup plus return for wall build.", "label": "Two-stage setup" }
+      ]
+    },
+    "estimated machine hours": {
+      "inputType": "text",
+      "defaultValue": "Assume 4 machine hours unless revised on site.",
+      "quoteNote": "Machine allowance uses the profile default until an exact duration is provided.",
+      "affectsPricing": true
+    },
+    "estimated labour hours": {
+      "inputType": "text",
+      "defaultValue": "Assume one standard labour day of 7 hours unless revised.",
+      "quoteNote": "Labour allowance uses the default standard day until a confirmed duration is supplied.",
+      "affectsPricing": true
+    },
+    "excavation and labour hours": {
+      "inputType": "text",
+      "defaultValue": "Assume one standard combined excavation/labour day of 7 hours.",
+      "quoteNote": "Excavation and labour have been priced from a standard default allowance.",
+      "affectsPricing": true
+    },
+    "fill volume": {
+      "inputType": "text",
+      "defaultValue": "Assume standard imported fill volume from the default profile.",
+      "quoteNote": "Imported fill uses the profile default until a measured volume is provided.",
+      "affectsPricing": true
+    },
+    "soil-out volume": {
+      "inputType": "text",
+      "defaultValue": "Assume standard spoil-out volume from the default profile.",
+      "quoteNote": "Soil removal uses the profile default until measured excavation volume is provided.",
+      "affectsPricing": true
+    },
+    "drainage run length": {
+      "inputType": "text",
+      "defaultValue": "Assume the standard drainage run length from the default profile.",
+      "quoteNote": "Drainage is priced from the default length allowance until a measured run is supplied.",
+      "affectsPricing": true
+    },
+    "material quantities": {
+      "inputType": "select",
+      "defaultValue": "Assume standard material quantities derived from the base rate card.",
+      "quoteNote": "Material quantities are provisionally covered by the default rate card assumptions.",
+      "affectsPricing": true,
+      "alternatives": [
+        { "value": "Assume standard material quantities derived from the base rate card.", "label": "Standard quantities" },
+        { "value": "Reduced material scope — lightweight or partial build.", "label": "Reduced scope" },
+        { "value": "Heavy material scope — oversized or reinforced build.", "label": "Heavy scope" }
+      ]
+    },
+    "haulage count or truck loads": {
+      "inputType": "text",
+      "defaultValue": "Assume one standard haulage load unless revised.",
+      "quoteNote": "Haulage is priced using the default single-load allowance.",
+      "affectsPricing": true
+    },
+    "manual scope review": {
+      "inputType": "text",
+      "defaultValue": "Assume standard site works allowance pending manual scope review.",
+      "quoteNote": "A provisional general site works allowance has been retained until scope is refined.",
+      "affectsPricing": true
+    },
+    "lawn area": {
+      "inputType": "text",
+      "defaultValue": "Assume a standard lawn zone size based on the current job context until confirmed.",
+      "quoteNote": "Lawn pricing uses a standard area assumption until measured dimensions are captured.",
+      "affectsPricing": true
+    }
+  },
+  // `quantityUnit` is the unit a rule's quantity is measured in (area rules
+  // m2, volume rules m3, ...). Lines keep it; the catalogue item's price is
+  // converted to it, or the line fails closed (rule_unit_mismatch).
+  "rules": [
+    {
+      "code": "site-establishment",
+      "authorityItemUid": "cat_e277230ded3b482c8aa89552",
+      "label": "Site establishment and set-out",
+      "defaultQuantity": 1,
+      "quantityUnit": "job",
+      "useWhen": "set-out, measure-up, mark-out, initial site establishment",
+      "keywords": ["site establishment", "set out", "set-out", "measure up", "mark out"],
+      "requiredInputs": ["site access constraints"],
+      "workDomain": "site_prep",
+      "presentation": {
+        "customerVisible": false
+      },
+      "execution": {
+        "stage": "setup",
+        "labourHoursPerUnit": 1.5,
+        "billableLabourHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "excavator-hour",
+      "label": "Excavator hour (incl. operator)",
+      "authorityItemUid": "cat_8cb11ceea88e41159072f17e",
+      "authorityItemCode": "EXCAVATOR-HOUR",
+      "defaultQuantity": 4,
+      "quantityUnit": "hour",
+      "useWhen": "excavation, digging, machine work, earthmoving",
+      "keywords": ["excavate", "excavation", "dig", "machine", "bobcat", "excavator", "cut", "earthworks"],
+      "quantitySource": "hoursOrDays",
+      "requiredInputs": ["estimated machine hours"],
+      "workDomain": "site_prep",
+      "presentation": {
+        "customerVisible": false
+      }
+    },
+    {
+      "code": "vehicle-hour",
+      "label": "Vehicle / truck hour",
+      "authorityItemUid": "cat_68707fe551034fe888269864",
+      "authorityItemCode": "VEHICLE-HOUR",
+      "defaultQuantity": 1,
+      "quantityUnit": "hour",
+      "useWhen": "truck or vehicle travel time",
+      "keywords": ["vehicle hour", "truck hour", "haulage hour", "travel hour"],
+      "workDomain": "site_prep",
+      "presentation": {
+        "customerVisible": false
+      }
+    },
+    {
+      "code": "vehicle-km",
+      "label": "Vehicle kilometre",
+      "authorityItemUid": "cat_ad791d52bd094b909e192f22",
+      "authorityItemCode": "VEHICLE-KM",
+      "defaultQuantity": 1,
+      "quantityUnit": "km",
+      "useWhen": "truck or vehicle distance charge",
+      "keywords": ["vehicle kilometre", "vehicle km", "truck km", "distance charge"],
+      "workDomain": "site_prep",
+      "presentation": {
+        "customerVisible": false
+      }
+    },
+    {
+      "code": "mini-loader-hour",
+      "label": "Mini loader hour",
+      "authorityItemUid": "cat_2063217769084b9daafce748",
+      "authorityItemCode": "KANGA-HOUR",
+      "defaultQuantity": 1,
+      "quantityUnit": "hour",
+      "useWhen": "mini loader or Kanga loading and handling time",
+      "keywords": ["mini loader", "kanga", "loader", "loading"],
+      "workDomain": "site_prep",
+      "presentation": {
+        "customerVisible": false
+      }
+    },
+    {
+      "code": "labourer-hour",
+      "label": "General labourer",
+      "authorityItemUid": "cat_d14c246b2d4e4a3db3a33039",
+      "authorityItemCode": "LABOURER-HOUR",
+      "defaultQuantity": 4,
+      "quantityUnit": "hour",
+      "useWhen": "hand work, labouring, shovel work, wheelbarrow work",
+      "keywords": ["labour", "labourer", "manual", "hand dig", "shovel", "wheelbarrow", "hand work"],
+      "quantitySource": "hoursOrDays",
+      "requiredInputs": ["estimated labour hours"],
+      "workDomain": "site_prep",
+      "presentation": {
+        "customerVisible": false
+      }
+    },
+    {
+      "code": "concrete-demolition",
+      "label": "Concrete demolition",
+      "authorityItemCode": "concrete-demolition",
+      "defaultQuantity": 1,
+      "quantityUnit": "job",
+      "useWhen": "break up and remove existing slabs, footings, or concrete walls",
+      "keywords": ["concrete demolition", "slab demolition", "concrete removal", "remove concrete", "jackhammer", "break up slab", "retaining wall removal"],
+      "requiredInputs": ["concrete demolition scope review"],
+      "workDomain": "site_prep",
+      "execution": {
+        "stage": "earthworks",
+        "labourHoursPerUnit": 4,
+        "machineHoursPerUnit": 2
+      }
+    },
+    {
+      "code": "concrete-surface-demolition",
+      "label": "Concrete surface demolition",
+      "authorityItemUid": "cat_7444b8d832714329b87f18a2",
+      "authorityItemCode": "concrete-surface-demolition",
+      "defaultQuantity": 10,
+      "quantityUnit": "m2",
+      "useWhen": "break up and remove concrete paths, flooring, or shed slabs up to 100 mm thick",
+      "keywords": ["concrete surface demolition", "path demolition", "slab demolition", "floor demolition", "pad demolition", "jackhammer", "break up slab"],
+      "quantitySource": "area",
+      "workDomain": "site_prep",
+      "presentation": {
+        "customerVisible": true,
+        "summaryLabel": "Concrete surface demolition",
+        "scheduleLabel": "Concrete Surface Demolition"
+      },
+      "execution": {
+        "stage": "earthworks",
+        "machineHoursPerUnit": 0.0667,
+        "billableMachineHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "concrete-structure-demolition",
+      "label": "Concrete structure demolition",
+      "authorityItemUid": "cat_db67b5a89544494e8a525afb",
+      "authorityItemCode": "concrete-structure-demolition",
+      "defaultQuantity": 6,
+      "quantityUnit": "m2",
+      "useWhen": "break up and remove concrete walls, frameworks, or structures up to 300 mm thick",
+      "keywords": ["concrete structure demolition", "concrete wall demolition", "concrete framework demolition", "retaining wall removal", "jackhammer"],
+      "quantitySource": "area",
+      "workDomain": "site_prep",
+      "presentation": {
+        "customerVisible": true,
+        "summaryLabel": "Concrete structure demolition",
+        "scheduleLabel": "Concrete Structure Demolition"
+      },
+      "execution": {
+        "stage": "earthworks",
+        "machineHoursPerUnit": 0.1429,
+        "billableMachineHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "concrete-removal",
+      "label": "Concrete removal and disposal",
+      "authorityItemUid": "cat_d27d39dadfa9472bb23f14f5",
+      "authorityItemCode": "concrete-removal",
+      "defaultQuantity": 1,
+      "quantityUnit": "m3",
+      "useWhen": "load out and dispose of demolished concrete",
+      "keywords": ["concrete removal", "concrete disposal", "load concrete", "remove demolished concrete"],
+      "quantitySource": "volume",
+      "requiredInputs": ["concrete removal volume"],
+      "workDomain": "site_prep",
+      "presentation": {
+        "customerVisible": true,
+        "summaryLabel": "Concrete removal and disposal",
+        "scheduleLabel": "Concrete Removal & Disposal"
+      },
+      "execution": {
+        "stage": "earthworks",
+        "machineHoursPerUnit": 0.8696,
+        "billableMachineHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "jackhammer-hour",
+      "label": "Jackhammer hour",
+      "authorityItemUid": "cat_b3cc449ea1f042379a35f346",
+      "authorityItemCode": "JACKHAMMER-HOUR",
+      "defaultQuantity": 1,
+      "quantityUnit": "hour",
+      "useWhen": "jackhammer or breaker attachment time for concrete breakup",
+      "keywords": ["jackhammer", "breaker", "concrete breaker"],
+      "workDomain": "site_prep",
+      "presentation": {
+        "customerVisible": false
+      }
+    },
+    {
+      "code": "soil-removal",
+      "label": "Soil removal and disposal",
+      "authorityItemUid": "cat_a00105ab3c9740139d87a0bd",
+      "authorityItemCode": "soil-removal",
+      "defaultQuantity": 4,
+      "quantityUnit": "m3",
+      "useWhen": "spoil removal, disposal, dump/tip, cart-away",
+      "keywords": ["soil out", "remove soil", "dispose", "dump", "tip fees", "cart away", "spoil"],
+      "quantitySource": "volume",
+      "requiredInputs": ["soil-out volume"],
+      "workDomain": "site_prep",
+      "execution": {
+        "stage": "earthworks",
+        "machineHoursPerUnit": 0.2286,
+        "billableMachineHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "clean-fill-disposal",
+      "label": "Clean fill disposal",
+      "authorityItemUid": "cat_2d051e7aa6d34a70b734182f",
+      "authorityItemCode": "clean-fill-disposal",
+      "defaultQuantity": 1,
+      "quantityUnit": "tonne",
+      "useWhen": "clean fill tipping and disposal",
+      "keywords": ["clean fill", "clean fill disposal", "dump clean fill", "tip clean fill"],
+      "requiredInputs": ["clean fill tonnes"],
+      "workDomain": "site_prep"
+    },
+    {
+      "code": "unclean-fill-disposal",
+      "label": "Unclean fill disposal",
+      "authorityItemUid": "cat_4ea3fa6be4c9456999d44beb",
+      "authorityItemCode": "unclean-fill-disposal",
+      "defaultQuantity": 1,
+      "quantityUnit": "tonne",
+      "useWhen": "unclean fill tipping and disposal",
+      "keywords": ["unclean fill", "dirty fill", "unclean fill disposal", "dump dirty fill"],
+      "requiredInputs": ["unclean fill tonnes"],
+      "workDomain": "site_prep"
+    },
+    {
+      "code": "concrete-waste-disposal",
+      "label": "Concrete waste disposal",
+      "authorityItemUid": "cat_abf6f2cd0d964d2faff8682a",
+      "authorityItemCode": "concrete-waste-disposal",
+      "defaultQuantity": 1,
+      "quantityUnit": "tonne",
+      "useWhen": "concrete tipping and disposal",
+      "keywords": ["concrete waste", "concrete disposal", "dump concrete", "tip concrete"],
+      "requiredInputs": ["concrete waste tonnes"],
+      "workDomain": "site_prep"
+    },
+    {
+      "code": "green-waste-disposal",
+      "label": "Green waste disposal",
+      "authorityItemUid": "cat_f1527d3894014e1db14466f9",
+      "authorityItemCode": "green-waste-disposal",
+      "defaultQuantity": 1,
+      "quantityUnit": "tonne",
+      "useWhen": "green waste tipping and disposal",
+      "keywords": ["green waste", "green waste disposal", "dump green waste", "tip green waste"],
+      "requiredInputs": ["green waste tonnes"],
+      "workDomain": "site_prep"
+    },
+    {
+      "code": "tip-truck",
+      "label": "Tip truck haulage",
+      "authorityItemUid": "cat_9f4cf2d95e2d45369db24b74",
+      "authorityItemCode": "tip-truck",
+      "defaultQuantity": 1,
+      "quantityUnit": "load",
+      "useWhen": "haulage, truck loads, tipper movements",
+      "keywords": ["tipper", "tip truck", "truck load", "haulage", "truck"],
+      "requiredInputs": ["haulage count or truck loads"],
+      "workDomain": "site_prep",
+      "execution": {
+        "stage": "haulage",
+        "supportHoursMode": "tip-truck-cycle"
+      }
+    },
+    {
+      "code": "site-levelling",
+      "label": "Site levelling and cut",
+      "authorityItemUid": "cat_4ffd243309a84f249e47e2d0",
+      "authorityItemCode": "site-levelling",
+      "defaultQuantity": 1,
+      "quantityUnit": "m3",
+      "useWhen": "cut and level soil to the nominated set level",
+      "keywords": ["site levelling", "site leveling", "cut and level", "shed area levelling", "excavator cut"],
+      "quantitySource": "volume",
+      "requiredInputs": ["site levelling cut volume"],
+      "workDomain": "leveling_grading",
+      "presentation": {
+        "customerVisible": true,
+        "summaryLabel": "Site levelling and cut",
+        "scheduleLabel": "Site Levelling & Cut"
+      },
+      "execution": {
+        "stage": "earthworks",
+        "machineHoursPerUnit": 0.5,
+        "billableMachineHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "imported-fill",
+      "authorityItemUid": "cat_02e5e698d73441f7bc652ce1",
+      "label": "Imported fill / topping",
+      "defaultQuantity": 4,
+      "quantityUnit": "m3",
+      "useWhen": "imported fill, topsoil, road base, crusher dust",
+      "keywords": ["import fill", "fill", "topsoil", "crusher dust", "road base", "bring in material"],
+      "quantitySource": "volume",
+      "requiredInputs": ["fill volume"],
+      "workDomain": "leveling_grading",
+      "execution": {
+        "stage": "backfill",
+        "labourHoursPerUnit": 0.15,
+        "machineHoursPerUnit": 0.2
+      }
+    },
+    {
+      "code": "retaining-wall",
+      "authorityItemUid": "cat_8a4c6ec0be70474a929af0fb",
+      "label": "Retaining wall construction",
+      "defaultQuantity": 6,
+      "quantityUnit": "m",
+      "useWhen": "retaining wall, sleepers, I-beams, C-channels",
+      "keywords": ["retaining wall", "sleepers", "i beam", "i-beam", "c channel", "c-channel"],
+      "quantitySource": "length",
+      "requiredInputs": ["wall length", "wall height profile"],
+      "workDomain": "retaining",
+      "execution": {
+        "stage": "structure",
+        "labourHoursPerUnit": 0.8,
+        "machineHoursPerUnit": 0.2
+      }
+    },
+    {
+      "code": "drainage",
+      "authorityItemUid": "cat_ffbaeece2c704cd8bacaa669",
+      "label": "Drainage installation",
+      "defaultQuantity": 8,
+      "quantityUnit": "m",
+      "useWhen": "drainage, ag pipe, stormwater, pits",
+      "keywords": ["drainage", "drain", "ag pipe", "stormwater", "pit", "socked agg"],
+      "quantitySource": "length",
+      "requiredInputs": ["drainage run length"],
+      "workDomain": "drainage",
+      "execution": {
+        "stage": "drainage",
+        "labourHoursPerUnit": 0.35,
+        "machineHoursPerUnit": 0.15
+      }
+    },
+    {
+      "code": "irrigation-system-install",
+      "authorityItemUid": "cat_38d2ea71570c4639a0b85893",
+      "label": "Irrigation system",
+      "defaultQuantity": 1,
+      "quantityUnit": "job",
+      "useWhen": "irrigation system, controller, sprinklers, drip line, lawn irrigation",
+      "keywords": ["irrigation", "sprinklers", "sprinkler", "controller", "drip", "irrigation system"],
+      "workDomain": "irrigation",
+      "presentation": {
+        "bundled": true,
+        "customerVisible": true,
+        "scheduleLabel": "Irrigation System — Supply & Install",
+        "summaryLabel": "Irrigation system — supply and install",
+        "defaultSection": "Irrigation"
+      },
+      "execution": {
+        "stage": "drainage",
+        "labourHoursPerUnit": 12,
+        "billableLabourHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "lawn-supply-prep-install",
+      "authorityItemUid": "cat_ca97883b9696451a95e64c80",
+      "label": "Lawn supply, preparation and install",
+      "defaultQuantity": 80,
+      "quantityUnit": "m2",
+      "useWhen": "new lawn area, turf supply, sandy loam, prep and lay",
+      "keywords": ["lawn", "turf", "grass", "sandy loam", "lay lawn", "new lawn"],
+      "quantitySource": "area",
+      "requiredInputs": ["lawn area"],
+      "workDomain": "lawn_turf",
+      "presentation": {
+        "bundled": true,
+        "customerVisible": true,
+        "scheduleLabel": "Lawn — Supply, Preparation & Install",
+        "summaryLabel": "Lawn — supply, preparation, and install"
+      },
+      "execution": {
+        "stage": "general",
+        "labourHoursPerUnit": 0.035,
+        "machineHoursPerUnit": 0.012,
+        "billableLabourHoursPerUnit": 0,
+        "billableMachineHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "large-tree-supply-install",
+      "authorityItemUid": "cat_93c53246af4942d3b8063d1e",
+      "label": "Large tree supply and install",
+      "defaultQuantity": 2,
+      "quantityUnit": "each",
+      "useWhen": "feature trees, specimen trees, large trees supplied and planted",
+      "keywords": ["feature tree", "feature trees", "large tree", "specimen tree", "ornamental tree"],
+      "quantitySource": "count",
+      "workDomain": "planting",
+      "presentation": {
+        "bundled": true,
+        "customerVisible": true,
+        "scheduleLabel": "Large Trees — Supply & Install",
+        "summaryLabel": "{quantity}x large trees supplied and installed",
+        "quantityLabelMode": "count_x"
+      },
+      "execution": {
+        "stage": "general",
+        "labourHoursPerUnit": 0.5,
+        "machineHoursPerUnit": 0.15,
+        "billableLabourHoursPerUnit": 0,
+        "billableMachineHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "tree-supply-install",
+      "authorityItemUid": "cat_a1f05dc49599402d8543ab5a",
+      "label": "Tree supply and install",
+      "defaultQuantity": 6,
+      "quantityUnit": "each",
+      "useWhen": "trees supplied and planted, screening trees, fruit trees, row planting",
+      "keywords": ["tree", "trees", "screening tree", "screen trees", "fruit tree", "pencil pine", "row of trees"],
+      "quantitySource": "count",
+      "workDomain": "planting",
+      "presentation": {
+        "bundled": true,
+        "customerVisible": true,
+        "scheduleLabel": "Trees — Supply & Install",
+        "summaryLabel": "{quantity}x trees supplied and installed",
+        "quantityLabelMode": "count_x"
+      },
+      "execution": {
+        "stage": "general",
+        "labourHoursPerUnit": 0.35,
+        "machineHoursPerUnit": 0.08,
+        "billableLabourHoursPerUnit": 0,
+        "billableMachineHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "plant-supply-install",
+      "authorityItemUid": "cat_57e0f52f474a4ee4b7b2eba4",
+      "label": "Plant supply and install",
+      "defaultQuantity": 12,
+      "quantityUnit": "each",
+      "useWhen": "garden plants, shrubs, planting out beds, screening plants",
+      "keywords": ["plants", "planting", "shrubs", "screening plants", "garden bed", "garden beds"],
+      "quantitySource": "count",
+      "workDomain": "planting",
+      "presentation": {
+        "bundled": true,
+        "customerVisible": true,
+        "scheduleLabel": "Plants — Supply & Install",
+        "summaryLabel": "{quantity} plants supplied and installed",
+        "quantityLabelMode": "count_with_unit",
+        "quantityLabelUnitSingular": "plant",
+        "quantityLabelUnitPlural": "plants"
+      },
+      "execution": {
+        "stage": "general",
+        "labourHoursPerUnit": 0.15,
+        "billableLabourHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "block-edging-supply-install",
+      "authorityItemUid": "cat_944b8895aaa445e6a45bee24",
+      "label": "Block edging supply and install",
+      "defaultQuantity": 20,
+      "quantityUnit": "m",
+      "useWhen": "block edging, garden edging, retaining edge, versastone edge",
+      "keywords": ["block edging", "edging", "versastone", "garden edge", "garden edging"],
+      "quantitySource": "length",
+      "workDomain": "edging_borders",
+      "presentation": {
+        "bundled": true,
+        "customerVisible": true,
+        "scheduleLabel": "Block Edging — Supply & Install",
+        "summaryLabel": "Block edging — supply and install"
+      },
+      "execution": {
+        "stage": "structure",
+        "labourHoursPerUnit": 0.08,
+        "machineHoursPerUnit": 0.02,
+        "billableLabourHoursPerUnit": 0,
+        "billableMachineHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "rock-wall",
+      "authorityItemUid": "cat_d016692f2d22444aaa0c97d3",
+      "label": "Rock wall / boulder placement",
+      "defaultQuantity": 6,
+      "quantityUnit": "m2",
+      "useWhen": "rock wall, stone wall, boulder placement",
+      "keywords": ["rock wall", "stone wall", "boulder", "rocks"],
+      "quantitySource": "area",
+      "requiredInputs": ["wall face area or length/height"],
+      "workDomain": "retaining",
+      "execution": {
+        "stage": "structure",
+        "labourHoursPerUnit": 0.45,
+        "machineHoursPerUnit": 0.35
+      }
+    },
+    {
+      "code": "cleanup",
+      "authorityItemUid": "cat_78b95e2772ea47c8b615cbba",
+      "label": "Final trim and cleanup",
+      "defaultQuantity": 1,
+      "quantityUnit": "job",
+      "useWhen": "cleanup, final trim, site clean",
+      "keywords": ["cleanup", "clean up", "final trim", "finish off", "site clean"],
+      "workDomain": "mulching_finishes",
+      "presentation": {
+        "customerVisible": false
+      },
+      "execution": {
+        "stage": "cleanup",
+        "labourHoursPerUnit": 1,
+        "billableLabourHoursPerUnit": 0
+      }
+    },
+    {
+      "code": "misc-site-works",
+      "authorityItemUid": "cat_273e14f5d04446558cb7479d",
+      "label": "General site works allowance",
+      "defaultQuantity": 1,
+      "quantityUnit": "job",
+      "useWhen": "use only when real job scope exists but no specific line item maps cleanly",
+      "keywords": [],
+      "requiredInputs": ["manual scope review"],
+      "workDomain": "site_prep",
+      "presentation": {
+        "customerVisible": false
+      },
+      "execution": {
+        "stage": "general",
+        "labourHoursPerUnit": 4
+      },
+      "fallback": true
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+modules = ["nodejs-20", "web", "bash"]
+run = ["bash", "scripts/replit-start.sh"]
+
+# Marks the Replit runtime for the app and for operator CLIs run from the
+# shell (a local PGlite database is refused; use DATABASE_URL).
+# scripts/replit-start.sh sets it too.
+[env]
+FIELD_RUNTIME = "replit"
+
+[nix]
+channel = "stable-25_05"
+
+[agent]
+expertMode = true
+
+[[ports]]
+localPort = 19200
+externalPort = 80
+
+# Reserved VM: Field sends scheduled quote and invoice emails in-process, so it
+# must stay up (an autoscale deployment would sleep and miss them).
+[deployment]
+deploymentTarget = "vm"
+build = ["bash", "scripts/replit-build.sh"]
+run = ["bash", "scripts/replit-start.sh"]
+ignorePorts = false
+
+[userenv]
+
+[userenv.shared]
+FIELD_AUTH = "clerk"
+FIELD_OWNER_GOOGLE_DOMAINS = "embarkearthworks.au"

@@ -1,0 +1,36 @@
+{
+  "port": 19200,
+  "publicUrl": "http://localhost:19200",
+  "authToken": "SET_LOCAL_AUTH_TOKEN",
+  "_comment_bootstrapUsers": "Optional local users for email/password login in the Field UI. Omit password to reuse authToken.",
+  "bootstrapUsers": [
+    {
+      "email": "operator@example.com",
+      "name": "Local Operator"
+    }
+  ],
+  "_comment_pricing": "Field owns pricing locally. Do not add external pricing or CRM blocks to new environments unless the repo intent changes.",
+  "mail": {
+    "fromEmail": "operator@example.com",
+    "fromName": "Field Local",
+    "replyTo": "operator@example.com",
+    "gmailUser": "operator@example.com",
+    "deliveryPolicy": {
+      "mode": "allowlist",
+      "allowedRecipients": [
+        "operator@example.com"
+      ]
+    }
+  },
+  "_comment_googleOAuth": "Google Workspace OAuth stores per-user refresh tokens under googleOAuth.users after consent for Gmail sending and read-only Contacts access. Do not commit real secrets.",
+  "googleOAuth": {
+    "clientId": "GOOGLE_OAUTH_CLIENT_ID",
+    "clientSecret": "GOOGLE_OAUTH_CLIENT_SECRET",
+    "users": {
+      "operator@example.com": {
+        "refreshToken": "USER_REFRESH_TOKEN",
+        "consentEmail": "operator@example.com"
+      }
+    }
+  }
+}

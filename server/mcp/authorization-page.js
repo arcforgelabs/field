@@ -1,0 +1,269 @@
+const SCOPE_COPY = {
+  "catalog.read": "Read price catalog items",
+  "catalog.write": "Update price catalog items",
+  "quote.read": "Read quotes",
+  "quote.draft": "Create and edit quote drafts",
+};
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "\u0026amp;")
+    .replaceAll("<", "\u0026lt;")
+    .replaceAll(">", "\u0026gt;")
+    .replaceAll('"', "\u0026quot;")
+    .replaceAll("'", "\u0026#39;");
+}
+
+function renderScopeItems(scopes) {
+  return scopes.map((scope) => {
+    const description = SCOPE_COPY[scope] || "Requested Field access";
+    return [
+      "          <li>",
+      `            <code>${escapeHtml(scope)}</code>`,
+      `            <span>${escapeHtml(description)}</span>`,
+      "          </li>",
+    ].join("\n");
+  }).join("\n");
+}
+
+// The credential part of the form. Password mode asks for email and password;
+// with Clerk sign-in (FIELD_AUTH=clerk) the owner is already signed in.
+function renderCredentialFields(signedInAs) {
+  if (signedInAs) {
+    return `        <p class="client">Signed in as ${escapeHtml(signedInAs)}.</p>`;
+  }
+  return [
+    "        <label>Email",
+    '          <input id="email" name="email" type="email" autocomplete="username" required>',
+    "        </label>",
+    "        <label>Password",
+    '          <input id="password" name="password" type="password" autocomplete="current-password" required>',
+    "        </label>",
+  ].join("\n");
+}
+
+export function renderAuthorizationPage({ clientName, scopes, requestId, csrf, signedInAs = null }) {
+  const title = `Authorize ${clientName} · Field`;
+  return renderPage(title, `      <form method="post" action="/oauth/approve">
+        <div class="brand">
+          <h1><img src="/field-mark.svg" alt="" width="36" height="28"> FIELD</h1>
+          <p>Authorize access</p>
+        </div>
+        <h2>Requested access</h2>
+        <p class="client">${escapeHtml(clientName)} wants to connect to this Field account.</p>
+        <ul class="scopes">
+${renderScopeItems(scopes)}
+        </ul>
+        <input type="hidden" name="request" value="${escapeHtml(requestId)}">
+        <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
+${renderCredentialFields(signedInAs)}
+        <button type="submit">Authorize</button>
+      </form>`);
+}
+
+// Clerk sign-in mode, when the visitor is not an owner with a verified owner sign-in yet: say
+// why and link to Field's sign-in, which returns here afterwards.
+export function renderAuthorizationSignInPage({ clientName, message, signInUrl }) {
+  const title = `Authorize ${clientName} · Field`;
+  return renderPage(title, `      <form method="get" action="/">
+        <div class="brand">
+          <h1><img src="/field-mark.svg" alt="" width="36" height="28"> FIELD</h1>
+          <p>Authorize access</p>
+        </div>
+        <h2>Owner sign-in required</h2>
+        <p class="client">${escapeHtml(clientName)} wants to connect to this Field account. Only a Field owner with a verified owner sign-in (Google Workspace, or two-step verification) can allow that.</p>
+        <p class="client">${escapeHtml(message)}</p>
+        <a href="${escapeHtml(signInUrl)}" style="display:block;width:100%;padding:13px 0;font-size:14px;font-weight:700;text-align:center;text-decoration:none;background:var(--t-primary);color:var(--t-on-primary);border-radius:var(--t-radius);font-family:var(--t-body);letter-spacing:.12em;text-transform:uppercase">Sign in to Field</a>
+      </form>`);
+}
+
+function renderPage(title, body) {
+  return `<!doctype html>
+<html lang="en" data-theme="field">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex,nofollow">
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" content="#f5f3eb" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#11110d" media="(prefers-color-scheme: dark)">
+    <title>${escapeHtml(title)}</title>
+    <link rel="icon" type="image/svg+xml" href="/icon-192.svg">
+    <style>
+      :root, [data-theme="field"] {
+        --t-bg: #f5f3eb;
+        --t-s1: #ebe9df;
+        --t-s2: #dedbd0;
+        --t-brd: rgba(17,17,13,.18);
+        --t-brd-hi: #11110d;
+        --t-text: #11110d;
+        --t-dim: #65645d;
+        --t-mute: #7a786f;
+        --t-accent: #11110d;
+        --t-accent-bg: rgba(244,197,24,.24);
+        --t-accent-brd: #d9ad0c;
+        --t-brand: #f4c518;
+        --t-primary: #11110d;
+        --t-on-primary: #f4c518;
+        --t-paper: #fbfaf5;
+        --t-danger: #b8442a;
+        --t-body: "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif;
+        --t-data: "Geist Mono Variable", ui-monospace, monospace;
+        --t-radius: 0px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root, [data-theme="field"] {
+          --t-bg: #11110d;
+          --t-s1: #1e1e18;
+          --t-s2: #2b2b24;
+          --t-brd: rgba(245,243,235,.16);
+          --t-brd-hi: #f5f3eb;
+          --t-text: #f5f3eb;
+          --t-dim: #b8b7ae;
+          --t-mute: #9c9a90;
+          --t-accent: #f4c518;
+          --t-accent-bg: rgba(244,197,24,.14);
+          --t-accent-brd: rgba(244,197,24,.50);
+          --t-primary: #f4c518;
+          --t-on-primary: #11110d;
+          --t-paper: #181813;
+          --t-danger: #e36a4d;
+        }
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body {
+        min-height: 100%;
+        background: var(--t-bg);
+        color: var(--t-text);
+        font-family: var(--t-body);
+        -webkit-font-smoothing: antialiased;
+      }
+      body {
+        display: flex;
+        min-height: 100dvh;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+      main, form {
+        width: 100%;
+        max-width: 360px;
+      }
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .brand {
+        text-align: center;
+      }
+      .brand h1 {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        font-family: var(--t-body);
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: .18em;
+        color: var(--t-text);
+        padding-bottom: 14px;
+        border-bottom: 3px solid var(--t-text);
+      }
+      .brand p {
+        margin-top: 12px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: var(--t-dim);
+      }
+      h2 {
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: var(--t-text);
+      }
+      .client {
+        color: var(--t-dim);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      .scopes {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px 14px;
+        background: var(--t-s1);
+        border: 1px solid var(--t-brd);
+        border-radius: var(--t-radius);
+      }
+      .scopes li {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .scopes code {
+        font-family: var(--t-data);
+        font-size: 12px;
+        color: var(--t-text);
+      }
+      .scopes span {
+        font-size: 12px;
+        color: var(--t-dim);
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: var(--t-text);
+      }
+      input[type="email"], input[type="password"] {
+        width: 100%;
+        padding: 12px 14px;
+        background: var(--t-paper);
+        border: 2px solid var(--t-text);
+        border-radius: var(--t-radius);
+        color: var(--t-text);
+        font-family: var(--t-body);
+        font-size: 14px;
+        outline: none;
+      }
+      input[type="email"]:focus, input[type="password"]:focus {
+        box-shadow: 0 0 0 3px var(--t-brand);
+      }
+      button[type="submit"] {
+        width: 100%;
+        padding: 13px 0;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        background: var(--t-primary);
+        color: var(--t-on-primary);
+        border-radius: var(--t-radius);
+        border: none;
+        cursor: pointer;
+        font-family: var(--t-body);
+      }
+      button[type="submit"]:hover { filter: brightness(1.05); }
+      button[type="submit"]:focus-visible {
+        outline: 3px solid var(--t-brand);
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+${body}
+    </main>
+  </body>
+</html>
+`;
+}

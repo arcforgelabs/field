@@ -1,0 +1,60 @@
+{
+  "port": 19200,
+  "dataDir": "/opt/apps/field/data",
+  "mcp": {
+    "enabled": false,
+    "publicOrigin": "https://field.example.com"
+  },
+  "authToken": "CHANGE_ME_GENERATE_WITH_openssl_rand_hex_24",
+  "googleDriveFolderId": "PASTE_FOLDER_ID_FROM_DRIVE_URL",
+  "priceCatalogBackups": {
+    "enabled": true,
+    "rootDir": "/opt/apps/field-catalog-backups",
+    "intervalHours": 24,
+    "retentionDays": 7,
+    "maxBackups": 7
+  },
+  "_comment_bootstrapUsers": "Optional. If set, these users are guaranteed to exist in the local Field auth store. Omit password to reuse authToken. Staging can use this to carry a small managed operator list until SSO exists.",
+  "bootstrapUsers": [
+    {
+      "email": "admin@example.com",
+      "name": "Sam Admin"
+    },
+    {
+      "email": "owner@example.com",
+      "name": "Alex Operator"
+    },
+    {
+      "email": "staff@example.com",
+      "name": "Staff Member",
+      "password": "SET_PER_ENV"
+    }
+  ],
+
+  "_comment_auth": "Drive can use googleServiceAccountKey while mail uses googleOAuth. Staging normally uses googleOAuth only. Production can keep the Drive service account and add googleOAuth just for Gmail send. Do not use the Google Cloud SDK default OAuth client for Gmail consent; create an app-owned OAuth client in Google Cloud Console.",
+
+  "googleServiceAccountKey": "/opt/apps/field/service-account.json",
+
+  "googleOAuth": {
+    "clientId": "FROM_YOUR_GOOGLE_CLOUD_OAUTH_CLIENT",
+    "clientSecret": "FROM_YOUR_GOOGLE_CLOUD_OAUTH_CLIENT",
+    "refreshToken": "FROM_FIELD_SETUP_GMAIL_OAUTH",
+    "quotaProject": "your-gcp-project-id"
+  },
+
+  "mail": {
+    "fromEmail": "owner@example.com",
+    "fromName": "Your Business",
+    "replyTo": "owner@example.com",
+    "gmailUser": "owner@example.com",
+    "_comment_deliveryPolicy": "Delivery policy is environment-specific. Use live for production. Use allowlist or disabled in non-production environments.",
+    "deliveryPolicy": {
+      "mode": "live",
+      "allowedRecipients": [
+        "admin@example.com"
+      ]
+    }
+  },
+
+  "_comment_pricing": "Field owns pricing locally. Do not add external pricing or CRM blocks unless the repo intent changes."
+}

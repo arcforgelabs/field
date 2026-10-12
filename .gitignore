@@ -1,0 +1,22 @@
+node_modules
+node_modules/
+data/
+server/db/dist/
+config.json
+config.local.json
+service-account.json
+scripts/ledgers/
+.pixel-forge/
+.playwright-mcp/
+.codex
+memory/
+.run/
+
+# Python validation artifacts
+__pycache__/
+*.pyc
+.artifacts/
+
+# Replit
+attached_assets/
+.local/

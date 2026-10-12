@@ -1,0 +1,112 @@
+{
+  id: "field-verification",
+  name: "Field Verification",
+  status: "active",
+  currency: "AUD",
+  gstRate: 0.1,
+  hoursPerDay: 8,
+  businessProfile: {
+    tradingName: "Field Verification",
+    legalName: "Field Verification",
+    abn: "SYNTHETIC-NOT-FOR-USE",
+    address: "Synthetic verification address, South Australia",
+    phone: "",
+    email: "field-verification@example.invalid",
+    paymentMethods: {
+      bankTransfer: {
+        accountName: "Field Verification",
+        bsb: "000-000",
+        accountNumber: "SYNTHETIC",
+        bank: "Synthetic bank",
+      },
+    },
+  },
+  executionProfile: {
+    travelHoursPerDay: 1,
+    tipTruckLoadMinutes: 30,
+    tipTruckDumpMinutes: 15,
+    defaultDumpDriveMinutesOneWay: 20,
+  },
+  sourceNote: "Synthetic verification-only catalog. It contains no customer identity, credentials, or customer pricing authority.",
+  supportRuleCodes: ["site-establishment", "cleanup"],
+  // Rules carry no prices, only the unit their quantity is measured in
+  // (quantityUnit): every rule's rate, sold unit and (for
+  // the disposal rules) costing basis come solely from the field-verification
+  // price-catalog item scripts/verification/fixtures.js seeds via createItem()
+  // at reset time, the same supported path real catalogue items use. The three
+  // verification-spoil-removal-* rules demonstrate a disposal line priced
+  // under each costing basis (per_tonne, per_load, per_m3) (DEL-46). All rates
+  // there are fictional and sanitized.
+  quantityRules: [
+    {
+      code: "verification-spoil-removal-tonne-recipe",
+      stage: "line_item",
+      mode: "bulk_loading_disposal",
+      appliesToRuleCodes: ["verification-spoil-removal-tonne"],
+      loaderRuleCode: "verification-loader-hour",
+      disposalRuleCode: "verification-fill-disposal-tonne",
+      loadingHoursPerLoad: 0.4,
+      truckVolumeCapacityM3: 2,
+    },
+    {
+      code: "verification-spoil-removal-load-recipe",
+      stage: "line_item",
+      mode: "bulk_loading_disposal",
+      appliesToRuleCodes: ["verification-spoil-removal-load"],
+      loaderRuleCode: "verification-loader-hour",
+      disposalRuleCode: "verification-waste-disposal-load",
+      loadingHoursPerLoad: 0.4,
+      truckVolumeCapacityM3: 2,
+    },
+    {
+      code: "verification-spoil-removal-volume-recipe",
+      stage: "line_item",
+      mode: "bulk_loading_disposal",
+      appliesToRuleCodes: ["verification-spoil-removal-volume"],
+      loaderRuleCode: "verification-loader-hour",
+      disposalRuleCode: "verification-material-disposal-m3",
+      loadingHoursPerLoad: 0.4,
+      truckVolumeCapacityM3: 2,
+    },
+  ],
+  rules: [
+    { code: "concrete-surface-demolition", label: "Concrete surface demolition", defaultQuantity: 1, quantityUnit: "m2" },
+    { code: "tip-truck", label: "Tip-truck haulage", defaultQuantity: 1, quantityUnit: "load" },
+    { code: "imported-fill", label: "Imported fill", defaultQuantity: 1, quantityUnit: "m3" },
+    { code: "block-edging-supply-install", label: "Block edging supply and install", defaultQuantity: 1, quantityUnit: "m" },
+    { code: "plant-supply-install", label: "Plant supply and install", defaultQuantity: 1, quantityUnit: "each" },
+    { code: "irrigation-system-install", label: "Irrigation system install", defaultQuantity: 1, quantityUnit: "job" },
+    { code: "retaining-wall", label: "Retaining wall construction", defaultQuantity: 1, quantityUnit: "m" },
+    { code: "drainage", label: "Drainage installation", defaultQuantity: 1, quantityUnit: "m" },
+    { code: "site-establishment", label: "Site establishment", defaultQuantity: 1, quantityUnit: "job" },
+    { code: "cleanup", label: "Site cleanup", defaultQuantity: 1, quantityUnit: "job" },
+    { code: "verification-loader-hour", label: "Verification loader hour (fictional demo rate)", defaultQuantity: 1, quantityUnit: "hour" },
+    {
+      code: "verification-spoil-removal-tonne",
+      label: "Spoil removal and disposal — weight basis (demo)",
+      defaultQuantity: 1,
+      quantityUnit: "m3",
+      useWhen: "verification demo: disposal billed per tonne",
+      quantitySource: "volume",
+    },
+    {
+      code: "verification-spoil-removal-load",
+      label: "Spoil removal and disposal — load basis (demo)",
+      defaultQuantity: 1,
+      quantityUnit: "m3",
+      useWhen: "verification demo: disposal billed per load",
+      quantitySource: "volume",
+    },
+    {
+      code: "verification-spoil-removal-volume",
+      label: "Spoil removal and disposal — volume basis (demo)",
+      defaultQuantity: 1,
+      quantityUnit: "m3",
+      useWhen: "verification demo: disposal billed per m3",
+      quantitySource: "volume",
+    },
+    { code: "verification-fill-disposal-tonne", label: "Fictional fill disposal — per tonne (demo)", defaultQuantity: 1, quantityUnit: "tonne" },
+    { code: "verification-waste-disposal-load", label: "Fictional waste disposal — per load (demo)", defaultQuantity: 1, quantityUnit: "load" },
+    { code: "verification-material-disposal-m3", label: "Fictional material disposal — per m3 (demo)", defaultQuantity: 1, quantityUnit: "m3" },
+  ],
+}
