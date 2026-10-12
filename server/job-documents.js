@@ -16,6 +16,7 @@ import {
   stripInvoiceRevisionSuffix,
 } from "./invoice-revisions.js";
 import { ARTIFACT_STATE } from "./invoice-artifact-state.js";
+import { isSequenceInvoiceNumber } from "./invoices/numbers.js";
 
 export const JOB_DOCUMENT_TYPES = ["quote", "invoice", "receipt"];
 export const MILESTONE_INVOICE_STATUSES = ["draft", "authorised", "paid"];
@@ -810,6 +811,31 @@ function resolveMilestoneInvoiceNumber({
   return existing === legacy ? next : existing;
 }
 
+// The base a milestone's provisional numbers are built from. A draft, or a
+// revision about to be issued, carries a provisional number (EI-…-M<n>, with
+// -R<k> for a later revision) until the issue service gives it its number
+// from the sequence (server/invoices/issue.js). Once a milestone has been
+// issued with an INV-… number, that number is the issued document's and never
+// a base: a draft after an unsend, or the next revision, goes back to the
+// provisional EI-…-M<n>.
+function provisionalInvoiceBaseNumber({
+  invoiceNumber = null,
+  meta = null,
+  quote = null,
+  milestoneIndex = 0,
+  milestoneInvoice = null,
+} = {}) {
+  if (!isSequenceInvoiceNumber(stripInvoiceRevisionSuffix(invoiceNumber))) {
+    return stripInvoiceRevisionSuffix(invoiceNumber);
+  }
+  return buildMilestoneInvoiceNumber({
+    meta,
+    quote,
+    milestoneIndex,
+    milestoneInvoice: { ...(milestoneInvoice || {}), invoiceNumber: null },
+  });
+}
+
 export function buildMilestoneInvoicePdfPath(milestoneInvoice = null) {
   const fallback = `milestone-${Number(milestoneInvoice?.milestoneIndex || 0) + 1}`;
   const safeInvoiceNumber = String(milestoneInvoice?.invoiceNumber || fallback)
@@ -1230,12 +1256,18 @@ export function buildMilestoneInvoices({
     const subtotal = subtotalAllocations[milestoneIndex];
     const total = totalAllocations[milestoneIndex];
     const gst = frozenRevision ? frozenRevision.gst : roundMoney(total - subtotal);
-    const baseInvoiceNumber = stripInvoiceRevisionSuffix(resolveMilestoneInvoiceNumber({
-      milestoneInvoice: existingMilestone,
+    const baseInvoiceNumber = provisionalInvoiceBaseNumber({
+      invoiceNumber: resolveMilestoneInvoiceNumber({
+        milestoneInvoice: existingMilestone,
+        meta,
+        quote,
+        milestoneIndex,
+      }),
       meta,
       quote,
       milestoneIndex,
-    }));
+      milestoneInvoice: existingMilestone,
+    });
     const receiptNumber = cleanText(existingMilestone?.receiptNumber) || buildMilestoneReceiptNumber({
       meta,
       quote,
@@ -1382,7 +1414,12 @@ export function applyMilestoneInvoiceRevisionState(milestoneInvoice = null, {
     issuedRevision: milestoneInvoice.issuedRevision || null,
     revisionHistory: milestoneInvoice.revisionHistory || [],
     storedRevisionNumber: milestoneInvoice.revisionNumber || null,
-    baseInvoiceNumber: stripInvoiceRevisionSuffix(milestoneInvoice.invoiceNumber),
+    baseInvoiceNumber: provisionalInvoiceBaseNumber({
+      invoiceNumber: milestoneInvoice.invoiceNumber,
+      meta: milestoneInvoice,
+      milestoneIndex: milestoneInvoice.milestoneIndex,
+      milestoneInvoice,
+    }),
     isIssued,
     issuedAt: issuedAt || milestoneInvoice.issuedAt || null,
     quoteVersion,

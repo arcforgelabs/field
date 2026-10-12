@@ -22,7 +22,9 @@ totals, the job's totals and the API and MCP customer pricing are read from
 those rows, while the files are still written alongside. Phase 3 step 4a
 is built too (#27): every job's payment schedule, milestone invoices,
 payments and receipts are also written as rows and checked against what was
-issued; nothing reads them yet.
+issued. Step 4b part one is built too (#28): invoices are issued from the
+issue service, with `INV-YYYY-M-N` numbers allocated in the issue
+transaction (see "Phase 3, step by step").
 
 The owner's six decisions of 2026-10-12 (from the document audit) are
 recorded where they change the design: credit notes ("Invoices and
@@ -175,10 +177,15 @@ reused, from a per-type sequence: quotes `EQ-YYMM-NN` (as today). Revisions
 of a quote keep its number and add a version (`EQ-2501-03 v2`).
 
 > **Decision, 2026-10-12:** invoice numbers are
-> `INV-YYYY-MM-N`, from one sequence per organisation, allocated when the
+> `INV-YYYY-M-N`, from one sequence per organisation, allocated when the
 > invoice is issued (`document_number_counters`). An invoice connected to a
 > job carries the job number as a required reference. Numbers already issued
-> (`EI-…`) stay as they are.
+> (`EI-…`) stay as they are. **Decided 2026-10-13:** the month is not
+> zero-padded: January 2026 is `INV-2026-1-1`, October `INV-2026-10-2`.
+> Numbers are ordered by their period and sequence, never as text
+> (`compareDocumentNumbers`, `server/invoices/numbers.js`). **Built (#28,
+> step 4b part one):** see "How step
+> 4b issues invoices".
 
 ### Numbers, money and rounding
 
@@ -546,7 +553,7 @@ Milestone invoicing is used on 51 of 65 jobs, so it gets proper tables.
 >   revisions (`issuedRevision`, `revisionHistory`, the `-R2` and `-R3`
 >   numbers, `reviseJobMilestoneInvoice`) migrate as a credit note plus a
 >   new invoice (step 4b).
-> - **Numbers:** `INV-YYYY-MM-N`, one sequence per organisation, allocated
+> - **Numbers:** `INV-YYYY-M-N`, one sequence per organisation, allocated
 >   in the issue transaction, with the job number as a required reference
 >   (see "Identity"). Numbers already issued (`EI-…-M<n>`, `-R<k>`, `ER-…`
 >   receipts) stay exactly as issued.
@@ -569,7 +576,7 @@ Milestone invoicing is used on 51 of 65 jobs, so it gets proper tables.
 - `payment_milestones`: `uid`, `quote_uid`, `label` ("Deposit",
   "On completion"), `percent` or `amount`, `sort_order`. Defaults come from
   the account's rules.
-- `invoices`: `uid` (`inv_…`), `number` (`INV-YYYY-MM-N`), `quote_uid`,
+- `invoices`: `uid` (`inv_…`), `number` (`INV-YYYY-M-N`), `quote_uid`,
   `job_id` (the required reference), `milestone_uid` null, `kind`
   (`deposit`, `progress`, `final`, `variation`), `status` (`draft`,
   `issued`, `paid`, `void`), `issued_on`, `due_on`, `subtotal`,
@@ -592,7 +599,7 @@ differences:**
   `is_default_schedule` is ready for step 4c. Nothing today is known to
   come from account rules, so it is false.
 - `invoices` keep their numbers as issued (`EI-…-M<n>`, `EI-…-M<n>-R<k>`).
-  `INV-YYYY-MM-N` arrives with step 4b. `status` also has `credited`: a
+  `INV-YYYY-M-N` arrives with step 4b. `status` also has `credited`: a
   revision that was superseded in place is its own row, `credited`, and its
   successor names it in `supersedes_invoice_uid`, until step 4b adds the
   credit note that corrects it. A revision returned to draft (unsent, or
@@ -655,8 +662,10 @@ tables are filled alongside them and read only by the by-uid routes.
   `by`, `data` (recipients, Gmail message and thread ids, the delivery
   attempt) and an `idempotency_key`, so a retried write adds nothing.
 - `document_number_counters`: `(org_uid, document_type, period)` and
-  `last_value`, for allocating numbers in the database in phase 3. Nothing
-  uses it yet.
+  `last_value`. The invoice issue service advances the `invoice` counter
+  (period `YYYY-MM`, zero-padded so periods compare in order; the printed
+  number drops the zero) inside the issue transaction (step 4b). Quotes and
+  receipts do not use it yet.
 
 Rules:
 
@@ -667,7 +676,9 @@ Rules:
   2026-10-12). The `issued` event and the `emailed` event are separate
   facts. Step 2 records both and does not change when today's code considers
   something issued: a quote is issued when it is emailed, an invoice revision
-  when it is frozen. Issuing at finalisation arrives with documents built
+  when it is frozen. Since step 4b an invoice is issued at finalisation by
+  the issue service, and its emails are `emailed` or `email_failed` events
+  that carry the hash of the bytes sent. Quotes follow with documents built
   from rows.
 - **Same number, same bytes, or refused.** Recording a number again with the
   same bytes is a no-op. A resend that renders the PDF again keeps the issued
@@ -941,7 +952,7 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 3, part two | Quote reads from rows (#10): display columns (migration 0011); the quote PDF, the quote email's totals, the job's cached totals and the job detail's customer pricing (client and MCP) come from the rows; editor saves carry `If-Match` | Built |
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
 | 4a | Invoices, payments and receipts as rows (#27): `payment_milestones`, `invoices`, `invoice_lines`, `payments`, `receipts`, and the shape of `credit_notes` (migration 0013); dual-write after every committed milestone change; a backfill verified against what was issued | Built |
-| 4b | The issue service for invoices (#28): `INV-YYYY-MM-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Next |
+| 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Part one built (issue service, migration 0014); credit notes and claim lines next |
 | 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Later |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
@@ -1105,3 +1116,49 @@ nothing reads the rows yet. No customer document changes.
   note carries it across. A receipt today acknowledges everything paid on
   the milestone, so its row's amount can be more than the one payment it
   points at.
+
+How step 4b issues invoices (`server/invoices/issue.js`, #28, part one).
+The job files stay the source of truth for everything else; an invoice's
+number and bytes now come from PostgreSQL.
+
+- **When.** An invoice is issued when it is finalised: authorised ("Mark as
+  sent"), sent (before the email is attempted), or issued as a revision.
+  `persistMilestoneInvoiceState` (`server/job-actions.js`) finds every
+  milestone whose issued revision has no document yet, and issues each one
+  through the service before the job generation commits.
+- **One transaction.** Under the organisation's issue lock
+  (`pg_advisory_xact_lock`), the service allocates `INV-YYYY-M-N` from
+  `document_number_counters` (period: the issue time's month in the server's
+  local time, the date the PDF prints), renders the PDF once with that number
+  and the job reference, stores the bytes in `document_blobs` with an
+  `issued_documents` row and an `issued` event, and writes the issued
+  `invoices` row and its claim line (migration `0014_invoice_issue`:
+  `issue_key`, a check that such an invoice has its reference and a sequence
+  number, and a sequence number unique in the organisation). After it
+  commits, the R2 replica copies the bytes.
+- **No gaps, never reused.** The counter only moves in that transaction: an
+  issue that fails (the render throws, the job has no job number) rolls it
+  back. The milestone takes the number and the stored bytes are written at
+  its PDF path, so the file and the issued document are the same bytes.
+- **Idempotent.** The issue key names the job, the milestone, the revision
+  and a hash of the money. A retried issue (say the job generation failed
+  after the transaction committed) returns the same invoice, number and
+  bytes and allocates nothing.
+- **Reference.** The job number (the quote's, else the job's, else the job
+  part of the quote number) is the invoice's required reference, printed as
+  "Job reference" and stored on the row. With none, issuing is refused.
+- **Drafts.** A draft is tracked under its provisional `EI-…-M<n>` and its
+  preview prints "Draft, not yet issued" and no payment reference. After an
+  unsend it goes back to the provisional number; issuing the same content
+  again restores the invoice it was, under its number.
+- **Email is delivery.** The `emailed` event carries the hash of the bytes
+  sent; a resend sends the stored bytes. A failed email is an `email_failed`
+  event and never undoes the issue.
+- **Receipts** keep `ER-…-M<n>` in this step: they are not yet issued
+  through a service, and moving them to a sequence is a later change.
+- **Without a database** the server installs an issuer that refuses, so
+  authorising or sending an invoice answers 503; invoice and quote sends
+  already need the database for their snapshots.
+- **Invoice rows.** The row the issue writes is mapped exactly as the job's
+  files map it afterwards (`mapInvoiceForIssue`), so the dual-write finds it
+  unchanged and only fills its links.
