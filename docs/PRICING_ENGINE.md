@@ -19,7 +19,10 @@ them). Phase 3 step 3 parts one and two are built too: every quote version
 is also written as `quotes`, `quote_sections` and `quote_lines` rows and
 checked against what Field shows, and the quote PDF, the quote email's
 totals, the job's totals and the API and MCP customer pricing are read from
-those rows, while the files are still written alongside.
+those rows, while the files are still written alongside. Phase 3 step 4a
+is built too (#27): every job's payment schedule, milestone invoices,
+payments and receipts are also written as rows and checked against what was
+issued; nothing reads them yet.
 
 The owner's six decisions of 2026-10-12 (from the document audit) are
 recorded where they change the design: credit notes ("Invoices and
@@ -539,15 +542,29 @@ Milestone invoicing is used on 51 of 65 jobs, so it gets proper tables.
 > **Decisions, 2026-10-12:**
 >
 > - **An issued invoice is never revised in place.** It is corrected with a
->   credit (adjustment) note against it, then a new invoice. Today's `-R2`
->   revisions migrate as a credit note plus a new invoice.
+>   credit (adjustment) note against it, then a new invoice. Today's in-place
+>   revisions (`issuedRevision`, `revisionHistory`, the `-R2` and `-R3`
+>   numbers, `reviseJobMilestoneInvoice`) migrate as a credit note plus a
+>   new invoice (step 4b).
 > - **Numbers:** `INV-YYYY-MM-N`, one sequence per organisation, allocated
->   at issue, with the job number as a required reference (see "Identity").
+>   in the issue transaction, with the job number as a required reference
+>   (see "Identity"). Numbers already issued (`EI-…-M<n>`, `-R<k>`, `ER-…`
+>   receipts) stay exactly as issued.
+> - **Bytes** go in `document_blobs`, with the R2 replica (#12).
+> - **A document is issued when it is finalised.** Email is delivery,
+>   tracked separately (`document_events`).
 > - **Milestone invoices show claim lines**, one per milestone, each
->   referencing the quote. Milestone defaults come from account-wide rules
->   by contract value, with per-job overrides that are visibly marked.
->   The first rules follow South Australia's domestic building deposit limits:
->   at most $1,000 under $20,000, at most 5 % from $20,000.
+>   referencing the quote ("Deposit, 50 % of EQ-2501-03 v2"), not the full
+>   quote schedule.
+> - **Milestone defaults come from account rules by contract value,**
+>   entered as data and never hard-coded, with per-job overrides that are
+>   visibly marked. A rule can cap a milestone, and each cap either warns or
+>   blocks issuing. An example rule set for a South Australian builder: a
+>   deposit of at most $1,000 under a $20,000 contract value, and at most
+>   5 % from $20,000.
+> - **GST is worked out once on the subtotal per tax rate,** in integer
+>   cents, half up (`shared/money.js` `taxOnSubtotal`). Money columns follow
+>   "Numbers, money and rounding".
 
 - `payment_milestones`: `uid`, `quote_uid`, `label` ("Deposit",
   "On completion"), `percent` or `amount`, `sort_order`. Defaults come from
@@ -565,6 +582,48 @@ Milestone invoicing is used on 51 of 65 jobs, so it gets proper tables.
   v2"), each pointing at the quote.
 - `payments`: `uid`, `invoice_uid`, `amount`, `paid_on`, `method`,
   `reference`. Receipts are generated from payments.
+
+**Built (step 4a, #27, migration `0013_invoice_rows`), with these
+differences:**
+
+- `payment_milestones` belongs to the job (`job_id`, `sort_order` = today's
+  milestone index) and points at the quote version it bills (`quote_uid`,
+  null while that version has no rows). It keeps `due_days`, and
+  `is_default_schedule` is ready for step 4c. Nothing today is known to
+  come from account rules, so it is false.
+- `invoices` keep their numbers as issued (`EI-…-M<n>`, `EI-…-M<n>-R<k>`).
+  `INV-YYYY-MM-N` arrives with step 4b. `status` also has `credited`: a
+  revision that was superseded in place is its own row, `credited`, and its
+  successor names it in `supersedes_invoice_uid`, until step 4b adds the
+  credit note that corrects it. A revision returned to draft (unsent, or
+  marked unpaid) is `void`; re-issuing the same content restores it under
+  the same number. `revision`, `quote_version` (with
+  `quote_version_inferred` for an invoice from before revisions were
+  tracked), `issued_at`, `issued_document_uid` and `reference` (the job
+  number; required from step 4b) are columns. `tax_total_source` works as
+  on quotes: a milestone's GST is its share of the quote's GST, so where
+  that differs from GST on its own subtotal the invoice keeps the GST it was
+  issued with, `printed`, with the reason.
+- `invoice_lines` hold what the invoice PDF claims: one `claim` line, the
+  milestone's share of the quote ex GST, against the quote. Today's PDF also
+  prints the quote's schedule, which is the quote's rows.
+- `credit_notes` and `credit_note_lines` exist with their checks and
+  triggers. Nothing writes them until step 4b.
+- `payments` belong to the invoice they were recorded against
+  (`sourceInvoiceNumber`), keep `voided_at`, `void_reason` and
+  `voided_by`, and are never deleted. A payment the files drop ("mark
+  unpaid" clears them) is voided. An invoice's `amount_paid` is the sum of
+  its active payments.
+- `receipts` are one per payment. Today a receipt is issued for a milestone
+  once it is paid in full. Its row is for the payment that cleared it, with
+  the amount it acknowledges, and is voided if that payment is.
+- **Issued never changes, in the database.** Once an invoice or credit note
+  has an issue time, triggers refuse any change to its number, money, lines
+  or issue time, setting it back to draft, and deleting it, for the table
+  owner too. Its status, amount paid, due date, kind and note may change,
+  and links missing when it was written are filled once. Payments may only
+  be voided, once; receipts may only be voided. `TRUNCATE` is always
+  refused.
 
 ### `document_events` and `issued_documents`
 
@@ -740,7 +799,9 @@ Rules for the migration:
   refuses the migration. Built as `scripts/backfill-quote-rows.js` (#6;
   see "Phase 3, step by step"), which refuses per job.
 - Milestone state becomes `payment_milestones`, and issued revisions become
-  issued `invoices` with their stored PDFs.
+  issued `invoices` with their stored PDFs. Built as
+  `scripts/backfill-invoice-rows.js` (#27), which verifies every issued
+  invoice against its PDF and refuses per job.
 - The old files stay read-only in the job folder until the watch period ends.
 
 ## Price book UI
@@ -877,7 +938,9 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 3, part one | Quotes as rows (#6): `quotes`, `quote_sections`, `quote_lines` (migration 0010), one `quoteTotals`, the quote service, dual-write after every committed quote change, and a backfill that verifies every version to the cent | Built |
 | 3, part two | Quote reads from rows (#10): display columns (migration 0011); the quote PDF, the quote email's totals, the job's cached totals and the job detail's customer pricing (client and MCP) come from the rows; editor saves carry `If-Match` | Built |
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
-| 4 | Invoices, credit notes, payments and receipts as rows; `INV-YYYY-MM-N` numbers allocated at issue; claim-line milestone invoices and milestone rules | Later |
+| 4a | Invoices, payments and receipts as rows (#27): `payment_milestones`, `invoices`, `invoice_lines`, `payments`, `receipts`, and the shape of `credit_notes` (migration 0013); dual-write after every committed milestone change; a backfill verified against what was issued | Built |
+| 4b | The issue service for invoices (#28): `INV-YYYY-MM-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (existing revisions migrate); issue separate from email; claim-line invoice documents | Next |
+| 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Later |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
 How step 2 fills the tables:
@@ -995,3 +1058,45 @@ How step 3 part two reads the quote tables (`server/quotes/read-model.js`,
   its engine rows point at engine line items that rows do not carry until
   the engine goes (phase 4). It reads its saved totals from the rows
   through the job detail. Editing rows directly is part three.
+
+How step 4a fills the invoice tables (`server/invoices/`, #27). The job
+files (`milestone-invoices/state.json`) stay the source of truth, and
+nothing reads the rows yet. No customer document changes.
+
+- **Mapping** (`from-milestones.js`). Each milestone is a
+  `payment_milestones` row. Each issued revision is an issued invoice under
+  its number exactly as issued: the current one `issued` (or `paid`), one
+  superseded by a revision `credited`, one returned to draft `void`. An
+  invoice issued before revisions were frozen maps from its stored record.
+  A draft milestone is a draft invoice under its provisional number. Totals
+  are as issued and never recomputed. Payments keep their dates, method,
+  reference and void details. A paid milestone's receipt keeps its `ER-…`
+  number.
+- **Checks** (`sync.js`). Each issued invoice's subtotal, GST and total
+  must equal its stored revision and, where its PDF can be read (the issued
+  document's bytes, else the revision's stored PDF, hash-checked), the
+  totals the PDF printed (`issued-totals.js` reads the "This claim" box).
+  Each milestone's active payments must add up to the amount paid Field
+  shows. Issued invoices must not claim more than the quote. Where the
+  drafts were built against an earlier quote, the difference is a warning:
+  Field rebuilds them on the next milestone action. A job that fails is
+  reported with both numbers, and nothing is written for it.
+- **Live.** After every committed job generation, after the quote rows,
+  the recorder writes the job's invoice rows. After an invoice or receipt
+  email the send path syncs again, so the rows link the issued document. A
+  failure is logged and counted under `invoiceRows` in
+  `GET /api/storage/status`, and never fails the action. Without a
+  database it is skipped with a log line.
+- **Backfill.** `node scripts/backfill-invoice-rows.js [--dry-run]
+  [--json] [--data-dir <dir> | --from-storage]` writes every job that
+  passes and refuses the rest (exit 2). A second run writes nothing new.
+  Run the quote-row backfill first, so invoices link their quote versions.
+  Production runs it from the stored files (`docs/REPLIT.md`, "Invoice rows
+  backfill").
+- **What does not reproduce exactly.** A payment recorded against a
+  revision that was later superseded stays on that revision (that is what
+  the payment record says), so the new revision's `amount_paid` can be
+  lower than the milestone's amount paid in the files; step 4b's credit
+  note carries it across. A receipt today acknowledges everything paid on
+  the milestone, so its row's amount can be more than the one payment it
+  points at.

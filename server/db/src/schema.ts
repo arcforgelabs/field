@@ -1222,3 +1222,445 @@ export const documentBlobReplicas = pgTable(
     tenantIsolation("document_blob_replicas"),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Invoices, payments and receipts as rows (#27, pricing engine phase 3 step
+// 4a; docs/PRICING_ENGINE.md "Invoices and payments"). In this step the job
+// files (milestone-invoices/state.json) stay the source of truth: the rows
+// are written alongside them after every committed milestone change and by a
+// verified backfill (server/invoices/), and nothing reads them yet.
+//
+// Numbers stay exactly as issued (EI-…-M1, EI-…-M1-R2, ER-…-M1). An invoice
+// revision superseded in place is its own row, `credited`; step 4b (#28) adds
+// the credit note that corrects it and stops revising in place.
+// `credit_notes` and `credit_note_lines` are created now for that step and
+// have no writer yet.
+//
+// Money follows "Numbers, money and rounding" as quote rows do. An issued
+// invoice keeps the totals it was issued with: its GST is `printed` (with the
+// reason) where a milestone's GST, allocated from the quote's, differs from
+// GST worked out on its own subtotal.
+//
+// Issued never changes (migration 0013): once an invoice or credit note has
+// an issue time, triggers refuse any change to its number, money, lines or
+// issue time, and deleting it, for the table owner as well as field_app. Its
+// status may still move on (issued -> paid, credited, void), its amount paid
+// and due date follow payments and terms, and links that were missing may be
+// filled once. Payments are never deleted: a payment is voided. Receipts are
+// issued when written and may only be voided.
+
+export const INVOICE_KINDS = ["deposit", "progress", "final", "variation"] as const;
+export type InvoiceKind = (typeof INVOICE_KINDS)[number];
+export const INVOICE_STATUSES = ["draft", "issued", "paid", "void", "credited"] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+export const CREDIT_NOTE_STATUSES = ["draft", "issued", "void"] as const;
+export type CreditNoteStatus = (typeof CREDIT_NOTE_STATUSES)[number];
+export const RECEIPT_STATUSES = ["issued", "void"] as const;
+export type ReceiptStatus = (typeof RECEIPT_STATUSES)[number];
+export const INVOICE_LINE_TYPES = ["claim", "item", "custom", "note"] as const;
+export type InvoiceLineType = (typeof INVOICE_LINE_TYPES)[number];
+
+/** A job's payment schedule: one row per milestone, in order. */
+export const paymentMilestones = pgTable(
+  "payment_milestones",
+  {
+    /** `pms_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    jobId: text("job_id").notNull(),
+    /** The quote version the schedule bills; null while that version has no rows (or a legacy job). */
+    quoteUid: text("quote_uid"),
+    label: text("label").notNull(),
+    /** Percent of the quote total (50 means 50 %); 0 beside a fixed amount. */
+    percent: numeric("percent", { precision: 7, scale: 3 }),
+    /** A fixed amount inc GST, or null for a percentage. */
+    amount: numeric("amount", { precision: 12, scale: 2 }),
+    dueDays: integer("due_days"),
+    /** The milestone's place in the schedule (today's milestone index). */
+    sortOrder: integer("sort_order").notNull(),
+    /** From the account's default rules (step 4c, #29); false for a schedule set on the job. */
+    isDefaultSchedule: boolean("is_default_schedule").notNull().default(false),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+    version: integer("version").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("payment_milestones_org_uid_key").on(t.orgUid, t.uid),
+    uniqueIndex("payment_milestones_org_job_sort_key").on(t.orgUid, t.jobId, t.sortOrder),
+    foreignKey({
+      name: "payment_milestones_quote_fk",
+      columns: [t.orgUid, t.quoteUid],
+      foreignColumns: [quotes.orgUid, quotes.uid],
+    }),
+    check("payment_milestones_uid_check", sql`${t.uid} ~ '^pms_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("payment_milestones_share_check", sql`(${t.percent} is not null and ${t.percent} > 0 and ${t.percent} <= 100) or (${t.amount} is not null and ${t.amount} > 0)`),
+    check("payment_milestones_sort_order_check", sql`${t.sortOrder} >= 0`),
+    check("payment_milestones_due_days_check", sql`${t.dueDays} is null or ${t.dueDays} > 0`),
+    check("payment_milestones_version_check", sql`${t.version} > 0`),
+    tenantIsolation("payment_milestones"),
+  ],
+);
+
+/** One row per invoice as issued (or the draft a milestone will issue). */
+export const invoices = pgTable(
+  "invoices",
+  {
+    /** `inv_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    jobId: text("job_id").notNull(),
+    /** As printed: EI-2501-01-M1, EI-2501-01-M1-R2 (INV-YYYY-MM-N from step 4b). */
+    number: text("number").notNull(),
+    kind: text("kind").$type<InvoiceKind>().notNull(),
+    status: text("status").$type<InvoiceStatus>().notNull().default("draft"),
+    quoteUid: text("quote_uid"),
+    /** The quote version it was issued against; `quote_version_inferred` when that is a best guess (an invoice from before revisions were tracked). */
+    quoteVersion: integer("quote_version"),
+    quoteVersionInferred: boolean("quote_version_inferred").notNull().default(false),
+    milestoneUid: text("milestone_uid"),
+    /** 1 for the original number, k for -Rk. */
+    revision: integer("revision").notNull().default(1),
+    /** The invoice this revision replaced in place (before credit notes). */
+    supersedesInvoiceUid: text("supersedes_invoice_uid"),
+    issuedAt: timestamp("issued_at", { withTimezone: true, mode: "date" }),
+    issuedOn: date("issued_on", { mode: "string" }),
+    dueOn: date("due_on", { mode: "string" }),
+    currency: text("currency").notNull().default("AUD"),
+    subtotal: numeric("subtotal", { precision: 12, scale: 2 }).notNull(),
+    taxTotal: numeric("tax_total", { precision: 12, scale: 2 }).notNull(),
+    total: numeric("total", { precision: 12, scale: 2 }).notNull(),
+    /** `computed`: GST on the subtotal. `printed`: the GST the invoice was issued with, with the reason. */
+    taxTotalSource: text("tax_total_source").$type<LineTotalSource>().notNull().default("computed"),
+    taxTotalReason: text("tax_total_reason"),
+    /** Sum of the active payments recorded against this invoice. */
+    amountPaid: numeric("amount_paid", { precision: 12, scale: 2 }).notNull().default("0"),
+    issuedDocumentUid: text("issued_document_uid"),
+    /** The job reference (required from step 4b). */
+    reference: text("reference"),
+    supersededAt: timestamp("superseded_at", { withTimezone: true, mode: "date" }),
+    revisionReason: text("revision_reason"),
+    revisedBy: text("revised_by"),
+    /** Why the status is what it is, where the files say more than the status. */
+    note: text("note"),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+    version: integer("version").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("invoices_org_uid_key").on(t.orgUid, t.uid),
+    uniqueIndex("invoices_org_job_number_key").on(t.orgUid, t.jobId, t.number),
+    index("invoices_org_number_idx").on(t.orgUid, t.number),
+    index("invoices_milestone_idx").on(t.orgUid, t.milestoneUid),
+    foreignKey({
+      name: "invoices_quote_fk",
+      columns: [t.orgUid, t.quoteUid],
+      foreignColumns: [quotes.orgUid, quotes.uid],
+    }),
+    foreignKey({
+      name: "invoices_milestone_fk",
+      columns: [t.orgUid, t.milestoneUid],
+      foreignColumns: [paymentMilestones.orgUid, paymentMilestones.uid],
+    }),
+    foreignKey({
+      name: "invoices_supersedes_fk",
+      columns: [t.orgUid, t.supersedesInvoiceUid],
+      foreignColumns: [t.orgUid, t.uid],
+    }),
+    foreignKey({
+      name: "invoices_issued_document_fk",
+      columns: [t.orgUid, t.issuedDocumentUid],
+      foreignColumns: [issuedDocuments.orgUid, issuedDocuments.uid],
+    }),
+    check("invoices_uid_check", sql`${t.uid} ~ '^inv_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("invoices_number_check", sql`btrim(${t.number}) <> ''`),
+    check("invoices_kind_check", sql`${t.kind} in ('deposit','progress','final','variation')`),
+    check("invoices_status_check", sql`${t.status} in ('draft','issued','paid','void','credited')`),
+    check("invoices_issued_check", sql`(${t.status} = 'draft') = (${t.issuedAt} is null)`),
+    check("invoices_currency_check", sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check("invoices_total_check", sql`${t.total} = ${t.subtotal} + ${t.taxTotal}`),
+    check("invoices_tax_total_source_check", sql`${t.taxTotalSource} in ('computed','printed') and (${t.taxTotalSource} = 'computed' or ${t.taxTotalReason} is not null)`),
+    check("invoices_amount_paid_check", sql`${t.amountPaid} >= 0`),
+    check("invoices_revision_check", sql`${t.revision} > 0`),
+    check("invoices_quote_version_check", sql`${t.quoteVersion} is null or ${t.quoteVersion} > 0`),
+    check("invoices_version_check", sql`${t.version} > 0`),
+    tenantIsolation("invoices"),
+  ],
+);
+
+/** An invoice's lines. A milestone invoice has one claim line against its quote. */
+export const invoiceLines = pgTable(
+  "invoice_lines",
+  {
+    /** `iln_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    invoiceUid: text("invoice_uid").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    /** claim (a share of a quote), item (catalogue), custom (typed in), note (text only). */
+    lineType: text("line_type").$type<InvoiceLineType>().notNull(),
+    /** The quote a claim line claims against. */
+    quoteUid: text("quote_uid"),
+    milestoneUid: text("milestone_uid"),
+    itemUid: text("item_uid"),
+    name: text("name").notNull(),
+    description: text("description"),
+    quantity: numeric("quantity", { precision: 14, scale: 4 }).notNull(),
+    unitCode: text("unit_code").notNull(),
+    unitSell: numeric("unit_sell", { precision: 12, scale: 4 }),
+    taxCode: text("tax_code").notNull(),
+    taxRate: numeric("tax_rate", { precision: 7, scale: 3 }).notNull(),
+    lineTotal: numeric("line_total", { precision: 12, scale: 2 }).notNull(),
+    lineTotalSource: text("line_total_source").$type<LineTotalSource>().notNull().default("computed"),
+    lineTotalReason: text("line_total_reason"),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+  },
+  (t) => [
+    uniqueIndex("invoice_lines_org_uid_key").on(t.orgUid, t.uid),
+    index("invoice_lines_invoice_idx").on(t.orgUid, t.invoiceUid, t.sortOrder),
+    foreignKey({
+      name: "invoice_lines_invoice_fk",
+      columns: [t.orgUid, t.invoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "invoice_lines_quote_fk",
+      columns: [t.orgUid, t.quoteUid],
+      foreignColumns: [quotes.orgUid, quotes.uid],
+    }),
+    foreignKey({
+      name: "invoice_lines_milestone_fk",
+      columns: [t.orgUid, t.milestoneUid],
+      foreignColumns: [paymentMilestones.orgUid, paymentMilestones.uid],
+    }),
+    check("invoice_lines_uid_check", sql`${t.uid} ~ '^iln_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("invoice_lines_line_type_check", sql`${t.lineType} in ('claim','item','custom','note')`),
+    check("invoice_lines_item_check", sql`${t.lineType} <> 'item' or ${t.itemUid} is not null`),
+    check("invoice_lines_note_check", sql`${t.lineType} <> 'note' or (${t.unitSell} is null and ${t.lineTotal} = 0)`),
+    check("invoice_lines_line_total_check", sql`case ${t.lineTotalSource}
+      when 'computed' then (${t.unitSell} is null and ${t.lineTotal} = 0) or ${t.lineTotal} = round(${t.quantity} * ${t.unitSell}, 2)
+      when 'printed' then ${t.lineTotalReason} is not null
+      else false end`),
+    check("invoice_lines_quantity_check", sql`${t.quantity} >= 0`),
+    tenantIsolation("invoice_lines"),
+  ],
+);
+
+/** A credit (adjustment) note against one issued invoice (written from step 4b). */
+export const creditNotes = pgTable(
+  "credit_notes",
+  {
+    /** `crn_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    jobId: text("job_id").notNull(),
+    number: text("number").notNull(),
+    invoiceUid: text("invoice_uid").notNull(),
+    status: text("status").$type<CreditNoteStatus>().notNull().default("draft"),
+    reason: text("reason").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true, mode: "date" }),
+    issuedOn: date("issued_on", { mode: "string" }),
+    currency: text("currency").notNull().default("AUD"),
+    /** Amounts credited, positive. */
+    subtotal: numeric("subtotal", { precision: 12, scale: 2 }).notNull(),
+    taxTotal: numeric("tax_total", { precision: 12, scale: 2 }).notNull(),
+    total: numeric("total", { precision: 12, scale: 2 }).notNull(),
+    taxTotalSource: text("tax_total_source").$type<LineTotalSource>().notNull().default("computed"),
+    taxTotalReason: text("tax_total_reason"),
+    issuedDocumentUid: text("issued_document_uid"),
+    reference: text("reference"),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+    version: integer("version").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("credit_notes_org_uid_key").on(t.orgUid, t.uid),
+    uniqueIndex("credit_notes_org_number_key").on(t.orgUid, t.number),
+    index("credit_notes_invoice_idx").on(t.orgUid, t.invoiceUid),
+    foreignKey({
+      name: "credit_notes_invoice_fk",
+      columns: [t.orgUid, t.invoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    foreignKey({
+      name: "credit_notes_issued_document_fk",
+      columns: [t.orgUid, t.issuedDocumentUid],
+      foreignColumns: [issuedDocuments.orgUid, issuedDocuments.uid],
+    }),
+    check("credit_notes_uid_check", sql`${t.uid} ~ '^crn_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("credit_notes_number_check", sql`btrim(${t.number}) <> ''`),
+    check("credit_notes_status_check", sql`${t.status} in ('draft','issued','void')`),
+    check("credit_notes_issued_check", sql`(${t.status} = 'draft') = (${t.issuedAt} is null)`),
+    check("credit_notes_currency_check", sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check("credit_notes_total_check", sql`${t.total} = ${t.subtotal} + ${t.taxTotal} and ${t.total} >= 0`),
+    check("credit_notes_tax_total_source_check", sql`${t.taxTotalSource} in ('computed','printed') and (${t.taxTotalSource} = 'computed' or ${t.taxTotalReason} is not null)`),
+    check("credit_notes_version_check", sql`${t.version} > 0`),
+    tenantIsolation("credit_notes"),
+  ],
+);
+
+export const creditNoteLines = pgTable(
+  "credit_note_lines",
+  {
+    /** `cnl_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    creditNoteUid: text("credit_note_uid").notNull(),
+    /** The invoice line it credits, when it credits one line. */
+    invoiceLineUid: text("invoice_line_uid"),
+    sortOrder: integer("sort_order").notNull(),
+    lineType: text("line_type").$type<InvoiceLineType>().notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    quantity: numeric("quantity", { precision: 14, scale: 4 }).notNull(),
+    unitCode: text("unit_code").notNull(),
+    unitSell: numeric("unit_sell", { precision: 12, scale: 4 }),
+    taxCode: text("tax_code").notNull(),
+    taxRate: numeric("tax_rate", { precision: 7, scale: 3 }).notNull(),
+    lineTotal: numeric("line_total", { precision: 12, scale: 2 }).notNull(),
+    lineTotalSource: text("line_total_source").$type<LineTotalSource>().notNull().default("computed"),
+    lineTotalReason: text("line_total_reason"),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+  },
+  (t) => [
+    uniqueIndex("credit_note_lines_org_uid_key").on(t.orgUid, t.uid),
+    index("credit_note_lines_credit_note_idx").on(t.orgUid, t.creditNoteUid, t.sortOrder),
+    foreignKey({
+      name: "credit_note_lines_credit_note_fk",
+      columns: [t.orgUid, t.creditNoteUid],
+      foreignColumns: [creditNotes.orgUid, creditNotes.uid],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "credit_note_lines_invoice_line_fk",
+      columns: [t.orgUid, t.invoiceLineUid],
+      foreignColumns: [invoiceLines.orgUid, invoiceLines.uid],
+    }),
+    check("credit_note_lines_uid_check", sql`${t.uid} ~ '^cnl_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("credit_note_lines_line_type_check", sql`${t.lineType} in ('claim','item','custom','note')`),
+    check("credit_note_lines_note_check", sql`${t.lineType} <> 'note' or (${t.unitSell} is null and ${t.lineTotal} = 0)`),
+    check("credit_note_lines_line_total_check", sql`case ${t.lineTotalSource}
+      when 'computed' then (${t.unitSell} is null and ${t.lineTotal} = 0) or ${t.lineTotal} = round(${t.quantity} * ${t.unitSell}, 2)
+      when 'printed' then ${t.lineTotalReason} is not null
+      else false end`),
+    check("credit_note_lines_quantity_check", sql`${t.quantity} >= 0`),
+    tenantIsolation("credit_note_lines"),
+  ],
+);
+
+/** Money received against an invoice. Never deleted: a mistaken payment is voided. */
+export const payments = pgTable(
+  "payments",
+  {
+    /** `pay_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    jobId: text("job_id").notNull(),
+    /** The invoice it was recorded against. */
+    invoiceUid: text("invoice_uid").notNull(),
+    milestoneUid: text("milestone_uid"),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    paidOn: date("paid_on", { mode: "string" }).notNull(),
+    method: text("method"),
+    reference: text("reference"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true, mode: "date" }).notNull(),
+    voidedAt: timestamp("voided_at", { withTimezone: true, mode: "date" }),
+    voidReason: text("void_reason"),
+    voidedBy: text("voided_by"),
+    /** Today's payment id in milestone-invoices/state.json, while the files are the source of truth. */
+    sourcePaymentId: text("source_payment_id"),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+    version: integer("version").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("payments_org_uid_key").on(t.orgUid, t.uid),
+    uniqueIndex("payments_org_job_source_key").on(t.orgUid, t.jobId, t.sourcePaymentId),
+    index("payments_invoice_idx").on(t.orgUid, t.invoiceUid),
+    foreignKey({
+      name: "payments_invoice_fk",
+      columns: [t.orgUid, t.invoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    foreignKey({
+      name: "payments_milestone_fk",
+      columns: [t.orgUid, t.milestoneUid],
+      foreignColumns: [paymentMilestones.orgUid, paymentMilestones.uid],
+    }),
+    check("payments_uid_check", sql`${t.uid} ~ '^pay_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("payments_amount_check", sql`${t.amount} > 0`),
+    check("payments_void_check", sql`${t.voidedAt} is not null or (${t.voidReason} is null and ${t.voidedBy} is null)`),
+    check("payments_version_check", sql`${t.version} > 0`),
+    tenantIsolation("payments"),
+  ],
+);
+
+/** A receipt, one per payment: today, for the payment that cleared its milestone. */
+export const receipts = pgTable(
+  "receipts",
+  {
+    /** `rct_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    jobId: text("job_id").notNull(),
+    /** As printed: ER-2501-01-M1. */
+    number: text("number").notNull(),
+    paymentUid: text("payment_uid").notNull(),
+    invoiceUid: text("invoice_uid").notNull(),
+    status: text("status").$type<ReceiptStatus>().notNull().default("issued"),
+    /** What the receipt acknowledges as paid. */
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    currency: text("currency").notNull().default("AUD"),
+    issuedAt: timestamp("issued_at", { withTimezone: true, mode: "date" }).notNull(),
+    issuedOn: date("issued_on", { mode: "string" }).notNull(),
+    issuedDocumentUid: text("issued_document_uid"),
+    createdAt: createdAt(),
+    createdBy: text("created_by"),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+    version: integer("version").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("receipts_org_uid_key").on(t.orgUid, t.uid),
+    uniqueIndex("receipts_org_payment_key").on(t.orgUid, t.paymentUid),
+    uniqueIndex("receipts_org_job_number_issued_key").on(t.orgUid, t.jobId, t.number).where(sql`${t.status} = 'issued'`),
+    foreignKey({
+      name: "receipts_payment_fk",
+      columns: [t.orgUid, t.paymentUid],
+      foreignColumns: [payments.orgUid, payments.uid],
+    }),
+    foreignKey({
+      name: "receipts_invoice_fk",
+      columns: [t.orgUid, t.invoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    foreignKey({
+      name: "receipts_issued_document_fk",
+      columns: [t.orgUid, t.issuedDocumentUid],
+      foreignColumns: [issuedDocuments.orgUid, issuedDocuments.uid],
+    }),
+    check("receipts_uid_check", sql`${t.uid} ~ '^rct_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("receipts_number_check", sql`btrim(${t.number}) <> ''`),
+    check("receipts_status_check", sql`${t.status} in ('issued','void')`),
+    check("receipts_amount_check", sql`${t.amount} > 0`),
+    check("receipts_currency_check", sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check("receipts_version_check", sql`${t.version} > 0`),
+    tenantIsolation("receipts"),
+  ],
+);
+
+export type PaymentMilestone = typeof paymentMilestones.$inferSelect;
+export type Invoice = typeof invoices.$inferSelect;
+export type InvoiceLine = typeof invoiceLines.$inferSelect;
+export type CreditNote = typeof creditNotes.$inferSelect;
+export type CreditNoteLine = typeof creditNoteLines.$inferSelect;
+export type Payment = typeof payments.$inferSelect;
+export type Receipt = typeof receipts.$inferSelect;

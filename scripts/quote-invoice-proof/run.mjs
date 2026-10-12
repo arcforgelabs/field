@@ -38,7 +38,9 @@
 // storage-restart.json (compare.mjs ignores storage-* files) and any
 // difference fails the run. On checkouts with issued documents and
 // quote rows (#6) it also checks those tables against what was sent
-// (storage-documents.json, storage-backfill.json, storage-quote-rows.json).
+// (storage-documents.json, storage-backfill.json, storage-quote-rows.json),
+// and on checkouts with invoice rows (#27) job A's invoices, payment and
+// receipt (storage-invoice-rows.json).
 //
 // PROOF_R2_REPLICA=minio (with PROOF_STORAGE=postgres) also turns on the R2
 // replica of issued documents (#12, FIELD_DOCUMENT_REPLICA=r2) against a
@@ -78,6 +80,9 @@ const HAS_ISSUED_DOCUMENTS = existsSync(join(repoRoot, "server/documents/routes.
 // Checkouts with quote rows (#6, server/quotes/).
 const HAS_QUOTE_ROWS = existsSync(join(repoRoot, "server/quotes/backfill.js"));
 let quoteRowStatus = null;
+// Checkouts with invoice rows (#27, server/invoices/).
+const HAS_INVOICE_ROWS = existsSync(join(repoRoot, "server/invoices/backfill.js"));
+let invoiceRowStatus = null;
 // Checkouts whose quote documents and totals are read from the rows (#10).
 const HAS_QUOTE_READS = existsSync(join(repoRoot, "server/quotes/read-model.js"));
 let quoteReadStatus = null;
@@ -245,6 +250,7 @@ try {
     const status = await syncJson("GET", "/api/storage/status");
     quoteRowStatus = status.quoteRows;
     quoteReadStatus = status.quoteReads || null;
+    invoiceRowStatus = status.invoiceRows || null;
   }
   if (REPLICA_MODE) await replicaProof([aid, bid]);
 } catch (error) {
@@ -262,6 +268,7 @@ try {
       if (!process.exitCode) await proveRestartFromEmptyDisk();
       if (!process.exitCode && HAS_ISSUED_DOCUMENTS) await backfillProof();
       if (!process.exitCode && HAS_QUOTE_ROWS) await quoteRowsProof(restartChecks.ids);
+      if (!process.exitCode && HAS_INVOICE_ROWS) await invoiceRowsProof(restartChecks.ids);
       if (!process.exitCode && REPLICA_MODE) await verifyR2Proof();
     } catch (error) {
       writeFileSync(join(outDir, "storage-ERROR.txt"), `${error.stack}\n`);
@@ -561,6 +568,87 @@ async function quoteRowsProof({ aid, bid }) {
   writeFileSync(join(outDir, "storage-quote-rows.json"), `${JSON.stringify(report, null, 2)}\n`);
   console.log(`quote rows proof: ${report.ok ? "OK" : "FAILED"} (${report.checks.filter((entry) => entry.ok).length}/${report.checks.length} checks)`);
   if (!report.ok) throw new Error(`quote rows proof failed: ${JSON.stringify(report.checks.filter((entry) => !entry.ok))}`);
+}
+
+// Invoice rows (#27): the live dual-write left job A's milestone invoices as
+// rows. Invoice 0 is paid, with exactly the subtotal, GST and total printed on
+// the invoice PDF the proof fetched (a08) and a claim line for its subtotal,
+// linked to its issued document; its payment (a11) and its receipt, linked to
+// the receipt that was emailed (a12), are rows too; invoice 1 is a draft. The
+// backfill over the data directory then verifies every issued invoice against
+// its PDF and finds nothing to write. Results go to storage-invoice-rows.json
+// (compare.mjs ignores storage-* files).
+async function invoiceRowsProof({ aid }) {
+  const load = (rel) => import(pathToFileURL(join(repoRoot, rel)).href);
+  const { extractInvoicePdfTotals } = await load("server/invoices/issued-totals.js");
+  const run = (extra) => {
+    try {
+      const source = extra.includes("--from-storage") ? [] : ["--data-dir", dataDir];
+      return { code: 0, report: JSON.parse(execFileSync(process.execPath, [join(repoRoot, "scripts/backfill-invoice-rows.js"), "--json", ...source, ...extra], {
+        cwd: repoRoot,
+        env: { PATH: baseEnv.PATH, HOME: root, FIELD_DB_URL: storageDb.url, FIELD_CONFIG: configPath },
+      }).toString()) };
+    } catch (error) {
+      return { code: error.status, report: JSON.parse(error.stdout?.toString() || "null"), stderr: error.stderr?.toString() || "" };
+    }
+  };
+  const report = { checks: [], ok: true, live: invoiceRowStatus };
+  const check = (name, ok, detail = null) => {
+    report.checks.push({ name, ok: Boolean(ok), ...(detail == null ? {} : { detail }) });
+    if (!ok) report.ok = false;
+  };
+  check("the live dual-write recorded without failures, mismatches or conflicts", invoiceRowStatus?.enabled && invoiceRowStatus.failures === 0
+    && invoiceRowStatus.mismatches === 0 && invoiceRowStatus.conflicts === 0 && invoiceRowStatus.written > 0, invoiceRowStatus);
+  const dry = run(["--dry-run"]);
+  const real = run([]);
+  report.dryRun = dry.report;
+  report.run = real.report;
+  const clean = (result) => result.code === 0 && result.report && result.report.mismatches.length === 0
+    && result.report.conflicts.length === 0 && result.report.errors.length === 0 && result.report.jobsRefused === 0;
+  check("the backfill dry run verifies every invoice and finds nothing to write", clean(dry)
+    && Object.keys(dry.report.actions).every((action) => action === "unchanged"), { code: dry.code, actions: dry.report?.actions, stderr: dry.stderr });
+  check("a real backfill run writes nothing new", clean(real)
+    && Object.keys(real.report.actions).every((action) => action === "unchanged"), { code: real.code, actions: real.report?.actions });
+  // As production runs it (docs/REPLIT.md): the files restored from durable storage.
+  const stored = run(["--from-storage", "--dry-run"]);
+  report.fromStorage = stored.report;
+  check("--from-storage restores the stored files, verifies the same jobs and finds nothing to write", clean(stored)
+    && stored.report.jobsWithMilestones === real.report?.jobsWithMilestones && stored.report.invoices === real.report?.invoices
+    && Object.keys(stored.report.actions).every((action) => action === "unchanged"), { code: stored.code, actions: stored.report?.actions, stderr: stored.stderr });
+
+  const { getDb, closeDb } = await load("server/db-runtime/index.js");
+  const { DEFAULT_ORG_UID } = await load("server/db-runtime/tenancy.js");
+  const { createInvoiceRowService } = await load("server/invoices/invoice-rows.js");
+  let rows;
+  try {
+    rows = await createInvoiceRowService({ db: getDb({ env: { FIELD_DB_URL: storageDb.url } }), orgUid: DEFAULT_ORG_UID }).readJob(aid);
+  } finally {
+    await closeDb();
+  }
+  report.rows = rows;
+  const detail = JSON.parse(readFileSync(join(outDir, "a15-detail-final.json"), "utf8"));
+  const [m0, m1] = detail.meta.milestoneInvoices;
+  const printed = extractInvoicePdfTotals(readFileSync(join(outDir, "a08-invoice-0.pdf")));
+  const [i0, i1] = rows.invoices;
+  check("job A: two milestones, two invoices under their numbers as issued", rows.milestones.length === 2 && rows.invoices.length === 2
+    && i0?.number === m0.invoiceNumber && i1?.number === m1.invoiceNumber, { numbers: rows.invoices.map((invoice) => invoice.number) });
+  check("job A: invoice 0 is paid, with the exact subtotal, GST and total printed on a08-invoice-0.pdf", i0 && printed
+    && i0.status === "paid" && i0.subtotal === printed.subtotal && i0.taxTotal === printed.taxTotal && i0.total === printed.total && i0.amountPaid === printed.total,
+  { rows: i0 ? { status: i0.status, subtotal: i0.subtotal, taxTotal: i0.taxTotal, total: i0.total, amountPaid: i0.amountPaid } : null, printed });
+  check("job A: invoice 0 has one claim line for its subtotal and links its issued document", i0?.lines.length === 1 && i0.lines[0].lineType === "claim"
+    && i0.lines[0].lineTotal === i0.subtotal && /^doc_/.test(i0.issuedDocumentUid || ""), { lines: i0?.lines, issuedDocumentUid: i0?.issuedDocumentUid });
+  check("job A: invoice 1 is a draft", i1?.status === "draft" && i1.issuedAt === null);
+  const [payment] = rows.payments;
+  check("job A: the payment is a row against invoice 0, as recorded (a11)", rows.payments.length === 1 && payment.invoiceUid === i0?.uid
+    && payment.amount === printed?.total && payment.paidOn === "2026-01-15" && payment.reference === "PROOF-1" && payment.method === "bank_transfer" && payment.voidedAt === null,
+  { payments: rows.payments });
+  const [receipt] = rows.receipts;
+  check("job A: the receipt is a row for that payment, linked to the receipt that was emailed (a12)", rows.receipts.length === 1 && receipt.number === m0.receiptNumber
+    && receipt.paymentUid === payment?.uid && receipt.status === "issued" && receipt.amount === printed?.total && /^doc_/.test(receipt.issuedDocumentUid || ""),
+  { receipts: rows.receipts });
+  writeFileSync(join(outDir, "storage-invoice-rows.json"), `${JSON.stringify(report, null, 2)}\n`);
+  console.log(`invoice rows proof: ${report.ok ? "OK" : "FAILED"} (${report.checks.filter((entry) => entry.ok).length}/${report.checks.length} checks)`);
+  if (!report.ok) throw new Error(`invoice rows proof failed: ${JSON.stringify(report.checks.filter((entry) => !entry.ok))}`);
 }
 
 // Requests for the catalogue-sync proof: not recorded in steps.json and not

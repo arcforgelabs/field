@@ -92,6 +92,13 @@
       "when": 1791790631441,
       "tag": "0012_document_replicas",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791803297301,
+      "tag": "0013_invoice_rows",
+      "breakpoints": true
     }
   ]
 }

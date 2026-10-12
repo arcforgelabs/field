@@ -49,6 +49,7 @@ import { recordIssuedQuoteDocuments } from "./quote-issuance.js";
 import { buildQuoteSnapshotRecord } from "./quote-snapshots.js";
 import { recordDeliveredDocument, recordFailedDelivery } from "./documents/delivery.js";
 import { quoteRowRecorder } from "./quotes/recorder.js";
+import { invoiceRowRecorder } from "./invoices/recorder.js";
 import { quoteRowsFromArtifact } from "./quotes/read-model.js";
 import { issuedDocumentRecorder } from "./documents/recorder.js";
 import { applyQuoteCatalogChanges, computeQuoteCatalogChanges, upgradeOrganizerCatalogLinks } from "./quote-catalog-sync.js";
@@ -2131,6 +2132,9 @@ async function finalizeAndProjectDelivery({ jobDir, finalization, config = null 
   // that its issued document exists, link it. Never throws.
   if ((finalization.resolvedDocumentType || "quote") === "quote") {
     await quoteRowRecorder().syncJob(jobDir, { reason: "quote sent" });
+  } else {
+    // Invoice rows (#27): link the invoice or receipt just recorded as issued.
+    await invoiceRowRecorder().syncJob(jobDir, { reason: `${finalization.resolvedDocumentType} sent` });
   }
   const postCommit = finalized?.postCommit;
   if (postCommit?.sentEmailRecord) {

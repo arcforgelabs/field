@@ -14,6 +14,8 @@ import { registerIssuedDocumentRoutes } from "./documents/routes.js";
 import { createQuoteRowService } from "./quotes/quote-rows.js";
 import { createQuoteRowRecorder, createUnavailableQuoteRowRecorder, installQuoteRowRecorder } from "./quotes/recorder.js";
 import { loadQuoteRows, quoteReadsStatus, quoteRowsFromArtifact } from "./quotes/read-model.js";
+import { createInvoiceRowService } from "./invoices/invoice-rows.js";
+import { createInvoiceRowRecorder, createUnavailableInvoiceRowRecorder, installInvoiceRowRecorder } from "./invoices/recorder.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
 // A job detail's quote read from its rows (#10), kept beside the detail object.
@@ -521,7 +523,30 @@ try {
   quoteRowRecorder = createUnavailableQuoteRowRecorder(reason);
 }
 installQuoteRowRecorder(quoteRowRecorder);
-installJobGenerationCommitListener((jobDir) => quoteRowRecorder.syncJob(jobDir, { reason: "job generation committed" }));
+
+// Invoice rows (#27): every committed milestone change is also written as
+// payment_milestones, invoices, payments and receipts rows, checked against
+// what was issued and what Field shows. After the quote rows, so invoices
+// link the quote versions they bill. The job files stay the source of truth:
+// a failure is logged and shown in /api/storage/status, never turned into a
+// failed action.
+let invoiceRowRecorder;
+try {
+  invoiceRowRecorder = createInvoiceRowRecorder({
+    service: createInvoiceRowService({ db: getDb(), orgUid: deploymentOrg?.uid }),
+    quoteRows: quoteRowRecorder.service || null,
+    issuedDocuments: issuedDocumentRecorder.service || null,
+  });
+} catch (err) {
+  const reason = err.code === "FIELD_NO_DATABASE" ? "no database configured" : err.message;
+  console.warn(`[invoice-rows] ${reason}: invoice rows are not recorded in PostgreSQL (the job files still hold them)`);
+  invoiceRowRecorder = createUnavailableInvoiceRowRecorder(reason);
+}
+installInvoiceRowRecorder(invoiceRowRecorder);
+installJobGenerationCommitListener(async (jobDir) => {
+  await quoteRowRecorder.syncJob(jobDir, { reason: "job generation committed" });
+  await invoiceRowRecorder.syncJob(jobDir, { reason: "job generation committed" });
+});
 
 // Initialize field database (SQLite — jobs + evidence tracking)
 let fieldDb = null;
@@ -985,6 +1010,7 @@ app.get("/api/storage/status", requireAuth, requireAdmin, (_req, res) => {
     ...(durableStorage ? durableStorage.status() : { enabled: false }),
     issuedDocuments: issuedDocumentRecorder.status(),
     quoteRows: quoteRowRecorder.status(),
+    invoiceRows: invoiceRowRecorder.status(),
     quoteReads: quoteReadsStatus(),
     documentReplica: documentReplica.status(),
   });

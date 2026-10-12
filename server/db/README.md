@@ -297,6 +297,27 @@ because Drizzle applies only migrations whose journal timestamp is later than
 the last one applied. `rollback/0012_document_replicas.down.sql` drops the
 table; the bytes stay in `document_blobs` and in R2. Run it before 0011's.
 
+### Invoice rows
+
+`0013_invoice_rows` (#27; design in `docs/PRICING_ENGINE.md` "Invoices and
+payments") adds seven tenant tables: `payment_milestones` (`pms_…`, a
+job's schedule), `invoices` (`inv_…`, one row per invoice as issued, number
+as printed, unique per job), `invoice_lines` (`iln_…`), `credit_notes` and
+`credit_note_lines` (`crn_…`, `cnl_…`; no writer until step 4b),
+`payments` (`pay_…`) and `receipts` (`rct_…`, one per payment). Money is
+`numeric(12,2)`; line rates, quantities and tax rates follow `quote_lines`,
+with the same `computed` / `printed` line-total check. Once an invoice or
+credit note has an issue time, triggers refuse any change to its number,
+money, lines or issue time, setting it back to draft, and deleting it, for
+the owner as well as `field_app`; its status, amount paid, due date, kind
+and note may change, and links missing when it was written are filled once.
+A payment is never deleted and may only be voided, once; a receipt may only
+be voided. `TRUNCATE` is always refused. `field_app` may read and write the
+rows otherwise. Only `server/invoices/` reads or writes them; nothing in the
+app reads them yet. `rollback/0013_invoice_rows.down.sql` drops them (the
+backfill rebuilds them from the job files after 0013 is applied again); run
+it before 0012's.
+
 ### Adding tables
 
 A tenant table gets `orgUid: orgUid()` and `tenantIsolation("<table>")` in
