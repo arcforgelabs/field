@@ -845,6 +845,42 @@ export function buildMilestoneInvoicePdfPath(milestoneInvoice = null) {
   return `${MILESTONE_INVOICE_DIR}/${safeInvoiceNumber}.pdf`;
 }
 
+// The receipt a paid milestone was issued (owner's decision, 2026-10-13):
+// RCT-YYYY-M-N from the issue service, the invoice it pays, the payment that
+// cleared the milestone and its stored PDF. Null for a milestone not paid
+// since the RCT series began (its receipt keeps the ER-… number).
+export function normalizeIssuedReceipt(receipt = null) {
+  if (!receipt || typeof receipt !== "object") return null;
+  const number = cleanText(receipt.number);
+  if (!number) return null;
+  return {
+    number,
+    issuedAt: normalizeIsoTimestamp(receipt.issuedAt),
+    invoiceNumber: cleanText(receipt.invoiceNumber) || null,
+    paymentId: cleanText(receipt.paymentId) || null,
+    amount: roundMoney(receipt.amount),
+    pdfPath: cleanText(receipt.pdfPath) || null,
+    pdfSha256: cleanText(receipt.pdfSha256) || null,
+    issuedDocumentUid: cleanText(receipt.issuedDocumentUid) || null,
+    ...(receipt.voidedAt ? { voidedAt: normalizeIsoTimestamp(receipt.voidedAt) } : {}),
+  };
+}
+
+function normalizeReceiptHistory(history = []) {
+  return (Array.isArray(history) ? history : []).map(normalizeIssuedReceipt).filter(Boolean);
+}
+
+// The receipt fields a milestone carries only once it has them, so the state
+// of a milestone never paid under the RCT series is unchanged.
+function receiptFields(milestoneInvoice = null) {
+  const issuedReceipt = normalizeIssuedReceipt(milestoneInvoice?.issuedReceipt);
+  const receiptHistory = normalizeReceiptHistory(milestoneInvoice?.receiptHistory);
+  return {
+    ...(issuedReceipt ? { issuedReceipt } : {}),
+    ...(receiptHistory.length ? { receiptHistory } : {}),
+  };
+}
+
 export function buildMilestoneReceiptPdfPath(milestoneInvoice = null) {
   const fallback = `receipt-${Number(milestoneInvoice?.milestoneIndex || 0) + 1}`;
   const safeReceiptNumber = String(milestoneInvoice?.receiptNumber || fallback)
@@ -954,6 +990,7 @@ export function normalizeStoredMilestoneInvoices(milestoneInvoices = []) {
           receiptNumber,
           milestoneIndex,
         }),
+        ...receiptFields(milestoneInvoice),
       };
     })
     .sort((a, b) => a.milestoneIndex - b.milestoneIndex);
@@ -1388,6 +1425,7 @@ export function buildMilestoneInvoices({
       payments,
       pdfPath: issuedRevision?.pdfPath || pdfPath,
       receiptPdfPath: cleanText(existingMilestone?.receiptPdfPath) || buildMilestoneReceiptPdfPath({ receiptNumber, milestoneIndex }),
+      ...receiptFields(existingMilestone),
     };
   });
 

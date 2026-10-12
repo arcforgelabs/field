@@ -554,12 +554,21 @@ export async function writeMilestoneReceiptArtifact({
   });
   const relativePdfPath = milestoneInvoice.receiptPdfPath || buildMilestoneReceiptPdfPath(milestoneInvoice);
   const pdfPath = join(jobDir, relativePdfPath);
+  // An issued receipt (RCT-…) is a money document: its stored bytes are the
+  // receipt, sent as they are. If they were lost it is drawn again with its
+  // number, marked "Reconstructed copy".
+  const issuedReceipt = milestoneInvoice.issuedReceipt?.pdfPath === relativePdfPath ? milestoneInvoice.issuedReceipt : null;
+  if (issuedReceipt && existsSync(pdfPath)) {
+    return { pdfBuffer: await readFile(pdfPath), pdfPath, relativePdfPath, alreadyIssued: true };
+  }
   await mkdir(dirname(pdfPath), { recursive: true });
 
   const pdfBuffer = await generateQuotePdfBuffer({
     meta: prepared.meta,
     quote: prepared.quote,
     documentType: "receipt",
+    jobDir,
+    reconstructed: Boolean(issuedReceipt),
   });
   await writeFile(pdfPath, pdfBuffer);
 
@@ -992,6 +1001,7 @@ async function renderQuotePdfBuffer({
       invoicePaidAmount,
       scheduleView,
       milestoneLayout,
+      reconstructed: Boolean(reconstructed),
     });
     doc.end();
   });
@@ -1214,6 +1224,7 @@ function renderQuotePdf(doc, {
   invoicePaidAmount = null,
   scheduleView = null,
   milestoneLayout = null,
+  reconstructed = false,
 }) {
   const delivery = quote.delivery || { status: "draft" };
   const quoteCatalog = quote.quoteCatalog || quote.profile || {};
@@ -1277,7 +1288,7 @@ function renderQuotePdf(doc, {
     documentType,
     documentLabel: invoiceTitle({ documentLabel, isInvoice, milestoneInvoice, legacy: milestoneLayout?.legacy }),
     issuedAt,
-    reconstructed: Boolean(milestoneLayout?.reconstructed),
+    reconstructed: Boolean(reconstructed),
   });
 
   // ─── CLIENT + BUSINESS DETAILS ───
@@ -1483,6 +1494,10 @@ function renderParties(doc, {
   const items = isPaymentDocument
     ? [
         isDraftInvoice(milestoneInvoice) && !isReceipt ? null : `${isReceipt ? "Received" : "Issued"}: ${formatDate(issuedAt)}`,
+        // A receipt names the invoice it pays.
+        isReceipt && (milestoneInvoice?.issuedReceipt?.invoiceNumber || milestoneInvoice?.issuedRevision?.invoiceNumber || milestoneInvoice?.invoiceNumber)
+          ? `For invoice: ${milestoneInvoice.issuedReceipt?.invoiceNumber || milestoneInvoice.issuedRevision?.invoiceNumber || milestoneInvoice.invoiceNumber}`
+          : null,
         !isReceipt && milestoneInvoice?.dueDate ? `Due: ${formatDate(milestoneInvoice.dueDate)}` : null,
         // An invoice issued from the sequence (INV-…) carries the job number.
         !isReceipt && milestoneInvoice?.issuedRevision?.jobReference ? `Job reference: ${milestoneInvoice.issuedRevision.jobReference}` : null,

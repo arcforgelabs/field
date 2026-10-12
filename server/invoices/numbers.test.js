@@ -2,7 +2,7 @@
 // not zero-padded, and ordered by period and sequence, never by their text.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compareDocumentNumbers, formatCreditNoteNumber, formatInvoiceNumber, formatSequenceNumber, invoicePeriod, isSequenceInvoiceNumber, parseSequenceNumber } from "./numbers.js";
+import { compareDocumentNumbers, formatCreditNoteNumber, formatInvoiceNumber, formatReceiptNumber, formatSequenceNumber, isSequenceReceiptNumber, invoicePeriod, isSequenceInvoiceNumber, parseSequenceNumber } from "./numbers.js";
 
 test("the month is printed without a leading zero; the counter's period keeps it", () => {
   assert.equal(invoicePeriod(new Date(2026, 0, 15, 9)), "2026-01");
@@ -46,4 +46,13 @@ test("one allocator format for every series; an unknown series is refused", () =
   assert.equal(formatSequenceNumber("credit_note", "2026-11", 1), "CN-2026-11-1");
   assert.throws(() => formatSequenceNumber("quote", "2026-01", 1), /no number series/);
   assert.throws(() => formatSequenceNumber("invoice", "2026-01", 0), /not a sequence value/);
+});
+
+test("receipts take the same format: RCT-2026-1-1; an ER-… receipt is not a sequence number", () => {
+  assert.equal(formatReceiptNumber("2026-01", 1), "RCT-2026-1-1");
+  assert.equal(formatSequenceNumber("receipt", "2026-10", 3), "RCT-2026-10-3");
+  assert.ok(isSequenceReceiptNumber("RCT-2026-1-1"));
+  assert.ok(!isSequenceReceiptNumber("ER-2601-01-M1"));
+  assert.ok(!isSequenceReceiptNumber("RCT-2026-01-1"));
+  assert.deepEqual(["RCT-2026-10-1", "RCT-2026-2-1", "ER-2601-01-M1"].sort(compareDocumentNumbers), ["ER-2601-01-M1", "RCT-2026-2-1", "RCT-2026-10-1"]);
 });

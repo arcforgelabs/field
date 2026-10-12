@@ -188,14 +188,22 @@ describe("invoice-row dual-write", () => {
       assert.equal(row.issuedDocumentUid, issuedDocument.uid);
       assert.equal(issuedDocument.pdfSha256, deposit.issuedRevision.pdfSha256);
 
-      // Email it, pay it, send the receipt (still ER-…): one issued invoice.
+      // Email it, pay it (its receipt is issued from the RCT series), send
+      // the receipt: one issued invoice, one issued receipt.
       await send(jobDir, "invoice", 0, "msg-issue-invoice");
       await actions.pay(jobDir, 0, 550);
       await send(jobDir, "receipt", 0, "msg-issue-receipt");
       state = await summary("job-issue");
       assert.deepEqual(state.invoices.find(([number]) => number === deposit.invoiceNumber), [deposit.invoiceNumber, "paid", "550.00", "550.00"]);
-      assert.deepEqual(state.receipts, [["ER-2610-02-M1", "550.00", "issued"]]);
+      assert.equal(state.receipts.length, 1);
+      const [receiptNumber, receiptAmount, receiptStatus] = state.receipts[0];
+      assert.match(receiptNumber, /^RCT-\d{4}-([1-9]|1[0-2])-1$/);
+      assert.deepEqual([receiptAmount, receiptStatus], ["550.00", "issued"]);
+      const receiptDocument = await documents.findIssuedDocument({ documentType: "receipt", number: receiptNumber });
+      assert.equal(receiptDocument.details.invoiceNumber, deposit.invoiceNumber, "the receipt names the invoice it pays");
       const listed = await documents.listJobDocuments("job-issue");
+      const receiptEmailed = listed.documents.find((document) => document.number === receiptNumber).events.find((event) => event.event === "emailed");
+      assert.equal(receiptEmailed.data.pdfSha256, receiptDocument.pdfSha256, "the receipt email carried the issued bytes");
       const emailed = listed.documents.find((document) => document.number === deposit.invoiceNumber).events.find((event) => event.event === "emailed");
       assert.equal(emailed.data.pdfSha256, deposit.issuedRevision.pdfSha256, "the email carried the issued bytes");
 

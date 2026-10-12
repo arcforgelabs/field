@@ -201,6 +201,8 @@ export interface MilestoneInvoice {
   payments: MilestonePayment[];
   pdfPath: string | null;
   receiptPdfPath: string | null;
+  /** The receipt issued when the milestone was paid (RCT-YYYY-M-N), naming the invoice it pays. */
+  issuedReceipt?: { number: string; issuedAt: string | null; invoiceNumber: string | null } | null;
   contextNote?: string | null;
 }
 

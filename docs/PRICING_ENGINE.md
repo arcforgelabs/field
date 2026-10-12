@@ -1090,8 +1090,8 @@ nothing reads the rows yet. No customer document changes.
   invoice issued before revisions were frozen maps from its stored record.
   A draft milestone is a draft invoice under its provisional number. Totals
   are as issued and never recomputed. Payments keep their dates, method,
-  reference and void details. A paid milestone's receipt keeps its `ER-…`
-  number.
+  reference and void details. A paid milestone's receipt keeps the number
+  it was issued with (`ER-…`, or `RCT-…` since step 4b).
 - **Checks** (`sync.js`). Each issued invoice's subtotal, GST and total
   must equal its stored revision and, where its PDF can be read (the issued
   document's bytes, else the revision's stored PDF, hash-checked), the
@@ -1159,8 +1159,22 @@ number and bytes now come from PostgreSQL.
 - **Email is delivery.** The `emailed` event carries the hash of the bytes
   sent; a resend sends the stored bytes. A failed email is an `email_failed`
   event and never undoes the issue.
-- **Receipts** keep `ER-…-M<n>` in this step: they are not yet issued
-  through a service, and moving them to a sequence is a later change.
+- **Receipts** have their own series, `RCT-YYYY-M-N` (the month not
+  zero-padded: `RCT-2026-1-1`), from the same allocator as invoices and
+  credit notes (owner's decision, 2026-10-13). When a milestone that was
+  not paid becomes paid, `issueReceipt` allocates the number, renders the
+  receipt once with it and the `INV-…` invoice it pays ("For invoice:" in
+  its details), and stores it as an issued document with its `issued`
+  event; the milestone carries the number (`receiptNumber`,
+  `issuedReceipt`), and sending the receipt sends those stored bytes. The
+  receipt row is written by the dual-write, which names the payment. A
+  milestone that stops being paid (marked unpaid, a payment voided) keeps
+  the issued receipt in its `receiptHistory`, marked voided, and its row
+  becomes `void`; paying it again issues a new receipt. Receipts issued
+  before keep their `ER-…-M<n>` numbers, and a milestone paid before this
+  release keeps its receipt. Until it is paid, a milestone's receipt is
+  tracked under the provisional `ER-…-M<n>`. A stored receipt that was lost
+  is drawn again with its number, marked "Reconstructed copy".
 - **Without a database** the server installs an issuer that refuses, so
   authorising or sending an invoice answers 503; invoice and quote sends
   already need the database for their snapshots.
@@ -1265,4 +1279,5 @@ issued from now on change; an issued PDF never does.
   schedule and the claim box. One issued from the sequence (`INV-…`) is
   drawn in the step 4b layout. An invoice not yet issued always uses the
   step 4b layout.
-- Receipts, and an invoice for a job with no milestones, print as before.
+- A receipt prints as before, with its number and "For invoice: INV-…" in
+  its details. An invoice for a job with no milestones prints as before.

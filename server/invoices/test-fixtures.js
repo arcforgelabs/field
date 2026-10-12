@@ -45,6 +45,11 @@ export const PRE_4B_ISSUER = Object.freeze({
       invoice: { number: invoice.number, reference: null, invoiceUid: null, issuedDocumentUid: null, pdfSha256: sha256Hex(pdfBytes), pdfBytes, issuedAt: new Date(issuedAt).toISOString() },
     };
   },
+  // Before the RCT series nothing issued a receipt: it kept the milestone's
+  // ER-… number and was drawn when it was written or sent.
+  async issueReceipt() {
+    return null;
+  },
 });
 
 const ACTOR = { kind: "user", label: "Test Operator" };
