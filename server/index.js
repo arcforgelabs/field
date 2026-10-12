@@ -29,8 +29,9 @@ import {
 } from "./documents/email-attachments.js";
 import { recordAttachedDocumentsEmailed } from "./documents/delivery.js";
 import { applyMergeFields, applyMergeFieldsToText } from "../shared/email-templates.js";
-import { buildEmailMergeValues } from "./email-merge-fields.js";
+import { adjustmentNoteValues, buildEmailMergeValues } from "./email-merge-fields.js";
 import { PENDING_NUMBER_TEXT, isDraftInvoice, jobQuoteForEmail, readEmailDocumentView, registerEmailComposeRoutes, withPendingNumber } from "./email-compose-routes.js";
+import { resolveReplyThread } from "./email-threads.js";
 import { CREDIT_NOTE_ON_REISSUE_CHOICES, createBusinessSettingsService } from "./invoices/business-settings.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
@@ -1452,6 +1453,7 @@ async function sendTestCopy({ req, job, payload, documentType = null, loadedDocu
     config,
     user: req.caller,
     attachmentNames: attachments.map((attachment) => attachment.filename),
+    adjustmentNote: payload?.adjustmentNote ? await adjustmentNoteValues(emailDocumentService(req), payload.adjustmentNote) : null,
   });
   if (isDraftInvoice(view)) values.documentNumber = PENDING_NUMBER_TEXT;
   const customBody = payload?.customBody ? applyMergeFields(String(payload.customBody), values, { final: true }) : null;
@@ -3079,6 +3081,7 @@ async function processScheduledEmail(record) {
         // The recorded references: read again, and refused for review if
         // their bytes changed or they were credited or voided since.
         documents: payload.documents || [],
+        thread: await resolveReplyThread({ jobDir: job.dir, inReplyTo: payload.inReplyTo }),
       });
     });
   }
@@ -3096,6 +3099,7 @@ async function processScheduledEmail(record) {
     config,
     user,
     attachmentNames: [...loadedDocuments.map((document) => document.filename), ...(record.loadedAttachments || []).map((file) => file.filename)],
+    adjustmentNote: payload.adjustmentNote ? await adjustmentNoteValues(issuedDocumentRecorder.service || null, payload.adjustmentNote) : null,
   });
   // A job email carries a Message-ID made from the queue record's delivery
   // attempt id. The first attempt stores the full Message-ID, the mailbox and
@@ -3114,6 +3118,7 @@ async function processScheduledEmail(record) {
     : null);
   const subject = applyMergeFieldsToText(payload.subject, merge, { final: true });
   const customBody = payload.customBody ? applyMergeFields(payload.customBody, merge, { final: true }) : null;
+  const thread = await resolveReplyThread({ jobDir: job.dir, inReplyTo: payload.inReplyTo });
   let result = null;
   if (reconciling && deliveryMessageId) {
     const found = await findSentMessageInMailbox({ config, user, mailbox: record.deliveryMailbox || null, messageId: deliveryMessageId });
@@ -3142,6 +3147,9 @@ async function processScheduledEmail(record) {
             scheduledAt: record.scheduledAt,
             messageId: found.id,
             threadId: found.threadId,
+            rfcMessageId: deliveryMessageId,
+            // The chain the first attempt went with, not the edit's.
+            references: first.references !== undefined ? first.references : thread?.references || null,
             reconciled: true,
             authMode: result.authMode || null,
             gmailUser: result.gmailUser || record.deliveryMailbox || null,
@@ -3178,6 +3186,7 @@ async function processScheduledEmail(record) {
     // A resend after an unknown attempt goes only from that attempt's mailbox.
     mailbox: reconciling ? record.deliveryMailbox || null : null,
     onBeforeDispatch: record.stampDelivery || null,
+    thread,
   });
   await recordAttachedDocumentsEmailed({ jobId: job.meta.id, attachments: loadedDocuments, result, user });
   await appendSentEmailArchive({
@@ -3188,6 +3197,8 @@ async function processScheduledEmail(record) {
       scheduledEmailId: record.id,
       scheduledAt: record.scheduledAt,
       messageId: result.id,
+      rfcMessageId: deliveryMessageId,
+      references: thread?.references || null,
       threadId: result.threadId,
       authMode: result.authMode,
       gmailUser: result.gmailUser,
@@ -3287,6 +3298,7 @@ app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res
         subject: payload?.subject ?? null,
         attachmentFilename: payload?.attachmentFilename ?? null,
         documents: documentRecords,
+        inReplyTo: payload?.inReplyTo ?? null,
       };
       const scheduledEmail = payload?.draftId
         ? await rescheduleEmailDraft({
@@ -3336,6 +3348,7 @@ app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res
           subject: payload?.subject ?? null,
           attachmentFilename: payload?.attachmentFilename ?? null,
           documents: documentRecords,
+          inReplyTo: payload?.inReplyTo ?? null,
         },
         snapshot,
         attachments: additionalAttachments,
@@ -3370,6 +3383,7 @@ app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res
         attachmentFilename: payload?.attachmentFilename ?? null,
         additionalAttachments,
         documents: documentRefs,
+        thread: await resolveReplyThread({ jobDir: job.dir, inReplyTo: payload?.inReplyTo }),
         documentService,
       });
     });
@@ -3436,6 +3450,8 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
         themeFontFamily: payload?.themeFontFamily ?? null,
         documentType: "email",
         documents: documentRecords,
+        inReplyTo: payload?.inReplyTo ?? null,
+        adjustmentNote: payload?.adjustmentNote ?? null,
       };
       const scheduledEmail = payload?.draftId
         ? await rescheduleEmailDraft({
@@ -3478,6 +3494,8 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
           themeFontFamily: payload?.themeFontFamily ?? null,
           documentType: "email",
           documents: documentRecords,
+          inReplyTo: payload?.inReplyTo ?? null,
+          adjustmentNote: payload?.adjustmentNote ?? null,
         },
         attachments: additionalAttachments,
         updatedBy: scheduledEmailActor(req.caller),
@@ -3492,6 +3510,7 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
       config,
       user: req.caller,
       attachmentNames: [...loadedDocuments.map((document) => document.filename), ...additionalAttachments.map((file) => file.filename)],
+      adjustmentNote: payload?.adjustmentNote ? await adjustmentNoteValues(documentService, payload.adjustmentNote) : null,
     });
     const result = await sendJobEmail({
       config,
@@ -3504,6 +3523,7 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
       customBody: customBody ? applyMergeFields(customBody, merge, { final: true }) : customBody,
       themeFontFamily: payload?.themeFontFamily ?? null,
       additionalAttachments: [...documentMimeAttachments(loadedDocuments), ...additionalAttachments],
+      thread: await resolveReplyThread({ jobDir: job.dir, inReplyTo: payload?.inReplyTo }),
     });
     await recordAttachedDocumentsEmailed({ jobId: job.meta.id, attachments: loadedDocuments, result, user: req.caller });
     await appendSentEmailArchive({
@@ -3577,6 +3597,8 @@ app.post("/api/jobs/:id/email-drafts", requireAuth, emailUploads, async (req, re
       attachmentFilename: payload?.attachmentFilename ?? null,
       attachCreditNote: payload?.attachCreditNote === true,
       documents: documentRecords,
+      inReplyTo: payload?.inReplyTo ?? null,
+      adjustmentNote: payload?.adjustmentNote ?? null,
     };
     const scheduledEmail = await saveEmailDraft({
       dataDir: DATA_DIR,

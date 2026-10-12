@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AlertCircle, ArrowLeft, CalendarClock, ChevronDown, ChevronUp, Clock3, Eye, FlaskConical, MoreVertical, Paperclip, Send, Trash2 } from "lucide-react";
-import { renderComposerTemplate, renderSignature } from "../../../../shared/email-templates.js";
+import { EMAIL_MERGE_FIELDS, renderComposerTemplate, renderSignature } from "../../../../shared/email-templates.js";
 import { api, type EmailContext, type EmailDraftInput, type EmailPreview, type GoogleContact, type JobDocument, type NotIssuedDocument, type ScheduledEmail, type SentEmail } from "@/lib/api";
 import type { JobDocumentType, MilestoneInvoice, RecordingDetail } from "@/lib/types";
 import { jobRef, jobTitle } from "@/lib/job-status";
@@ -40,6 +40,45 @@ export function plainSendError(err: unknown) {
   // time-out, a reset or a 5xx may have sent it.
   if (error?.deliveryOutcome === "rejected") return `Gmail did not accept the email: ${message}`;
   return `Not confirmed: Field could not tell whether Gmail sent it (${message}). Check Sent Mail before you send it again.`;
+}
+
+const MERGE_TOKEN = /(\{\{\s*[A-Za-z]+\s*\}\})/;
+
+/**
+ * The subject: a plain input while it is edited. Away from it, a merge field
+ * such as {{documentNumber}} reads as a chip with its value (or its name
+ * while it has none), as the body shows them. The send fills it.
+ */
+export function SubjectField({ value, onChange, values }: { value: string; onChange: (next: string) => void; values: Record<string, string | null> | undefined }) {
+  const [focused, setFocused] = useState(false);
+  const parts = value.split(MERGE_TOKEN).filter(Boolean);
+  const hasFields = parts.some((part) => MERGE_TOKEN.test(part));
+  const masked = hasFields && !focused;
+  return (
+    <span className="fx-subject">
+      <input
+        id="composer-subject"
+        className={`fx-composer__subject${masked ? " fx-composer__subject--masked" : ""}`}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder="Subject"
+        aria-describedby={hasFields ? "composer-subject-fields" : undefined}
+      />
+      {masked ? (
+        <span className="fx-subject__mirror" aria-hidden="true">
+          {parts.map((part, index) => {
+            const key = part.match(/^\{\{\s*([A-Za-z]+)\s*\}\}$/)?.[1];
+            if (!key) return <span key={index}>{part}</span>;
+            const label = EMAIL_MERGE_FIELDS.find((field) => field.key === key)?.label || key;
+            return <span key={index} className="fx-subject__field" data-merge={key}>{values?.[key] || label}</span>;
+          })}
+        </span>
+      ) : null}
+      {hasFields ? <span id="composer-subject-fields" className="fx-sr">Fields in double braces are filled in when the email is sent.</span> : null}
+    </span>
+  );
 }
 
 /** How long Undo stays: until the server's hold ends, never longer than the hold. */
@@ -213,15 +252,30 @@ export function EmailComposerPage() {
     return defaultMilestone(invoices);
   }, [detail, documentType, draft, params]);
   const version = draft?.quoteVersion ? String(draft.quoteVersion) : params.get("version");
+  // An adjustment note on its own (from the invoice's menu).
+  const adjustmentNote = draft?.draftContent?.adjustmentNote
+    || (!documentType && params.get("purpose") === "adjustment-note" ? params.get("creditNote") : null)
+    || null;
 
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    api.emailContext(id, { documentType, milestoneIndex: milestoneInvoice?.milestoneIndex ?? null, version })
+    api.emailContext(id, {
+      documentType,
+      milestoneIndex: milestoneInvoice?.milestoneIndex ?? null,
+      version,
+      ...(adjustmentNote ? { purpose: "adjustment-note", creditNote: adjustmentNote } : {}),
+    })
       .then((next) => { if (!cancelled) setContext(next); })
       .catch((err) => { if (!cancelled) setLoadError(err instanceof Error ? err.message : "The composer could not load."); });
     return () => { cancelled = true; };
-  }, [id, documentType, milestoneInvoice?.milestoneIndex, version]);
+  }, [id, documentType, milestoneInvoice?.milestoneIndex, version, adjustmentNote]);
+
+  // Into the earlier Gmail conversation for this document line (decision 5):
+  // on by default; the subject then follows that conversation's.
+  const [threadOn, setThreadOn] = useState(false);
+  const [templateSubject, setTemplateSubject] = useState("");
+  const thread = context?.thread || null;
 
   // A new message: the job's contact, the first template and the signature.
   useEffect(() => {
@@ -229,14 +283,18 @@ export function EmailComposerPage() {
     const template = context.templates[0];
     const contact = context.jobContacts.find((entry) => entry.source === "job");
     if (contact) setTo([{ email: contact.email, name: contact.name || null }]);
+    const fresh = template ? renderComposerTemplate(template, context.mergeValues).subject || context.defaultSubject : context.defaultSubject;
+    setTemplateSubject(fresh);
     if (template) {
       setTemplateId(template.id);
-      setSubject(renderComposerTemplate(template, context.mergeValues).subject || context.defaultSubject);
       setBody(composeTemplateBody(template, context));
     } else {
-      setSubject(context.defaultSubject);
       setBody(renderSignature(context.signature?.html || null, context.mergeValues));
     }
+    setThreadOn(Boolean(context.thread));
+    setSubject(context.thread ? context.thread.replySubject : fresh);
+    // The send type's default attachments: ticked ones attached, the others offered.
+    setSelectedUids((context.suggestions || []).filter((entry) => entry.ticked).map((entry) => entry.uid));
     setInitialised(true);
   }, [context, initialised, draft]);
 
@@ -274,6 +332,11 @@ export function EmailComposerPage() {
     && !(attachCreditNote && creditNoteDocument?.uid === entry.uid)
   ));
   const trayDocuments = [...attachedDocuments, ...(attachCreditNote && creditNoteDocument ? [creditNoteDocument] : [])];
+  // Offered by the send type, not attached until ticked.
+  const suggestedDocuments = (context?.suggestions || [])
+    .filter((entry) => !selectedUids.includes(entry.uid) && entry.number !== mainNumber)
+    .map((entry) => ({ document: (jobDocuments || []).find((candidate) => candidate.uid === entry.uid) || null, reason: entry.reason }))
+    .filter((entry): entry is { document: JobDocument; reason: string } => Boolean(entry.document));
   const totals = attachmentTotals({ main: mainAttachment, documents: trayDocuments, uploads });
   const recipientIssues = [...to, ...cc, ...bcc].filter((entry) => recipientProblem(entry.email, context?.deliveryPolicy));
   const blockers = [
@@ -286,7 +349,7 @@ export function EmailComposerPage() {
 
   // The preview: what the server would send now. Debounced; cancelled when
   // the message changes again.
-  const previewKey = JSON.stringify({ subject, body, to: to.map((entry) => entry.email), cc: cc.map((entry) => entry.email), bcc: bcc.map((entry) => entry.email), docs: trayDocuments.map((entry) => entry.uid), uploads: uploads.map((file) => [file.name, file.size]), documentType, m: milestoneInvoice?.milestoneIndex ?? null, version });
+  const previewKey = JSON.stringify({ subject, body, to: to.map((entry) => entry.email), cc: cc.map((entry) => entry.email), bcc: bcc.map((entry) => entry.email), docs: trayDocuments.map((entry) => entry.uid), uploads: uploads.map((file) => [file.name, file.size]), documentType, m: milestoneInvoice?.milestoneIndex ?? null, version, adjustmentNote });
   useEffect(() => {
     if (!id || !context || !initialised) return;
     const controller = new AbortController();
@@ -303,6 +366,7 @@ export function EmailComposerPage() {
         documents: trayDocuments.map(({ uid }) => ({ uid })),
         uploads: uploads.map((file) => ({ filename: file.name, byteLength: file.size })),
         attachmentFilename: draft?.draftContent?.attachmentFilename || null,
+        adjustmentNote,
       }, { signal: controller.signal })
         .then((next) => { setPreview(next); setPreviewError(null); })
         .catch((err) => { if (!controller.signal.aborted) setPreviewError(err instanceof Error ? err.message : "Preview unavailable"); });
@@ -343,6 +407,8 @@ export function EmailComposerPage() {
       attachCreditNote: Boolean(creditNoteNumber && attachCreditNote),
       documents: attachedDocuments.map(({ uid }) => ({ uid })),
       keepAttachments: latest.current.retained,
+      inReplyTo: threadOn && thread ? thread.id : null,
+      adjustmentNote,
     };
   }
   const draftSignature = JSON.stringify({ ...draftInput(), draftId: null, uploads: uploads.map((file) => [file.name, file.size]) });
@@ -427,6 +493,8 @@ export function EmailComposerPage() {
         holdSeconds: scheduledAt ? null : UNDO_SECONDS,
         draftId,
         keepAttachments: draftId ? keep : null,
+        inReplyTo: threadOn && thread ? thread.id : null,
+        adjustmentNote,
         documents: attachedDocuments.map(({ uid }) => ({ uid })),
       };
       const result = documentType
@@ -482,6 +550,7 @@ export function EmailComposerPage() {
         attachments: uploads,
         test: true,
         documents: attachedDocuments.map(({ uid }) => ({ uid })),
+        adjustmentNote,
       };
       const result = documentType
         ? await api.emailQuote(id, recipients, body, {
@@ -590,7 +659,11 @@ export function EmailComposerPage() {
 
   const meta = detail.meta;
   const label = documentType ? DOCUMENT_LABEL[documentType] : "email";
-  const title = documentType ? `Send ${label}${mainNumber && mainIssued ? ` ${mainNumber}` : ""}` : "Send email";
+  const title = adjustmentNote
+    ? `Send adjustment note ${adjustmentNote}`
+    : documentType ? `Send ${label}${mainNumber && mainIssued ? ` ${mainNumber}` : ""}` : "Send email";
+  const replacement = context.replacement || null;
+  const money = (value: number | null | undefined) => (value == null ? null : Number(value).toLocaleString("en-AU", { style: "currency", currency: "AUD" }));
   const presets = schedulePresets();
   const sendMenu: MenuItem[] = [
     ...presets.map((preset) => ({ label: `${preset.label} · ${scheduleLabel(preset.at)}`, icon: <Clock3 aria-hidden />, onSelect: () => void send(preset.at.toISOString()) })),
@@ -627,9 +700,28 @@ export function EmailComposerPage() {
       />
       {showCc ? <div className="fx-composer__fold" data-open={phoneCcOpen ? "true" : undefined}><RecipientField label="Cc" recipients={cc} onChange={setCc} contacts={contacts} policy={context.deliveryPolicy} inputRef={ccInput} /></div> : null}
       {showBcc ? <div className="fx-composer__fold" data-open={phoneCcOpen ? "true" : undefined}><RecipientField label="Bcc" recipients={bcc} onChange={setBcc} contacts={contacts} policy={context.deliveryPolicy} inputRef={bccInput} /></div> : null}
+      {thread ? (
+        <label className="fx-composer__thread">
+          <input
+            type="checkbox"
+            className="fx-checkbox"
+            checked={threadOn}
+            onChange={(event) => {
+              setThreadOn(event.target.checked);
+              setSubject(event.target.checked ? thread.replySubject : templateSubject);
+            }}
+          />
+          <span>
+            Send in the conversation of &ldquo;{thread.subject}&rdquo;{thread.sentAt ? `, sent ${whenLabel(thread.sentAt)}` : ""}
+            <small>{threadOn
+              ? `Gmail keeps it in that conversation while the subject stays "${thread.replySubject}".${thread.headers ? "" : " That email was sent before Field kept its Message-ID, so the customer's mail may show it apart."}`
+              : "Off: this email starts a new conversation."}</small>
+          </span>
+        </label>
+      ) : null}
       <div className="fx-composer__field">
         <label className="fx-rcpt__label" htmlFor="composer-subject">Subject</label>
-        <input id="composer-subject" className="fx-composer__subject" value={subject} onChange={(event) => { setSubject(event.target.value); setTouched(true); }} placeholder="Subject" />
+        <SubjectField value={subject} onChange={(next) => { setSubject(next); setTouched(true); }} values={context?.mergeValues} />
       </div>
     </>
   );
@@ -663,12 +755,25 @@ export function EmailComposerPage() {
           </nav>
           <div className="fx-ph__line">
             <h1 className="fx-ph__title">{title}</h1>
+            {replacement?.replacesNumber && context.sendType === "replacement-invoice" ? <span className="fx-mute fx-composer__ref">Replaces {replacement.replacesNumber}</span> : null}
             <span className="fx-mute fx-composer__ref">{jobRef(meta)}</span>
             {saveLabel ? <span className="fx-save-state" data-state={saveError ? "error" : "saved"} title={saveError || undefined}>{saveLabel}</span> : null}
           </div>
         </div>
       </header>
 
+      {replacement?.replacesNumber && context.sendType === "replacement-invoice" ? (
+        <div className="fx-notice">
+          <span>
+            {mainNumber}{money(replacement.total) ? ` (${money(replacement.total)})` : ""} replaces {replacement.replacesNumber}{money(replacement.replacesTotal) ? ` (${money(replacement.replacesTotal)})` : ""}, which adjustment note {replacement.creditNoteNumber} credits in full. Both are issued and attach as stored. Nothing is rendered again.
+          </span>
+        </div>
+      ) : null}
+      {replacement && context.sendType === "adjustment-note" ? (
+        <div className="fx-notice">
+          <span>Adjustment note {replacement.creditNoteNumber} cancels {replacement.replacesNumber || "the credited invoice"}{replacement.replacementNumber ? `, replaced by ${replacement.replacementNumber}` : ""}. It attaches as stored.</span>
+        </div>
+      ) : null}
       {openedDraft ? (
         <div className="fx-notice"><span>Editing a draft. Sending or scheduling uses this draft, so no copy is left behind.{draft?.checksSentMail ? " An earlier send of it was not confirmed: Field looks for it in Sent Mail first, and does not send it twice." : ""}</span></div>
       ) : null}
@@ -696,7 +801,7 @@ export function EmailComposerPage() {
             mergeFields={context.mergeFields}
             onInsertSignature={() => editorRef.current?.insertHtml(renderSignature(context.signature?.html || null, context.mergeValues))}
           />
-          {creditNoteNumber ? (
+          {creditNoteNumber && jobDocuments === null ? (
             <label className="fx-check fx-composer__check">
               <input type="checkbox" className="fx-checkbox" checked={attachCreditNote} onChange={(event) => setAttachCreditNote(event.target.checked)} />
               Also attach the adjustment note ({creditNoteNumber})
@@ -705,6 +810,8 @@ export function EmailComposerPage() {
           <AttachmentTray
             main={mainAttachment}
             documents={trayDocuments}
+            suggested={suggestedDocuments}
+            onAddSuggested={(uid: string) => setSelectedUids((current) => [...current, uid])}
             uploads={uploads}
             retainedNames={retained}
             onRemoveRetained={(name: string) => setRetained((current) => current.filter((entry) => entry !== name))}

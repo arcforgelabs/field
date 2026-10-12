@@ -84,6 +84,8 @@ export type ScheduledEmail = {
     attachmentFilename?: string | null;
     invoicePaidAmount?: number | null;
     attachCreditNote?: boolean;
+    inReplyTo?: string | null;
+    adjustmentNote?: string | null;
   } | null;
   /** A held send (Undo send), due in seconds. */
   held?: boolean;
@@ -152,6 +154,13 @@ export type EmailContext = {
   signature: { html: string; isDefault: boolean } | null;
   jobContacts: Array<{ email: string; name: string; source: "job" | "sent" }>;
   deliveryPolicy: { mode: "live" | "allowlist" | "disabled"; allowedRecipients?: string[] };
+  /** quote, revised-quote, invoice, replacement-invoice, receipt, adjustment-note or email. */
+  sendType?: string;
+  /** Documents to attach by default (ticked) or offer (unticked), by send type. */
+  suggestions?: Array<{ uid: string; number: string; documentType: string; ticked: boolean; reason: string }>;
+  replacement?: { creditNoteNumber: string; creditNoteUid: string | null; replacesNumber: string | null; replacesTotal?: number | null; total?: number | null; replacementNumber?: string | null } | null;
+  /** The earlier Gmail conversation for this document line. */
+  thread?: { id: string; subject: string | null; sentAt: string | null; to: string[]; threadId: string; headers: boolean; replySubject: string } | null;
 };
 
 /** What a send would produce (POST /api/jobs/:id/email-preview). */
@@ -230,6 +239,8 @@ export type EmailDraftInput = {
   attachCreditNote?: boolean;
   documents?: Array<{ uid: string }>;
   keepAttachments?: string[];
+  inReplyTo?: string | null;
+  adjustmentNote?: string | null;
 };
 
 type CacheSlot<T> = {
@@ -621,9 +632,12 @@ export const api = {
       test?: boolean;
       /** A draft's stored uploads to keep, by name. */
       keepAttachments?: string[] | null;
+      /** Send into the conversation of this earlier sent email (its record id). */
+      inReplyTo?: string | null;
     }
   ) {
     const extra = {
+      ...(options?.inReplyTo ? { inReplyTo: options.inReplyTo } : {}),
       ...(options?.holdSeconds != null ? { holdSeconds: options.holdSeconds } : {}),
       ...(options?.test ? { test: true } : {}),
       ...(options?.keepAttachments ? { keepAttachments: options.keepAttachments } : {}),
@@ -693,8 +707,10 @@ export const api = {
   discardEmailDraft(id: string, draftId: string) {
     return request<{ ok: true; scheduledEmail: ScheduledEmail }>(`/api/jobs/${id}/email-drafts/${draftId}`, { method: "DELETE" });
   },
-  emailContext(id: string, params: { documentType?: string | null; milestoneIndex?: number | null; version?: string | null }) {
+  emailContext(id: string, params: { documentType?: string | null; milestoneIndex?: number | null; version?: string | null; purpose?: string | null; creditNote?: string | null }) {
     const search = new URLSearchParams();
+    if (params.purpose) search.set("purpose", params.purpose);
+    if (params.creditNote) search.set("creditNote", params.creditNote);
     if (params.documentType) search.set("documentType", params.documentType);
     if (params.milestoneIndex != null) search.set("milestoneIndex", String(params.milestoneIndex));
     if (params.version) search.set("version", params.version);
@@ -712,6 +728,7 @@ export const api = {
     documents?: Array<{ uid: string }>;
     uploads?: Array<{ filename: string; byteLength: number }>;
     attachmentFilename?: string | null;
+    adjustmentNote?: string | null;
   }, init?: { signal?: AbortSignal }) {
     return request<EmailPreview>(`/api/jobs/${id}/email-preview`, { method: "POST", body: JSON.stringify(body), signal: init?.signal });
   },
@@ -755,9 +772,14 @@ export const api = {
       holdSeconds?: number | null;
       test?: boolean;
       keepAttachments?: string[] | null;
+      inReplyTo?: string | null;
+      /** An adjustment note sent on its own: its number, for its merge fields. */
+      adjustmentNote?: string | null;
     },
   ) {
     const payload = {
+      ...(options?.inReplyTo ? { inReplyTo: options.inReplyTo } : {}),
+      ...(options?.adjustmentNote ? { adjustmentNote: options.adjustmentNote } : {}),
       ...(options?.documents?.length ? { documents: options.documents.map(({ uid }) => ({ uid })) } : {}),
       ...(options?.holdSeconds != null ? { holdSeconds: options.holdSeconds } : {}),
       ...(options?.test ? { test: true } : {}),

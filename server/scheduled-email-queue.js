@@ -218,6 +218,8 @@ function publicRecord(record) {
       attachmentFilename: record.payload?.attachmentFilename || null,
       invoicePaidAmount: record.payload?.invoicePaidAmount ?? null,
       attachCreditNote: record.payload?.attachCreditNote === true,
+      inReplyTo: record.payload?.inReplyTo || null,
+      adjustmentNote: record.payload?.adjustmentNote || null,
     } : null,
   };
 }

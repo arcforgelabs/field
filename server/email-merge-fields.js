@@ -58,6 +58,8 @@ export function buildEmailMergeValues({
   user = null,
   attachmentNames = [],
   defaultSubject = null,
+  // An adjustment note sent on its own: { creditNoteNumber, replacesNumber, replacementNumber }.
+  adjustmentNote = null,
 }) {
   const milestone = milestoneInvoice || meta?.milestoneInvoice || null;
   let senderName = null;
@@ -98,7 +100,25 @@ export function buildEmailMergeValues({
     values.documentNumber = text(buildReceiptDocumentNumber({ meta, quote, milestoneInvoice: milestone }));
     values.amountDue = money(milestone.amountPaid);
   }
+  if (adjustmentNote?.creditNoteNumber) {
+    values.creditNoteNumber = adjustmentNote.creditNoteNumber;
+    values.replacesNumber = adjustmentNote.replacesNumber || null;
+    values.documentNumber = adjustmentNote.replacementNumber || values.documentNumber;
+  }
   return values;
+}
+
+/** For an adjustment note sent on its own: its number, the invoice it credits and its replacement, from the issued document. */
+export async function adjustmentNoteValues(service, number) {
+  const clean = text(number);
+  if (!clean || !service) return null;
+  const note = await service.findIssuedDocument({ documentType: "credit_note", number: clean }).catch(() => null);
+  if (!note) return null;
+  return {
+    creditNoteNumber: note.number,
+    replacesNumber: text(note.details?.creditedInvoiceNumber),
+    replacementNumber: text(note.details?.replacementInvoiceNumber),
+  };
 }
 
 /** The fields the composer offers (Insert field), with their current values. */

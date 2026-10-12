@@ -695,6 +695,9 @@ html[data-theme="field"][data-mode] .fx-table th, html[data-theme="field"][data-
 .fx-att__lock { display: inline-grid; place-items: center; width: 26px; color: var(--t-mute); }
 .fx-att__lock svg { width: 14px; height: 14px; }
 .fx-att__problem { margin: 0; padding: 8px 12px 10px; color: var(--t-danger); font-size: 12.5px; }
+.fx-att__row--offered .fx-att__name > span { color: var(--t-dim); font-weight: 500; }
+.fx-composer__thread { display: flex; align-items: flex-start; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--fx-line); font-size: 12.5px; color: var(--t-dim); }
+.fx-composer__thread small { display: block; color: var(--t-mute); }
 .fx-att-picker { width: min(620px, 100%); }
 .fx-att-picker__h { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-bottom: 10px; }
 .fx-att-picker__h > span { flex: 1; }
@@ -731,6 +734,11 @@ html[data-theme="field"][data-mode] .fx-table th, html[data-theme="field"][data-
 .fx-rcpt__label { flex: none; width: 56px; color: var(--t-mute); font-size: 12.5px; }
 .fx-composer__from-value { color: var(--t-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fx-composer__subject { flex: 1; min-width: 0; border: 0; background: none; color: var(--t-text); font: 600 14px var(--t-body); height: 34px; outline: none; }
+/* The subject's merge fields read as chips away from the input (SubjectField). */
+.fx-subject { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+.fx-composer__subject--masked { color: transparent; }
+.fx-subject__mirror { position: absolute; inset: 0; display: flex; align-items: center; gap: 0; pointer-events: none; overflow: hidden; white-space: pre; color: var(--t-text); font: 600 14px var(--t-body); }
+.fx-subject__field { padding: 1px 6px; margin: 0 1px; border-radius: 4px; background: color-mix(in srgb, var(--t-accent) 14%, transparent); text-decoration: underline dotted color-mix(in srgb, var(--t-accent) 70%, transparent); text-underline-offset: 3px; }
 .fx-composer__check { margin: 8px 14px 0; }
 .fx-rcpt { position: relative; }
 .fx-rcpt__chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; align-items: center; }

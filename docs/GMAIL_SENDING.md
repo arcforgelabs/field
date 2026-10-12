@@ -201,6 +201,47 @@ the sender and the delivery policy.
   email was for (`mainDocument`). The job's Email tab opens each one exactly
   as it went out.
 
+## Default attachments and the earlier conversation
+
+`GET /api/jobs/:id/email-context` also returns the send type and its
+default attachments (`server/email-send-plan.js`), and the earlier Gmail
+conversation for the same document line:
+
+| Send type | Ticked by default | Offered, unticked |
+| --- | --- | --- |
+| Quote | The quote version being sent | None |
+| Revised quote | The new version | None; the old one is superseded |
+| Milestone invoice | The invoice | The accepted quote |
+| Replacement invoice | The new invoice and its adjustment note | The accepted quote |
+| Adjustment note on its own | The adjustment note | The invoice it credits |
+| Receipt | The receipt | The invoice it pays |
+| Job email | None | Any issued document, through Add |
+
+The email's own document is always attached by the send; the others go by
+uid. A replacement invoice starts on the **Replacement invoice** template;
+an adjustment note sent on its own (from the invoice's menu,
+`?purpose=adjustment-note&creditNote=CN-…`) has templates of its own
+(`adjustment_note`) with the adjustment note number, the invoice it
+cancels and its replacement as merge fields. The "Also attach the adjustment
+note" box (#45) now only appears without a database; the API's
+`attachCreditNote` still works.
+
+**Threading.** A follow-up for the same document line (a quote's revisions;
+a milestone's invoice, its replacement and its receipt; an adjustment note
+and the invoice it credits) is offered into the conversation of the last
+email Field sent for that line, on by default. The send names it with
+`inReplyTo` (the earlier sent record's id). The server then sends with that
+Gmail `threadId`, `In-Reply-To` the earlier message's Message-ID and
+`References` the chain, and the composer uses the earlier subject with
+"Re: ", because Gmail joins a conversation only while the subjects match.
+Sent records keep `rfcMessageId` and `references` for the next reply. An
+email sent before Field kept its Message-ID is threaded by `threadId` alone,
+so the customer's mail may show it apart. A Gmail `threadId` belongs to one
+mailbox, so it is sent only when the earlier email went from the mailbox that
+sends now (its `gmailUser`). A reply to another mailbox's email carries only
+`In-Reply-To`, `References` and the "Re: " subject. Turning the option off
+starts a new conversation with the template's subject.
+
 ## Message-ID
 
 Every document send, and every job email sent from the queue, carries a

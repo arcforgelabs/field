@@ -23,7 +23,7 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/api")>()), api }));
 
-const { EmailComposerPage, composeTemplateBody, plainSendError, undoWindowMs } = await import("./email-composer-page");
+const { EmailComposerPage, SubjectField, composeTemplateBody, plainSendError, undoWindowMs } = await import("./email-composer-page");
 const { EmailRows, SentEmailSheet, emailRows } = await import("./email-record");
 
 const CONTEXT = {
@@ -245,7 +245,112 @@ describe("undo, drafts and the sent record", () => {
   });
 });
 
+describe("replacement invoices and threading", () => {
+  const QUOTE = { uid: "doc_01JB8Z0000000000000000000Q", documentType: "quote", number: "EQ-2609-14 v2", quoteVersion: 2, revision: null, issuedAt: "2026-09-18T06:40:00.000Z", pdfSha256: "a".repeat(64), pdfUrl: "", byteLength: 212 * 1024, status: "accepted", emailed: [] };
+  const NOTE = { ...QUOTE, uid: "doc_01JB8Z0000000000000000000C", documentType: "credit_note", number: "CN-2026-10-1", quoteVersion: null, status: "issued", byteLength: 94 * 1024 };
+  const NEW_INVOICE = { ...QUOTE, uid: "doc_01JB8Z0000000000000000000I", documentType: "invoice", number: "INV-2026-10-2", quoteVersion: null, status: "issued", byteLength: 187 * 1024 };
+  const REPLACEMENT_CONTEXT = {
+    ...CONTEXT,
+    documentType: "invoice",
+    milestoneIndex: 0,
+    defaultSubject: "Invoice — INV-2026-10-2 — Progress claim",
+    templates: [{ id: "replacement", name: "Replacement invoice", description: "", subject: "Replacement invoice {{documentNumber}} · {{jobTitle}}", html: "<p>{{greeting}}</p><p>{{documentNumber}} replaces {{replacesNumber}}.</p>" }],
+    mergeValues: { ...CONTEXT.mergeValues, documentNumber: "INV-2026-10-2", replacesNumber: "INV-2026-10-1", creditNoteNumber: "CN-2026-10-1" },
+    sendType: "replacement-invoice",
+    suggestions: [
+      { uid: NOTE.uid, number: NOTE.number, documentType: "credit_note", ticked: true, reason: "Adjustment note · cancels the invoice this one replaces" },
+      { uid: QUOTE.uid, number: QUOTE.number, documentType: "quote", ticked: false, reason: "The accepted quote · suggested" },
+    ],
+    replacement: { creditNoteNumber: "CN-2026-10-1", creditNoteUid: NOTE.uid, replacesNumber: "INV-2026-10-1", replacesTotal: 8250, total: 7920 },
+    thread: { id: "sent_1", subject: "Invoice INV-2026-10-1 · 14 Copperleaf Rise", sentAt: "2026-10-02T05:42:00.000Z", to: [], threadId: "t-1", headers: true, replySubject: "Re: Invoice INV-2026-10-1 · 14 Copperleaf Rise" },
+  };
+
+  function renderReplacement(toast = vi.fn()) {
+    api.recording.mockResolvedValue({ meta: { id: "job-1", title: "14 Copperleaf Rise", contactEmail: "dana@whitfield.example.invalid", contactName: "Dana Whitfield", milestoneInvoices: [{ milestoneIndex: 0, milestoneLabel: "Progress claim", status: "authorised", invoiceNumber: "INV-2026-10-2", amountPaid: 0, issuedRevision: { invoiceNumber: "INV-2026-10-2", creditNoteNumber: "CN-2026-10-1" } }] }, quote: null });
+    api.jobDocuments.mockResolvedValue({ ok: true, jobId: "job-1", documents: [QUOTE, NOTE, NEW_INVOICE], notIssued: [] });
+    api.emailContext.mockResolvedValue(REPLACEMENT_CONTEXT);
+    api.emailQuote.mockResolvedValue({ ok: true });
+    return render(
+      <ShellContext.Provider value={{ newQuote: () => {}, toast }}>
+        <MemoryRouter initialEntries={["/jobs/job-1/email-editor?documentType=invoice&milestoneIndex=0"]}>
+          <Routes>
+            <Route path="/jobs/:id/email-editor" element={<EmailComposerPage />} />
+            <Route path="/jobs/:id" element={<div>Job page</div>} />
+          </Routes>
+        </MemoryRouter>
+      </ShellContext.Provider>,
+    );
+  }
+
+  it("ticks the adjustment note, offers the accepted quote, and goes into the replaced invoice's conversation", async () => {
+    renderReplacement();
+    await screen.findByText(/INV-2026-10-2 \(\$7,920.00\) replaces INV-2026-10-1 \(\$8,250.00\), which adjustment note CN-2026-10-1 credits in full/);
+    const tray = screen.getByRole("region", { name: "Attachments" });
+    expect(within(tray).getByText("CN-2026-10-1.pdf")).toBeTruthy();
+    expect(within(tray).getByText("2 of 3 ticked")).toBeTruthy();
+    const offered = within(tray).getByRole("checkbox", { name: "Attach EQ-2609-14 v2" }) as HTMLInputElement;
+    expect(offered.checked).toBe(false);
+    expect(screen.queryByText(/Also attach the adjustment note/)).toBeNull();
+    const toggle = screen.getByRole("checkbox", { name: /Send in the conversation of/ }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect((screen.getByLabelText("Subject") as HTMLInputElement).value).toBe("Re: Invoice INV-2026-10-1 · 14 Copperleaf Rise");
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole("combobox", { name: "To" }), { key: "Enter", ctrlKey: true });
+    });
+    await waitFor(() => expect(api.emailQuote).toHaveBeenCalled());
+    const options = api.emailQuote.mock.calls[0][3];
+    expect(options.documents).toEqual([{ uid: NOTE.uid }]);
+    expect(options.inReplyTo).toBe("sent_1");
+    expect(options.subject).toBe("Re: Invoice INV-2026-10-1 · 14 Copperleaf Rise");
+  });
+
+  it("unticking the adjustment note leaves it out; turning the conversation off restores the subject", async () => {
+    renderReplacement();
+    const tray = await screen.findByRole("region", { name: "Attachments" });
+    await within(tray).findByText("CN-2026-10-1.pdf");
+    fireEvent.click(within(tray).getByRole("button", { name: "Remove CN-2026-10-1" }));
+    expect((within(tray).getByRole("checkbox", { name: "Attach CN-2026-10-1" }) as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Send in the conversation of/ }));
+    expect((screen.getByLabelText("Subject") as HTMLInputElement).value).toBe("Replacement invoice INV-2026-10-2 · 14 Copperleaf Rise");
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole("combobox", { name: "To" }), { key: "Enter", ctrlKey: true });
+    });
+    await waitFor(() => expect(api.emailQuote).toHaveBeenCalled());
+    const options = api.emailQuote.mock.calls[0][3];
+    expect(options.documents).toEqual([]);
+    expect(options.inReplyTo).toBeNull();
+  });
+
+  it("previews an adjustment note on its own with the note's number", async () => {
+    api.emailContext.mockResolvedValue({ ...CONTEXT, mergeValues: { ...CONTEXT.mergeValues, creditNoteNumber: "CN-2026-10-1" } });
+    render(
+      <ShellContext.Provider value={{ newQuote: () => {}, toast: vi.fn() }}>
+        <MemoryRouter initialEntries={["/jobs/job-1/email-editor?purpose=adjustment-note&creditNote=CN-2026-10-1"]}>
+          <Routes>
+            <Route path="/jobs/:id/email-editor" element={<EmailComposerPage />} />
+          </Routes>
+        </MemoryRouter>
+      </ShellContext.Provider>,
+    );
+    await screen.findByRole("heading", { name: "Send adjustment note CN-2026-10-1" });
+    await waitFor(() => expect(api.emailPreview).toHaveBeenCalled(), { timeout: 2000 });
+    expect(api.emailPreview.mock.calls.at(-1)?.[1].adjustmentNote).toBe("CN-2026-10-1");
+  });
+});
+
 describe("composer", () => {
+  it("shows a merge field in the subject as a readable chip, and the raw field while it is edited", () => {
+    render(<SubjectField value="Invoice {{documentNumber}} · {{jobTitle}}" onChange={() => {}} values={{ documentNumber: null, jobTitle: "14 Copperleaf Rise" }} />);
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    expect(input.className).toContain("fx-composer__subject--masked");
+    const mirror = document.querySelector(".fx-subject__mirror") as HTMLElement;
+    expect(mirror.textContent).toBe("Invoice Document number · 14 Copperleaf Rise");
+    expect(mirror.querySelector('[data-merge="documentNumber"]')?.textContent).toBe("Document number");
+    fireEvent.focus(input);
+    expect(document.querySelector(".fx-subject__mirror")).toBeNull();
+    expect(input.value).toBe("Invoice {{documentNumber}} · {{jobTitle}}");
+  });
+
   it("fills the template and signature from the server's values, the merge fields marked", () => {
     const html = composeTemplateBody(CONTEXT.templates[0], CONTEXT);
     expect(html).toContain('<span data-merge="clientName">Dana Whitfield</span>');

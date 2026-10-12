@@ -44,6 +44,7 @@ import {
   writeMilestoneInvoiceArtifact,
   writeMilestoneReceiptArtifact,
   writeQuoteArtifacts,
+  sanitizeAttachmentFilename,
 } from "./quote-artifacts.js";
 import { projectQuoteForReviewState } from "./quote-review-projection.js";
 import { applyPresentationToQuote, getCustomerPresentationFinancials } from "./quote-presentation.js";
@@ -1752,19 +1753,6 @@ function annotateCarriedForwardPayment({
   };
 }
 
-function sanitizeAttachmentFilename(filename) {
-  const raw = String(filename || "").trim();
-  if (!raw) return null;
-  const withoutExtension = raw.replace(/\.pdf$/i, "");
-  const cleaned = withoutExtension
-    .replace(/[/\\:*?"<>|]+/g, "-")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 160);
-  if (!cleaned) return null;
-  return `${cleaned}.pdf`;
-}
-
 function buildMilestoneInvoiceActivityBody({
   milestoneInvoice,
   to,
@@ -1920,6 +1908,7 @@ async function prepareQuoteDeliveryAttempt({
   attachedDocuments = [],
   messageIdHost,
   uploadNames = [],
+  thread = null,
 }) {
   let preparedMeta = resolvedMeta;
   let preparedQuote = deliveryQuote;
@@ -2097,6 +2086,8 @@ async function prepareQuoteDeliveryAttempt({
     // Field documents attached by uid: the reference and hash, never the
     // bytes. A dispatch reads them again from the issued-document store.
     documents: attachedDocuments.map(documentAttachmentRecord),
+    // Into the earlier Gmail conversation, kept so a retry threads the same.
+    thread: thread || null,
     bcc: Array.isArray(bcc) ? bcc : [],
     customBody: mergedBody || null,
     validatedInvoicePaidAmount,
@@ -2152,6 +2143,8 @@ export async function sendJobQuote({
   // recorder's when not given).
   documents = [],
   documentService = undefined,
+  // { threadId, inReplyTo, references } (server/email-threads.js), or null.
+  thread = null,
 }) {
   const documentStore = documentService === undefined ? issuedDocumentRecorder().service || null : documentService;
   // Reconcile an existing attempt before reading mutable current quote state.
@@ -2223,6 +2216,8 @@ export async function sendJobQuote({
       sendPolicy: pendingDelivery.sendPolicy || { businessStage: normalizePipelineStage(pendingDelivery.preparedMeta?.pipelineStage), selectedVersionLocked: false },
       latestVersion: pendingDelivery.latestVersion || pendingDelivery.preparedQuote.version,
       pendingAttemptId: pendingDelivery.attemptId,
+      rfcMessageId: pendingDelivery.messageId || null,
+      thread: pendingDelivery.thread || null,
       pendingArtifacts,
       scheduledEmailId: pendingDelivery.scheduledEmailId || null,
       scheduledAt: pendingDelivery.scheduledAt || null,
@@ -2349,6 +2344,7 @@ export async function sendJobQuote({
       attachedDocuments,
       messageIdHost: resolveMessageIdHost({ config, user }),
       uploadNames: (additionalAttachments || []).map((attachment) => attachment?.filename).filter(Boolean),
+      thread,
     })
   ));
   let {
@@ -2425,6 +2421,7 @@ export async function sendJobQuote({
     additionalAttachments: [...documentMimeAttachments(attachedDocuments), ...additionalAttachments],
       deliveryAttemptId: pendingAttempt.attemptId,
       deliveryMessageId: pendingAttempt.messageId || null,
+      thread: pendingAttempt.thread || null,
     });
   } catch (error) {
     // A timeout or process interruption may have happened after Gmail accepted
@@ -2461,6 +2458,8 @@ export async function sendJobQuote({
     sendPolicy,
     latestVersion,
     pendingAttemptId: pendingAttempt.attemptId,
+    rfcMessageId: pendingAttempt.messageId || null,
+    thread: pendingAttempt.thread || null,
     scheduledEmailId,
     scheduledAt,
     attachedDocuments: pendingAttempt.documents || [],
@@ -2562,6 +2561,7 @@ async function dispatchPendingQuoteDelivery({
       additionalAttachments: [...documentMimeAttachments(attachedDocuments), ...(additionalAttachments || [])],
       deliveryAttemptId: attempt.attemptId,
       deliveryMessageId: attempt.messageId || null,
+      thread: attempt.thread || null,
     });
   } catch (error) {
     const outcomeUnknown = !isProvablyRejectedDeliveryError(error);
@@ -2601,6 +2601,8 @@ async function dispatchPendingQuoteDelivery({
       },
       latestVersion: attempt.latestVersion || attempt.preparedQuote.version,
       pendingAttemptId: attempt.attemptId,
+      rfcMessageId: attempt.messageId || null,
+      thread: attempt.thread || null,
       pendingArtifacts: artifacts,
       scheduledEmailId: attempt.scheduledEmailId || null,
       scheduledAt: attempt.scheduledAt || null,
@@ -2708,6 +2710,8 @@ async function finalizeSuccessfulDelivery({
   sendPolicy,
   latestVersion,
   pendingAttemptId = null,
+  rfcMessageId = null,
+  thread = null,
   pendingArtifacts = null,
   expectedPreparedVersion = null,
   scheduledEmailId = null,
@@ -2774,6 +2778,8 @@ async function finalizeSuccessfulDelivery({
     quoteVersion: issuedVersion,
     milestoneIndex: preparedMilestoneInvoice?.milestoneIndex ?? milestoneIndex ?? null,
     issuedDocumentId: issuance.issuanceId,
+    rfcMessageId,
+    references: thread?.references || null,
     scheduledEmailId,
     scheduledAt,
     sentBy: user ? { id: user.id, email: user.email, name: user.name } : null,

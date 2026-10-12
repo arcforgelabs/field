@@ -57,7 +57,8 @@ const gmailUsersFor = (mailbox) => ({
       writeFileSync(join(mailDir, name), raw);
       mailboxOf.set(name, mailbox);
       if (failure) throw failureError(failure);
-      return { data: { id: `proof-message-${index}`, threadId: `proof-thread-${index}` } };
+      // A send that names a thread joins it, as Gmail's does.
+      return { data: { id: `proof-message-${index}`, threadId: requestBody?.threadId || `proof-thread-${index}` } };
     },
     // Sent Mail search by Message-ID (q: "in:sent rfc822msgid:<...>").
     async list({ q = "" } = {}) {
