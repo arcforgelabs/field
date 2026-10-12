@@ -211,10 +211,10 @@ test("the route in the real server: admins only, ids and numbers only, writes no
   const byId = Object.fromEntries(body.migrations.map((entry) => [entry.id, entry]));
   assert.deepEqual(body.migrations.map((entry) => entry.id), ["2026-10-12-quote-rows-by-uid", "2026-10-12-price-book-cleanup", QUOTE_ROWS_BACKFILL_ID, INVOICE_ROWS_BACKFILL_ID]);
   assert.equal(byId[QUOTE_ROWS_BACKFILL_ID].status, "would-apply");
-  assert.equal(byId[QUOTE_ROWS_BACKFILL_ID].summary.jobs, 6);
+  assert.equal(byId[QUOTE_ROWS_BACKFILL_ID].summary.jobs, 7);
   assert.equal(byId[QUOTE_ROWS_BACKFILL_ID].summary.refusedJobs, 0);
   assert.equal(byId[INVOICE_ROWS_BACKFILL_ID].status, "would-apply");
-  assert.deepEqual([byId[INVOICE_ROWS_BACKFILL_ID].summary.jobsWithMilestones, byId[INVOICE_ROWS_BACKFILL_ID].summary.written], [6, 6]);
+  assert.deepEqual([byId[INVOICE_ROWS_BACKFILL_ID].summary.jobsWithMilestones, byId[INVOICE_ROWS_BACKFILL_ID].summary.written], [7, 7]);
   assert.deepEqual(byId[INVOICE_ROWS_BACKFILL_ID].waitingFor, [QUOTE_ROWS_BACKFILL_ID]);
   for (const customerText of ["Sam Customer", "Synthetic job", "customer@example.invalid", "Driveway", "Retaining wall"]) {
     assert.equal(text.includes(customerText), false, `no customer text in the answer (${customerText})`);
@@ -228,8 +228,8 @@ test("the route in the real server: admins only, ids and numbers only, writes no
   const bootOutput = [];
   const released = await startField(t, { dir, env, output: bootOutput });
   const log = bootOutput.join("");
-  assert.match(log, new RegExp(`\\[data-migrations\\] ${QUOTE_ROWS_BACKFILL_ID}: applied \\(6 job\\(s\\), \\d+ quote version\\(s\\): \\d+ written, 0 already present, 0 job\\(s\\) refused; \\d+ warning\\(s\\)\\); recorded`));
-  assert.match(log, new RegExp(`\\[data-migrations\\] ${INVOICE_ROWS_BACKFILL_ID}: applied \\(6 job\\(s\\) with milestones, 11 invoice\\(s\\): 6 job\\(s\\) written, 0 already present, 0 job\\(s\\) refused; \\d+ warning\\(s\\)\\); recorded`));
+  assert.match(log, new RegExp(`\\[data-migrations\\] ${QUOTE_ROWS_BACKFILL_ID}: applied \\(7 job\\(s\\), \\d+ quote version\\(s\\): \\d+ written, 0 already present, 0 job\\(s\\) refused; \\d+ warning\\(s\\)\\); recorded`));
+  assert.match(log, new RegExp(`\\[data-migrations\\] ${INVOICE_ROWS_BACKFILL_ID}: applied \\(7 job\\(s\\) with milestones, 14 invoice\\(s\\): 7 job\\(s\\) written, 0 already present, 0 job\\(s\\) refused; \\d+ warning\\(s\\)\\); recorded`));
   const after = await released.dryRun(await released.login("owner@example.invalid", "route-owner-password"));
   assert.equal(after.status, 200, after.text);
   const statuses = Object.fromEntries(after.body.migrations.map((entry) => [entry.id, entry.status]));
@@ -237,7 +237,7 @@ test("the route in the real server: admins only, ids and numbers only, writes no
   assert.equal(statuses[INVOICE_ROWS_BACKFILL_ID], "already-applied");
   await released.stop();
   const counts = await rowsAndLedger(pgliteDir);
-  assert.equal(counts.invoices, 11);
+  assert.equal(counts.invoices, 14);
   assert.ok(counts.quotes >= 6);
   assert.deepEqual(jobFileHashes(dataDir), filesBefore, "the backfills wrote rows only");
 });

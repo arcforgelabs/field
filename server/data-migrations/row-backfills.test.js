@@ -155,20 +155,22 @@ for (const backend of backends) {
         [INVOICE_ROWS_BACKFILL_ID, "applied"],
       ]);
       const quotes = first.byId[QUOTE_ROWS_BACKFILL_ID].summary;
-      assert.deepEqual([quotes.jobs, quotes.refusedJobs, quotes.alreadyPresent], [6, 0, 0]);
+      // The 4a fixtures' seven jobs, one of them a deposit paid and then
+      // revised in place before credit notes (#28).
+      assert.deepEqual([quotes.jobs, quotes.refusedJobs, quotes.alreadyPresent], [7, 0, 0]);
       assert.equal(quotes.written, quotes.versions, "every quote version written");
-      assert.ok(quotes.versions >= 6, "every job's quote");
+      assert.ok(quotes.versions >= 7, "every job's quote");
       const invoices = first.byId[INVOICE_ROWS_BACKFILL_ID].summary;
-      assert.deepEqual([invoices.jobsWithMilestones, invoices.written, invoices.alreadyPresent, invoices.refusedJobs, invoices.invoices], [6, 6, 0, 0, 11]);
+      assert.deepEqual([invoices.jobsWithMilestones, invoices.written, invoices.alreadyPresent, invoices.refusedJobs, invoices.invoices], [7, 7, 0, 0, 14]);
       assert.deepEqual(first.lines, [
-        `[data-migrations] ${QUOTE_ROWS_BACKFILL_ID}: applied (6 job(s), ${quotes.versions} quote version(s): ${quotes.versions} written, 0 already present, 0 job(s) refused; ${quotes.warnings} warning(s)); recorded`,
-        `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: applied (6 job(s) with milestones, 11 invoice(s): 6 job(s) written, 0 already present, 0 job(s) refused; 0 warning(s)); recorded`,
+        `[data-migrations] ${QUOTE_ROWS_BACKFILL_ID}: applied (7 job(s), ${quotes.versions} quote version(s): ${quotes.versions} written, 0 already present, 0 job(s) refused; ${quotes.warnings} warning(s)); recorded`,
+        `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: applied (7 job(s) with milestones, 14 invoice(s): 7 job(s) written, 0 already present, 0 job(s) refused; 1 warning(s)); recorded`,
       ], "one line per migration, with the counts");
 
       const recorded = await ledger(db);
       assert.deepEqual(Object.keys(recorded), [INVOICE_ROWS_BACKFILL_ID, QUOTE_ROWS_BACKFILL_ID]);
       assert.equal(recorded[QUOTE_ROWS_BACKFILL_ID].written, quotes.versions);
-      assert.equal(recorded[INVOICE_ROWS_BACKFILL_ID].written, 6);
+      assert.equal(recorded[INVOICE_ROWS_BACKFILL_ID].written, 7);
       assert.deepEqual(treeHashes(dataDir), filesBefore, "no job file was written");
 
       const invoiceRows = createInvoiceRowService({ db, orgUid: DEFAULT_ORG_UID });
@@ -199,7 +201,7 @@ for (const backend of backends) {
       const first = await boot();
       assert.deepEqual(first.report.map((entry) => entry.status), ["applied", "incomplete"]);
       const invoices = first.byId[INVOICE_ROWS_BACKFILL_ID];
-      assert.deepEqual([invoices.summary.written, invoices.summary.refusedJobs], [5, 1]);
+      assert.deepEqual([invoices.summary.written, invoices.summary.refusedJobs], [6, 1]);
       assert.deepEqual(invoices.refused, [{
         jobId: "job-deposit",
         mismatches: [
@@ -209,7 +211,7 @@ for (const backend of backends) {
         ],
       }]);
       assert.deepEqual(first.lines.slice(1), [
-        `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: incomplete (6 job(s) with milestones, 11 invoice(s): 5 job(s) written, 0 already present, 1 job(s) refused; ${invoices.summary.warnings} warning(s)); not recorded (1 job(s) refused), runs again at next boot`,
+        `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: incomplete (7 job(s) with milestones, 14 invoice(s): 6 job(s) written, 0 already present, 1 job(s) refused; ${invoices.summary.warnings} warning(s)); not recorded (1 job(s) refused), runs again at next boot`,
         `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: refused job job-deposit: EI-2605-02-M1 totals: subtotal rows 900.00 vs revision-pdf 925.50; EI-2605-02-M1 totals: taxTotal rows 90.00 vs revision-pdf 92.55; EI-2605-02-M1 totals: total rows 990.00 vs revision-pdf 1018.05`,
       ]);
       const logged = first.lines.join("\n");
@@ -225,7 +227,7 @@ for (const backend of backends) {
       const counts = await rowCounts(db);
       const retry = await boot();
       assert.deepEqual(retry.report.map((entry) => entry.status), ["already-applied", "incomplete"]);
-      assert.deepEqual([retry.byId[INVOICE_ROWS_BACKFILL_ID].summary.written, retry.byId[INVOICE_ROWS_BACKFILL_ID].summary.alreadyPresent], [0, 5]);
+      assert.deepEqual([retry.byId[INVOICE_ROWS_BACKFILL_ID].summary.written, retry.byId[INVOICE_ROWS_BACKFILL_ID].summary.alreadyPresent], [0, 6]);
       assert.deepEqual(await rowCounts(db), counts, "the retry is idempotent");
 
       // Once the job verifies, the next boot writes it and records the backfill.
@@ -235,7 +237,7 @@ for (const backend of backends) {
       });
       const fixed = await boot();
       assert.deepEqual(fixed.report.map((entry) => entry.status), ["already-applied", "applied"]);
-      assert.deepEqual([fixed.byId[INVOICE_ROWS_BACKFILL_ID].summary.written, fixed.byId[INVOICE_ROWS_BACKFILL_ID].summary.alreadyPresent], [1, 5]);
+      assert.deepEqual([fixed.byId[INVOICE_ROWS_BACKFILL_ID].summary.written, fixed.byId[INVOICE_ROWS_BACKFILL_ID].summary.alreadyPresent], [1, 6]);
       assert.equal((await invoiceRows.readJob("job-deposit")).invoices.length, 2);
       assert.deepEqual(Object.keys(await ledger(db)), [INVOICE_ROWS_BACKFILL_ID, QUOTE_ROWS_BACKFILL_ID]);
     });
@@ -269,7 +271,7 @@ for (const backend of backends) {
       const filesBefore = treeHashes(dataDir);
       const dry = await boot({ mode: "dry-run" });
       assert.deepEqual(dry.report.map((entry) => entry.status), ["would-apply", "would-apply"]);
-      assert.equal(dry.byId[INVOICE_ROWS_BACKFILL_ID].summary.written, 6);
+      assert.equal(dry.byId[INVOICE_ROWS_BACKFILL_ID].summary.written, 7);
       assert.deepEqual(dry.byId[INVOICE_ROWS_BACKFILL_ID].waitingFor, [QUOTE_ROWS_BACKFILL_ID]);
       assert.deepEqual(dry.lines, []);
       assert.deepEqual(await rowCounts(db), { quotes: 0, quote_lines: 0, milestones: 0, invoices: 0, payments: 0, receipts: 0 });
