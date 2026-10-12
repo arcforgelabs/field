@@ -87,6 +87,8 @@ test("5xx answers and background failures reach Sentry once, scrubbed", async (t
     SENTRY_ENVIRONMENT: "test",
     FIELD_REVISION: "0123456789abcdef",
     SENTRY_REPLAYS_SESSION_SAMPLE_RATE: "1",
+    // Every request is traced, so the transaction checks below always run.
+    SENTRY_TRACES_SAMPLE_RATE: "1",
   });
   const events = [];
   Sentry.getClient().on("beforeSendEvent", (event) => events.push(event));
@@ -96,7 +98,7 @@ test("5xx answers and background failures reach Sentry once, scrubbed", async (t
   assert.match(script, /^<script>window\.__FIELD_SENTRY__=\{.*\};<\/script>$/);
   assert.match(script, /"environment":"test"/);
   assert.match(script, /"release":"0123456789abcdef"/);
-  assert.match(script, /"tracesSampleRate":0.2/);
+  assert.match(script, /"tracesSampleRate":1/);
   assert.match(script, /"replaysSessionSampleRate":1/);
   assert.match(script, /"replaysOnErrorSampleRate":1/);
   assert.match(script, /"feedback":true/);
@@ -123,6 +125,7 @@ test("5xx answers and background failures reach Sentry once, scrubbed", async (t
   await Sentry.flush(2000);
 
   const transactions = events.filter((event) => event.type === "transaction");
+  assert.ok(transactions.length > 0, "the traced requests reached Sentry");
   for (const transaction of transactions) {
     assert.ok(!JSON.stringify(transaction).includes("token=abc"), "no query string in a transaction");
     assert.ok(!JSON.stringify(transaction).includes("12-main-st"), "no address-like job id in a transaction");
