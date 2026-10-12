@@ -14,8 +14,13 @@ identities) live in the installation's secret store, never here.
    configured (`googleServiceAccountKey` / `GOOGLE_SERVICE_ACCOUNT_KEY`) **and**
    a delegated user resolves. Mints a send-only JWT impersonating that user.
 2. **Per-user OAuth.** Only reached when there is no key file or no delegated
-   user. Uses `googleOAuth.users[<signed-in email>].refreshToken`, falling back
-   to a legacy global `googleOAuth.refreshToken`.
+   user. Uses the signed-in user's refresh token: one granted in the app
+   (`GET /api/auth/gmail`, stored in `FIELD_DATA/gmail-oauth-users.json`,
+   mode 0600), else `googleOAuth.users[<signed-in email>].refreshToken`,
+   falling back to a legacy global `googleOAuth.refreshToken`.
+   `GOOGLE_OAUTH_REFRESH_TOKEN`, when set, outranks all of them, and
+   `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` outrank the client
+   in config.
 
 The delegated user comes from `resolveExpectedGmailUser`, which resolves:
 
@@ -33,7 +38,8 @@ Two consequences that are easy to get wrong:
   as an outside account fails no matter what the configured default sender says.
 
 `GET /api/auth/gmail` (`server/index.js`) uses a *different* test — it treats
-delegation as active only when `mail.gmailUser` is explicitly set. The two
+delegation as active only when `FIELD_MAIL_GMAIL_USER` or `mail.gmailUser` is
+explicitly set. The two
 disagree. That disagreement concealed a live outage once; if you touch
 this area, reconcile them.
 

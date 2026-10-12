@@ -2,7 +2,7 @@
  * Generate landscaping quote PDF for job CD18E516.
  * Produces: quote.json, quote.pdf, meta.json, cost-vs-price report.
  *
- * Usage:  node apps/field/generate-landscaping-quote.js
+ * Usage:  node generate-landscaping-quote.js
  */
 
 import { mkdir, writeFile } from "node:fs/promises";

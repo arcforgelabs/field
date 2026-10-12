@@ -1,7 +1,7 @@
 # Price catalogue (`server/catalog/`)
 
 Field's price catalogue lives in PostgreSQL, in the tables of
-`server/db/src/schema.ts` (migration `server/db/drizzle/0001_price_catalogue.sql`).
+`server/db/src/schema.ts` (migration `server/db/drizzle/0003_price_catalogue.sql`).
 The SQLite `data/price-catalog/catalog.db` is no longer read at runtime; it is
 an import source only (`legacy-import.js`).
 
@@ -24,7 +24,10 @@ an import source only (`legacy-import.js`).
 | `price-import.js` | Supplier price-list imports: `inspectPriceList`, `stageImport`, `applyImport`, `discardImport`. |
 | `csv.js` | The CSV reader, money parsing and column-map guessing/validation for imports. |
 | `price-book-health.js` | Health checks for stale prices, scheduled price changes and staged imports. |
-| `price-book-http.js` | The HTTP routes for all of the above, mounted under `/api/price-catalog`. |
+| `price-book-http.js` | The price book's HTTP routes (grid, bulk edits, suppliers, imports), mounted under `/api/price-catalog`. The other catalogue routes are in `server/price-catalog/catalog-api.js`. |
+| `refs.js` | `resolveItemRef`: an item named by uid, else by legacy code. |
+| `item-codes.js` | `omitItemCodes` and the `Prefer: field-item-codes=omit` handling. |
+| `usage.js` | "Used on N quotes": which quotes use each item. |
 
 Pricing projections over a snapshot (price maps, the quote-catalog overlay,
 the quote pricing snapshot, recipe pricing, the wall rate card) stay in
@@ -103,8 +106,8 @@ catalogue allows (min ↔ hour, mm ↔ m, an item's own conversion), else a
 problem (`missing_item`, `inactive_item`, `unpriced_item`, `unit_mismatch`,
 `unknown_unit`) naming the item. A recipe line with a problem is not priced;
 its pricing issue carries the message. Golden fixtures
-(`fixtures/assembly-golden.json`, captured from the hardcoded recipes at
-52fc3e9 by `fixtures/assembly-golden.capture.mjs`) prove the assemblies give
+(`fixtures/assembly-golden.json`, captured from the hardcoded recipes, before
+they became assembly data, by `fixtures/assembly-golden.capture.mjs`) prove the assemblies give
 the same quantities, and at the same rates the same prices.
 
 The engine modes that read assemblies (`lawn_bundle`, `irrigation_bundle`,
@@ -196,7 +199,7 @@ prices.
 The measured-assembly tables (`assembly_params`, `assembly_vars`,
 `assembly_components`, `assembly_tests`, `assembly_versions`) were never
 written and migration 0007 dropped them; measured formulas are deferred
-(`docs/PRICING_ENGINE.md` decision 4), and the recipes that need them stay in
+(`docs/PRICING_ENGINE.md` "`kit_components`"), and the recipes that need them stay in
 the quote catalog until phase 4.
 
 - **Type, sold, pricing method** (pricing engine phase 1, migration 0007). `items.type`
@@ -230,7 +233,7 @@ Writes (each one transaction): `createItem(input, { author, reason })`,
 `attachEvidence`, `removeEvidence`.
 
 Errors are `CatalogError { code, path, message, statusCode }`: `NOT_FOUND`,
-`CODE_CONFLICT`, `CODE_READ_ONLY`, `NAME_CONFLICT` (`CatalogNameConflictError`, with `conflict`),
+`CODE_CONFLICT`, `CODE_READ_ONLY`, `CATEGORY_CONFLICT`, `NAME_CONFLICT` (`CatalogNameConflictError`, with `conflict`),
 `VERSION_CONFLICT`, `CYCLE`, `UNIT_MISMATCH`, `UNKNOWN_UNIT`, `UNKNOWN_REF`,
 `PRICING_BASIS`, `INVALID`, `INVALID_QUANTITY`, `FUTURE_PRICE_UNSUPPORTED`,
 `PENDING_PRICE_CHANGE`.
@@ -412,7 +415,10 @@ npm run catalog:price-gate -- --compare before.json   # exit 1 if any item price
 ## The price book clean-up (code retirement step 5)
 
 `server/data-migrations/price-book-cleanup.js` applies
-`price-book-cleanup.plan.json` once, at boot, in one catalogue transaction:
+`price-book-cleanup.plan.json` once, at boot, in one catalogue transaction.
+The plan is built from an installation's own catalogue export and review,
+and is not in this repository: with no plan file the migration is deferred,
+changes nothing and is not recorded. What it applies:
 names, types and categories (a two-level tree by what an item is), kits made
 of one resource or sitting below a sold kit's second level folded into the
 kits that use them (quantities multiplied through, rows with the same

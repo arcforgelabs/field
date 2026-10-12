@@ -124,7 +124,7 @@ request instead.
    | --- | --- |
    | `CLERK_SECRET_KEY` | Server: verifies sessions and looks up a new user's email (`sk_test_...` / `sk_live_...`) |
    | `CLERK_PUBLISHABLE_KEY` | Server hands it to the browser at runtime through `GET /api/auth/config` (`pk_test_...` / `pk_live_...`). `VITE_CLERK_PUBLISHABLE_KEY` is accepted if that is the name Replit uses |
-   | `CLERK_PROXY_URL` | Optional, passed to Clerk if Replit sets it |
+   | `CLERK_PROXY_URL` | Set by Replit's managed Clerk on the published app (`/api/__clerk`). Field serves Clerk's Frontend API on that path (`server/auth/clerk-proxy.js`), so sign-in loads from the app's own origin. Unset: no proxy |
    | `DATABASE_URL` | Required: Field users live in PostgreSQL |
 
    The browser gets the publishable key from the server at runtime rather than
@@ -149,11 +149,11 @@ request instead.
    | `FIELD_PUBLIC_ORIGIN` | the published `https://` origin | Published app only. Clerk accepts only session tokens minted for this origin (`authorizedParties`); also the MCP OAuth issuer. Leave unset in the workspace, whose preview origin differs |
    | `FIELD_TRUST_PROXY` | unset | `trust proxy` override; see below |
 
-6. Restart. The boot log shows `[auth] imported N user(s) from users.json ...`
-   the first time, then `[auth] Clerk sign-in on (CLERK_SECRET_KEY,
-   CLERK_PUBLISHABLE_KEY)` and `[auth] owner actions: ... Google Workspace
-   sign-in on your domain with no password; Clerk authorized parties:
-   ...`. Field refuses to start with `FIELD_AUTH=clerk` if a key is missing or
+6. Restart. The boot log shows `[auth] owner actions: ... Google Workspace
+   sign-in on <your domain> with no password; Clerk authorized parties:
+   ...`, then `[auth] imported N user(s) from users.json ...` the first
+   time, then `[auth] Clerk sign-in on (CLERK_SECRET_KEY,
+   CLERK_PUBLISHABLE_KEY) ...`. Field refuses to start with `FIELD_AUTH=clerk` if a key is missing or
    malformed, a setting above is malformed, or there is no database.
 
 ### Client addresses behind Replit's proxy (`trust proxy`)

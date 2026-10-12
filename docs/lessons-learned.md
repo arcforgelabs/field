@@ -7,7 +7,7 @@ the commit that landed it — so future debugging has the full trail.
 
 ---
 
-## 2026-10-12 — Jobs open by their link but are missing from the jobs board (#32)
+## 2026-10-12 — Jobs open by their link but are missing from the jobs board (#32, fixed in #34)
 
 **Symptom:** On a live installation the board listed 57 jobs while the data
 directory held 65. The 8 missing jobs, all created in April 2026, were not
@@ -33,6 +33,10 @@ folder moved. The list reconciles again when a row's folder is gone, and
 ---
 
 ## 2026-04-12 — "Make Current" on archived quote version freezes the page
+
+This entry predates the open-source release. The commits it names are not in
+this repository's history, and the files it names have since been removed.
+The rules at the end still apply.
 
 **Symptom:** Clicking **Make Current** on an archived quote version caused the
 screen to dim and then become completely unresponsive. Refreshing did not

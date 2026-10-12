@@ -128,7 +128,7 @@ Treat `field --help` as authoritative. Current high-value commands:
 ### Core
 
 ```bash
-field create-job "58 Landale Bvd, Redwood Park"
+field create-job "12 Sample Street, Exampleton"
 field list-jobs
 field get-job <jobId> [--version latest|customer|v003]
 field get-quote <jobId> [--version latest|customer|v003]
@@ -242,11 +242,11 @@ Price catalog routes:
 - `POST /api/price-catalog/categories`
 - `PATCH /api/price-catalog/categories/:id`
 - `DELETE /api/price-catalog/categories/:id`
-- `GET /api/price-catalog/items?status=active|inactive|all&category=<name>&kind=goods_service|component&search=<text>`
+- `GET /api/price-catalog/items?status=active|draft|archived|all&category=<name>&search=<text>`. The deprecated `kind=component` filter returns only items with kit parts; `kind=item` returns only items without them.
 - `GET /api/price-catalog/items/:codeOrUid`
 - `POST /api/price-catalog/items`
 - `PATCH /api/price-catalog/items/:codeOrUid`
-- `DELETE /api/price-catalog/items/:codeOrUid` archives the item.
+- `DELETE /api/price-catalog/items/:codeOrUid` deletes the item and removes it from every kit that uses it. To archive an item, `PATCH` its `status` to `archived`.
 - `GET /api/price-catalog/items/:codeOrUid/children`
 - `POST /api/price-catalog/items/:codeOrUid/children`
 - `PATCH /api/price-catalog/items/:codeOrUid/children/:childCodeOrUid`
@@ -309,7 +309,7 @@ Check catalog health and inspect a catalog item:
 
 ```bash
 curl -s -H "Authorization: Bearer $FIELD_TOKEN" "$FIELD_URL/api/price-catalog/health"
-curl -s -H "Authorization: Bearer $FIELD_TOKEN" "$FIELD_URL/api/price-catalog/items?status=active&kind=goods_service"
+curl -s -H "Authorization: Bearer $FIELD_TOKEN" "$FIELD_URL/api/price-catalog/items?status=active&search=labour"
 ```
 
 Create a component and attach it to a goods/service recipe:

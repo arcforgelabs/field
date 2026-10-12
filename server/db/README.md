@@ -1,18 +1,22 @@
 # Field DB Lane
 
-Additive DB-first scaffold for `apps/field`. This lane does not change the live runtime contract, live API routes, or the current shipped Field UX baseline work.
+Field's PostgreSQL schema and migrations. The Drizzle migrations in
+`drizzle/` are live: the server applies them at boot (see "Runtime" below).
+The older `migrations/0001_initial.sql` lane (from "Scope" on) is an additive
+scaffold that the running server does not use.
 
 ## Drizzle toolchain
 
 The typed Drizzle source lives in `src/` and targets PostgreSQL. The generated
 ESM output is written to `dist/` (ignored in source control and copied into
 the runtime image by the Docker build). `src/schema.ts` holds the
-test-scoped `drizzle_toolchain_probe` table (it proves the toolchain) and the
-price catalogue's tables (`server/catalog/README.md`, migration
-`0001_price_catalogue`).
+test-scoped `drizzle_toolchain_probe` table (it proves the toolchain) and
+every table the server uses: durable storage, users and tenancy, the price
+catalogue (`server/catalog/README.md`, migration `0003_price_catalogue`),
+data migrations, issued documents, quote rows and invoice rows.
 
 The generated migration set is `drizzle/`. It is intentionally separate from
-the older hand-written `migrations/0001_initial.sql` backfill lane above;
+the older hand-written `migrations/0001_initial.sql` backfill lane below;
 Drizzle does not replay or replace that legacy migration.
 
 From the repository root:
@@ -25,9 +29,11 @@ npm run db:check           # verify generated migration history is consistent
 npm run db:check:ci        # regenerate, check, and fail on uncommitted drift
 ```
 
-Applying or opening Studio requires an explicitly supplied `DATABASE_URL`.
-Keep it in the approved local environment/secret store; it is never needed by
-normal Field boot:
+Applying or opening Studio from the command line requires an explicitly
+supplied `DATABASE_URL` (these commands do not read `FIELD_DB_URL`). Keep it
+in the approved local environment/secret store. Normal Field boot does not
+need these commands: it applies the same migrations itself
+(`runMigrations`, below):
 
 ```bash
 export DATABASE_URL=<development-postgres-url>
@@ -218,7 +224,8 @@ drizzle-kit would drop and re-create a renamed table: it renames
 every index, constraint, sequence and policy renamed to match; rows, grants
 and row-level security carry over), drops the five never-written
 `assembly_*` tables (refusing if one holds rows), and adds `items.type` with
-its check, set to `kit` on every item with components. Its snapshot was taken
+its check, set to `kit` on every item with components, and `items.notes`
+(internal notes, never printed). Its snapshot was taken
 from a fresh `drizzle-kit generate` of the schema, and the schema the
 migration chain builds was compared with the one a fresh generate builds:
 they differ only in 0005's hand-written `ON DELETE SET NULL (column)`.
@@ -271,7 +278,10 @@ time, triggers refuse any change to its sections and lines, its money,
 customer and wording, setting it back to draft and deleting it, for the
 owner as well as `field_app`; `TRUNCATE` is always refused. `field_app` may
 read and write the rows otherwise. Only `server/quotes/` reads or writes
-them; nothing in the app reads them yet.
+them. Since 0011 (#10) the quote PDF, the quote email's totals, the job's
+totals and the job detail's customer pricing read them, through
+`server/quotes/read-model.js` (`FIELD_QUOTE_READS=files` sends those reads
+back to the job files).
 `rollback/0010_quote_rows.down.sql` reverses it (the backfill rebuilds the
 rows after 0010 is applied again, since the job files still hold every
 quote); run it before 0009's.
@@ -345,15 +355,15 @@ is set: `startTestPostgres()` returns `{ url, stop }` or `null`.
 
 - Postgres becomes the future canonical store for structured state.
 - Raw and binary artifacts stay referenced through `storage_objects`.
-- Quote-catalog metadata remains file-authoritative under `apps/field/quote-catalogs/`.
+- Quote-catalog metadata remains file-authoritative under `quote-catalogs/`.
 - Google Drive is modeled only as async backup/export through `backup_jobs`.
 
 ## Files
 
 - `migrations/0001_initial.sql`
   Initial additive schema for jobs, captures, quotes, timeline, gaps, chat, measurements, storage objects, backup outbox, and audit events.
-- `recording-backfill.js`
-  Shared mapper that reads the current recording-folder structure and produces deterministic rows/SQL.
+- `job-backfill.js`
+  Shared mapper that reads the job-folder structure and produces deterministic rows/SQL.
 - `ARTIFACT-MAP.md`
   Current file/folder artifact to target-table mapping.
 
@@ -365,15 +375,19 @@ is set: `startTestPostgres()` returns `{ url, stop }` or `null`.
 ## Apply Schema
 
 ```bash
-psql "$DATABASE_URL" -f apps/field/server/db/migrations/0001_initial.sql
+psql "$DATABASE_URL" -f server/db/migrations/0001_initial.sql
 ```
 
 ## Backfill CLI
 
+`scripts/backfill-db.js` does not run today: it imports
+`server/db/recording-backfill.js`, which is now `job-backfill.js`. The
+intended use:
+
 ```bash
-node apps/field/scripts/backfill-db.js --source-root /opt/apps/field/data --emit-sql /tmp/field-backfill.sql
-node apps/field/scripts/backfill-db.js --source-root /opt/apps/field/data --include-schema --apply
-node apps/field/scripts/backfill-db.js --source-root /opt/apps/field/data --seed-backup-jobs --emit-sql -
+node scripts/backfill-db.js --source-root <data dir> --emit-sql /tmp/field-backfill.sql
+node scripts/backfill-db.js --source-root <data dir> --include-schema --apply
+node scripts/backfill-db.js --source-root <data dir> --seed-backup-jobs --emit-sql -
 ```
 
 ## Backup Model

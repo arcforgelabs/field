@@ -35,7 +35,6 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `docs/REMOTE_MCP.md` | The OAuth MCP surface AI agents and other systems connect through |
 | `docs/concepts/surveyor.md` | Surveyor, Field's before/after proof lane |
 | `docs/lessons-learned.md` | Persistent production bugs and the fixes that resolved them |
-| `docs/public-repo-checklist.md` | What was removed or changed to publish this repository |
 | `server/catalog/README.md` | The PostgreSQL price catalogue |
 | `server/db/README.md` | The database runtime, migrations and tenancy |
 | `skills/using-field/SKILL.md` | Operator and agent runbook for the API, CLI and quote lifecycle |
@@ -48,6 +47,7 @@ can use PGlite (an in-process PostgreSQL) instead.
 ```bash
 npm ci
 npm --prefix client ci
+npm run db:build                                 # compile the data layer (server/db/dist)
 cp config.local.example.json config.local.json   # then set authToken and bootstrapUsers
 ```
 
@@ -62,7 +62,10 @@ FIELD_CONFIG=config.local.json npm run dev      # API on http://localhost:19200
 npm run dev:client                              # Vite dev server for the UI
 ```
 
-`./dev.sh` wraps the same local boot.
+`./dev.sh` starts the same server in the background on port 19200, with the
+same local PGlite database. It builds the data layer and the client bundle
+first if they are missing, and serves the UI itself (`./dev.sh stop` stops
+it). It does not seed the catalogue.
 
 For a real installation:
 

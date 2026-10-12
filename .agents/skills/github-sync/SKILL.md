@@ -18,14 +18,16 @@ publishes from its own files, so keep the two identical.
 ## Facts you must not re-discover
 
 - Find the GitHub remote by URL (`git remote -v | grep github.com`), usually
-  `origin`, and use it as `<remote>`. The `subrepl-*` remotes are Replit task sandboxes, not GitHub. Do
-  not add a second GitHub remote.
+  `origin`, and use it as `<remote>`. The Replit Git pane may name it
+  `subrepl-*`; a `subrepl-*` remote whose URL is not on github.com is a Replit
+  task sandbox, not GitHub. Do not add a second GitHub remote.
 - `<default>` is usually PR-only on GitHub (branch rulesets): a direct push is rejected with
   PUSH_REJECTED even with valid credentials. Always branch and open a PR.
 - Your shell has **no GitHub credentials by default**. The GitHub connector
   only gives API access (`proxyFetch`), never a token, so plain `git push`
   fails with "Invalid username or token". The Replit Git tool authenticates
-  with the human's browser session, which you cannot use.
+  with the human's browser session, which you cannot use. Pulling a public
+  repository needs no token: `scripts/github-sync.sh pull` works without one.
 - **Never** create commits on GitHub through the REST API (blobs/trees/commits).
   That produces commits whose hashes differ from the local ones and splits the
   history; it took a manual merge to repair last time.
@@ -42,8 +44,9 @@ through a credential helper rather than putting it in the URL.
 This repo ships `scripts/github-sync.sh` and `scripts/git-credential-github.sh`.
 
 - Token works → you can push and pull yourself (Path A).
-- No `GITHUB_TOKEN` → prepare the work and hand it off (Path B), and walk the
-  user through **Setting up GITHUB_TOKEN**.
+- No `GITHUB_TOKEN` → you can still pull a public repository. Prepare the
+  work and hand off the push (Path B), and walk the user through **Setting up
+  GITHUB_TOKEN**.
 - Token set but rejected → see the checks at the end of **Setting up GITHUB_TOKEN**.
 
 ## Path A — do it yourself (GITHUB_TOKEN secret present)
@@ -59,8 +62,9 @@ This repo ships `scripts/github-sync.sh` and `scripts/git-credential-github.sh`.
 
 ## Path B — hand off (no token)
 
-1. Do steps 1–3 of Path A, except replace the pull with a warning that `<default>`
-   may be behind GitHub (you cannot fetch).
+1. Do steps 1–3 of Path A. The pull works without a token for a public
+   repository; if it fails to fetch, warn that `<default>` may be behind
+   GitHub.
 2. Run `scripts/github-sync.sh handoff` and paste its output verbatim in your
    reply. It contains the branch name, HEAD sha, and the exact clicks a human
    or supervising agent needs in the Replit Git tool

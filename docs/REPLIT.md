@@ -229,7 +229,7 @@ workspace's database, so it does not check production; use the route above.
 It skips the row backfills. It suits an installation whose database you can
 reach directly, for example a Docker one.
 
-## Invoice rows backfill
+## Following the row backfills
 
 The quote rows and invoice rows from before #6 and #27 are filled at boot by
 the `2026-10-13-quote-rows-backfill` and `2026-10-13-invoice-rows-backfill`
@@ -295,7 +295,9 @@ processes on one database compete for the lock: the second to start waits
 60 s, then exits.
 
 Moving existing data in (once, before the first publish with durable storage,
-with no Field process using the database):
+with no Field process using the database). The script writes to the database
+`DATABASE_URL` names: in the workspace shell, that is the workspace's
+database, not production's ("Database").
 
 ```bash
 node scripts/migrate-data-to-postgres.js --source <untarred data dir> --dry-run
@@ -413,7 +415,8 @@ FIELD_R2_BUCKET is not set`. Fix the setting and republish.
 2. `GET /api/storage/status` (admin sign-in): `documentReplica` adds the boot
    check (`bootCheck.ok`), the last success and last error (time and code),
    mismatches, and counts.
-3. In a shell that has the deployment's secrets, once `pending` is 0:
+3. Once `pending` is 0, in a shell that has the deployment's database and
+   R2 settings:
 
    ```bash
    npm run documents:verify-r2
@@ -422,7 +425,9 @@ FIELD_R2_BUCKET is not set`. Fix the setting and republish.
    It reads every stored document back from R2 and checks its hash. It
    writes nothing. Exit 0 means every one is there with the right bytes; 2
    lists what is missing, different or unreadable; 1 means it could not run.
-   It needs the database and the four `FIELD_R2_*` settings.
+   It needs the database and the four `FIELD_R2_*` settings. On Replit no
+   shell has them: the workspace has its own database and must not get the
+   R2 settings. There, steps 1 and 2 are the check.
 
 What an error code means:
 
@@ -440,8 +445,9 @@ What an error code means:
 2. Put its Access Key ID and Secret Access Key in the published app's
    `FIELD_R2_ACCESS_KEY_ID` and `FIELD_R2_SECRET_ACCESS_KEY`.
 3. Republish.
-4. Verify: `/api/storage/status` shows `bootCheck.ok: true`, `/health` shows
-   `state: ok`, and `npm run documents:verify-r2` exits 0.
+4. Verify: `/api/storage/status` shows `bootCheck.ok: true` and `/health`
+   shows `state: ok`. Where a shell has the deployment's settings (not on
+   Replit), `npm run documents:verify-r2` exits 0.
 5. Only then delete the old token in Cloudflare.
 
 ### Turning it off
@@ -614,6 +620,9 @@ To deploy a change merged on GitHub:
 1. In the workspace shell, bring it to `main`. Every publish leaves an
    empty "Published your App" commit on the workspace's `main`; never push
    those commits.
+   - `scripts/github-sync.sh pull` does this in one command, with no token
+     ("GitHub"). If it stops on a local commit that changes files, check that
+     commit by hand as below.
    - `git fetch origin && git status --short` must list nothing.
    - `git cherry -v origin/main HEAD` lists each commit only the workspace
      has. `-` means its change is already on GitHub. `+` needs a look unless
