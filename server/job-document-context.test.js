@@ -208,7 +208,7 @@ test("readDocumentQuoteArtifacts defaults non-draft quote reads to the locked cu
   }
 });
 
-test("readDocumentQuoteArtifacts with intent 'delivery' resolves an unversioned quote request to the latest revision (DEL-30 defect B)", async () => {
+test("readDocumentQuoteArtifacts with intent 'delivery' resolves an unversioned quote request to the latest revision", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-document-context-delivery-"));
 
   try {
@@ -422,7 +422,7 @@ test("readPreparedJobDocument surfaces 404 for an out-of-range milestone index",
   }
 });
 
-// Shared resolver used by every invoice download/preview route (DEL-30):
+// Shared resolver used by every invoice download/preview route:
 // a sent invoice must be served from the bytes it was issued with, never
 // re-rendered from whatever the quote looks like now.
 // The quote-pdf and preview routes ask resolveIssuedQuotePdf with what they
@@ -577,7 +577,7 @@ test("resolveIssuedMilestoneInvoiceArtifact leaves draft, legacy, receipt and qu
     });
     assert.equal(draftResolved.render, true);
 
-    // A legacy invoice with no issuedRevision (pre-DEL-30 data) also renders.
+    // A legacy invoice with no issuedRevision (legacy data) also renders.
     const legacyMilestone = {
       ...draftMilestone,
       status: "authorised",
@@ -647,9 +647,8 @@ test("resolveIssuedMilestoneInvoiceArtifact leaves draft, legacy, receipt and qu
 // Before this fix, only a *superseded* revision with a missing file 410'd —
 // the ACTIVE, currently-issued revision fell through to `render: true` and
 // the caller rendered a fresh document from whatever quote the request
-// resolved, serving it under the invoice number the customer already holds
-// (DEL-30 P2-C).
-test("resolveIssuedMilestoneInvoiceArtifact 410s an active (non-superseded) issued revision whose stored file is missing, instead of rendering (DEL-30 P2-C)", async () => {
+// resolved, serving it under the invoice number the customer already holds.
+test("resolveIssuedMilestoneInvoiceArtifact 410s an active (non-superseded) issued revision whose stored file is missing, instead of rendering", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-document-resolver-active-gone-"));
 
   try {
@@ -667,12 +666,11 @@ test("resolveIssuedMilestoneInvoiceArtifact 410s an active (non-superseded) issu
     const writtenArtifact = await writeMilestoneInvoiceArtifact({ jobDir, meta, quote, milestoneInvoice: issued });
     assert.equal(writtenArtifact.alreadyIssued, false);
 
-    // Simulate the persisted, stamped state (the write path always
-    // transitions artifactState to STORED, alongside pdfIssuedAt, the
-    // moment the artifact is first written — DEL-30 round-4 architecture
-    // correction) and then the file going missing from disk afterwards —
-    // lost, deleted, moved — while the revision itself is still the
-    // current, active one.
+    // Simulate the persisted, stamped state (the write path always transitions
+    // artifactState to STORED, alongside pdfIssuedAt, the moment the artifact
+    // is first written) and then the file going missing from disk afterwards —
+    // lost, deleted, moved — while the revision itself is still the current,
+    // active one.
     const stampedIssued = {
       ...issued,
       issuedRevision: {
@@ -697,7 +695,7 @@ test("resolveIssuedMilestoneInvoiceArtifact 410s an active (non-superseded) issu
   }
 });
 
-test("resolveIssuedMilestoneInvoiceArtifact 410s a legacyOrigin-synthesized revision whose stored file is missing, instead of rendering (DEL-30 P2-C)", async () => {
+test("resolveIssuedMilestoneInvoiceArtifact 410s a legacyOrigin-synthesized revision whose stored file is missing, instead of rendering", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-document-resolver-legacy-gone-"));
 
   try {
@@ -716,10 +714,9 @@ test("resolveIssuedMilestoneInvoiceArtifact 410s a legacyOrigin-synthesized revi
         currency: "AUD",
         lineItems: [],
         pdfPath: "milestone-invoices/EI-LEGACY-GONE-01.pdf",
-        // Marks a revision synthesized from pre-DEL-30 stored content
-        // mid-rebuild — not something a caller would normally hand a
-        // read-only resolver, but checked defensively per the DEL-30 P2-C
-        // correction.
+        // Marks a revision synthesized mid-rebuild from stored content that
+        // predates per-revision tracking. A caller would not normally hand
+        // this to a read-only resolver, but it is checked defensively.
         legacyOrigin: true,
       },
       revisionHistory: [],
@@ -740,11 +737,11 @@ test("resolveIssuedMilestoneInvoiceArtifact 410s a legacyOrigin-synthesized revi
 
 // `pdfUnrecoverable` is the signal that survives what `legacyOrigin` does
 // not: an opportunistic (implicit) artifact write can fail and get caught
-// rather than aborting an unrelated mutation (DEL-30 P1-C), leaving a
+// rather than aborting an unrelated mutation, leaving a
 // revision with no `pdfIssuedAt` and no `legacyOrigin` (stripped by
 // normalization on the very next touch). Without this flag the read path
 // would have no signal left at all and would fall through to `render`.
-test("resolveIssuedMilestoneInvoiceArtifact 410s a pdfUnrecoverable revision whose stored file is missing, instead of rendering (DEL-30 P1-C)", async () => {
+test("resolveIssuedMilestoneInvoiceArtifact 410s a pdfUnrecoverable revision whose stored file is missing, instead of rendering", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-job-document-resolver-unrecoverable-"));
 
   try {
@@ -782,7 +779,7 @@ test("resolveIssuedMilestoneInvoiceArtifact 410s a pdfUnrecoverable revision who
   }
 });
 
-// Guards the DEL-30 F3 self-heal mechanism from over-firing: it must only
+// Guards the legacy self-heal mechanism from over-firing: it must only
 // adopt an existing file for a revision synthesized from legacy stored
 // content (`legacyOrigin`), never for an ordinary fresh mint that simply
 // happens to find a stray file already sitting at its path — e.g. a draft
@@ -822,8 +819,8 @@ test("writeMilestoneInvoiceArtifact never self-heals an ordinary mint, only a le
     assert.notDeepEqual(written.pdfBuffer, staleBytes);
     assert.notDeepEqual(await readFile(pdfPath), staleBytes);
 
-    // A revision synthesized from legacy content (ARTIFACT_STATE.ADOPT_PENDING
-    // — DEL-30 round-4; supersedes the old transient `legacyOrigin` marker),
+    // A revision synthesized from legacy content (ARTIFACT_STATE.ADOPT_PENDING,
+    // which supersedes the old transient `legacyOrigin` marker),
     // by contrast, does adopt the existing file. `freshlyIssued.issuedRevision`
     // already carries a real `artifactState` (UNWRITTEN, from its own mint) —
     // it must be overridden, not merely added alongside, exactly as the real

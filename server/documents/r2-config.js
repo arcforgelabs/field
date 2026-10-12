@@ -1,4 +1,4 @@
-// Configuration for the R2 replica of issued document bytes (#240).
+// Configuration for the R2 replica of issued document bytes (#12).
 //
 //   FIELD_DOCUMENT_REPLICA=r2     turns replication on. Unset: off, and Field
 //                                 behaves exactly as without this module.

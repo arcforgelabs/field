@@ -381,7 +381,7 @@ export function normalizeQuoteCatalogRule(rule) {
     unit: quantityUnit,
     defaultQuantity: Number(rule.defaultQuantity || 1),
     authorityItemCode: resolveRawAuthorityItemCode(rule),
-    // The production item's uid (#178 step 4); the code above is the
+    // The production item's uid (code retirement step 4); the code above is the
     // fallback for a catalogue that lacks it. Present only when set.
     ...optionalCode(rule, "authorityItemUid"),
     workDomain: typeof rule.workDomain === "string" ? rule.workDomain.trim() || null : null,
@@ -680,7 +680,7 @@ function formatMoney(value, currency) {
   // first, so this never has to absorb a null/undefined itself. Left as a
   // narrow defensive fallback rather than removed; do not treat this as a
   // green light to call formatMoney directly with an unvalidated rate
-  // elsewhere (DEL-46, round 7).
+  // elsewhere.
   return new Intl.NumberFormat("en-AU", {
     style: "currency",
     currency,
@@ -691,12 +691,11 @@ function formatMoney(value, currency) {
 function formatMaybeMoney(value, currency) {
   // value is already null-or-number by the time it reaches here (it comes
   // from resolveRuleSellRate/resolveRuleBuyingRate, both already fixed to
-  // return a real null rather than a coerced 0 — DEL-46, round 6). Checking
+  // return a real null rather than a coerced 0). Checking
   // Number.isFinite(Number(value)) instead of Number.isFinite(value) would
   // silently reintroduce the exact bug those fixes exist to prevent:
   // Number(null) is 0, which is finite, so a null rate would take the money
-  // branch and formatMoney would render it as "$0.00" instead of "-"
-  // (DEL-46, round 7).
+  // branch and formatMoney would render it as "$0.00" instead of "-".
   return Number.isFinite(value) ? formatMoney(value, currency) : "-";
 }
 
@@ -784,7 +783,7 @@ function buildRulePricingIssues({ rule, authorityProvider }) {
 
 function isRuleQuoteable({ rule, authorityProvider }) {
   if (authorityProvider === "catalog") return false;
-  // DEL-46 (round 7): both of these used a plain `!= null` check, unlike the
+  // Both of these used a plain `!= null` check, unlike the
   // catalog branch above — an authored sell_price/sellingRate of exactly 0
   // (which the price-catalog API permits: "zero or greater") would report
   // quoteable: true here while generate-evidence-quote.js's matching

@@ -1,4 +1,4 @@
-// Clerk sign-in for Field (#149), switched on by FIELD_AUTH=clerk.
+// Clerk sign-in for Field, switched on by FIELD_AUTH=clerk.
 //
 // People sign in with Clerk (Replit's managed Clerk integration provisions the
 // keys). Who they are in Field, their role and whether they may use Field at

@@ -1,4 +1,4 @@
-// Document bytes, by SHA-256 (#223). The only reader and writer of
+// Document bytes, by SHA-256. The only reader and writer of
 // `document_blobs`, behind two calls:
 //
 //   put(bytes, { tx, contentType }) -> sha256
@@ -6,7 +6,7 @@
 //
 // The PostgreSQL store writes inside the caller's organisation transaction, so
 // a document row and its bytes commit together. PostgreSQL stays the store of
-// record (#240): a locked R2 bucket holds a write-once replica, copied after
+// record (#12): a locked R2 bucket holds a write-once replica, copied after
 // the transaction commits (replicator.js), and createReplicaFallbackBlobStore
 // reads from it only when PostgreSQL cannot give the bytes.
 //
@@ -69,7 +69,7 @@ export function createPostgresBlobStore({ now = () => new Date() } = {}) {
 }
 
 /**
- * Reads PostgreSQL first and falls back to the R2 replica (#240) only when
+ * Reads PostgreSQL first and falls back to the R2 replica (#12) only when
  * PostgreSQL has no bytes for the hash, or bytes that fail it. Bytes from R2
  * are hashed before they are returned; a mismatch is an error, never served.
  * Writes go to PostgreSQL only (the replicator copies them after commit).

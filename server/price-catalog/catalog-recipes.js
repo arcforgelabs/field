@@ -32,12 +32,12 @@ export function loadRecipeChildrenByParent() {
  * uses it), resolved through that catalog's own rule-code -> DB-code
  * aliasing. Used by server/catalog/health.js to flag a disposal item that has no
  * pricing_basis at all — the recipe and quote engines already fail closed
- * for it, but nothing else surfaces why (DEL-46).
+ * for it, but nothing else surfaces why.
  *
  * Scoped to a single catalogId (e.g. "embark-default" or
  * "field-verification") — quote-catalogs/ can hold multiple catalogs, and a
  * production installation only ever serves one of them. Aggregating across
- * all of them (the pre-round-4 behaviour) made every installation's health
+ * all of them (the earlier behaviour) made every installation's health
  * report permanently show critical issues for another installation's
  * fictional/production codes. Pass no catalogId to get the union across
  * every catalog (only for callers that genuinely want that, e.g. tests).
@@ -144,7 +144,7 @@ export function buildRecipeChildrenFromCatalogRoot(root, disposalItemCodesByCata
         const key = normalizeCode(targetDbCode);
         if (!map.has(key)) map.set(key, children);
         // Also keyed by the target item's uid when the rule declares it
-        // (#178 step 4): the roll-up looks a kit's recipe up by uid first.
+        // (code retirement step 4): the roll-up looks a kit's recipe up by uid first.
         const uid = dbCodeToUid.get(key);
         if (uid && !map.has(recipeUidKey(uid))) map.set(recipeUidKey(uid), children);
       }
@@ -244,7 +244,7 @@ function bulkLoadingDisposalChildren(rule, resolveDbCode) {
   // module has no DB handle (see loadRecipeChildrenByParent()), so the
   // quantity is deferred and resolved lazily by resolveRecipeChildQuantity()
   // once a caller has a catalogue snapshot (server/catalog/rollup.js
-  // resolveRecipeChildQuantity, DEL-46).
+  // resolveRecipeChildQuantity).
   if (rule.disposalRuleCode) {
     out.push(recipeChild(rule, resolveDbCode(rule.disposalRuleCode), null, {
       quantityBasis: "disposal_per_volume",

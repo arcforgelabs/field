@@ -1,4 +1,4 @@
-// The R2 replica of issued document bytes (#240).
+// The R2 replica of issued document bytes (#12).
 //
 // PostgreSQL is the store of record: document_blobs is written in the issue
 // transaction as before, so issuing never waits on Cloudflare. After that

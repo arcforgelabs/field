@@ -55,7 +55,7 @@ Catalogue tools name an item by uid: `item` on `field_price_item_get`,
 and `parentItem` / `childItem` on `field_catalog_structure_update`. A legacy
 item code is still accepted in those fields, and `code`, `parentCode` and
 `childCode` remain as deprecated names for them. Catalogue answers carry no
-item codes (#178).
+item codes.
 
 List tools declare object output schemas and return records in both `structuredContent` and the JSON text content: `field_quote_list` as `{ "quotes": [...] }`, `field_price_item_list` as `{ "items": [...] }`, and `field_quote_catalog_list` as `{ "catalogs": [...] }`. MCP structured content must remain a top-level object so clients can validate it as a record.
 

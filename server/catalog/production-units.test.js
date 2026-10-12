@@ -1,4 +1,4 @@
-// Units against a catalogue shaped like production (#168 review): the quote
+// Units against a catalogue shaped like production: the quote
 // rules and recipes declare the unit they measure in, and where the
 // catalogue sells an item in a unit that cannot convert, the line fails
 // closed naming the item and the health page reports it. Nothing is

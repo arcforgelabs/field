@@ -1,4 +1,4 @@
-// The price catalogue's data access (#148), on PostgreSQL through Drizzle.
+// The price catalogue's data access, on PostgreSQL through Drizzle.
 //
 // Reads go through getState(): one immutable snapshot of the catalogue,
 // reloaded only when catalog_meta.version moves or a future-dated price
@@ -92,7 +92,7 @@ function storageValue(value) {
 }
 
 /**
- * A disposal item's costing basis and the factor it needs (DEL-46): per_tonne
+ * A disposal item's costing basis and the factor it needs: per_tonne
  * needs a density (t/m3), per_load a load capacity (m3/load), per_m3 none.
  */
 export function validatePricingBasis({ pricing_basis, pricing_basis_factor }) {
@@ -609,7 +609,7 @@ export function createCatalogStore({ db: database, orgUid = DEFAULT_ORG_UID, clo
         if (!name) throw new CatalogError("INVALID", "name cannot be empty", { path: "name" });
         if (name !== current.name) { set.name = name; note("name", current.name, name); }
       }
-      // A code is a legacy alias (item_code_aliases, #178 step 2): it never
+      // A code is a legacy alias (item_code_aliases, code retirement step 2): it never
       // changes, so nothing that names the item by it can be repointed. A
       // patch that repeats the current code (older clients send the whole
       // row) is accepted and changes nothing.

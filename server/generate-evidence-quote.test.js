@@ -464,8 +464,8 @@ test("support line items inherit buying costs from the refreshed catalog authori
   }
 });
 
-// DEL-46 (P3, round 7): an unpriced support rule (site-establishment/
-// cleanup) is correctly omitted (fail-closed, round 6), but the omission
+// An unpriced support rule (site-establishment/
+// cleanup) is correctly omitted (fail-closed), but the omission
 // must surface as a pricing issue rather than disappear silently — the
 // reviewer confirmed this is currently unreachable via the public
 // generateEvidenceQuote() surface because both catalogues price every
@@ -709,7 +709,7 @@ test("non-wall sections do not compile from wall-zone exact pricing just because
 }));
 
 test("option families produce scenario summaries while using the default scenario for totals", async () => {
-  // DEL-46 (P0, round 4): the "soil-removal" option now correctly needs a
+  // The "soil-removal" option now correctly needs a
   // resolvable disposal basis to price at all (see
   // generate-evidence-quote.duration.test.js's withDisposalPriceCatalogAuthority
   // for the same pattern) — without it the option silently disappeared from

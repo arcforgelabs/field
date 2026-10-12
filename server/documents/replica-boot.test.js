@@ -1,4 +1,4 @@
-// Booting the real server with FIELD_DOCUMENT_REPLICA=r2 (#240): the Replit
+// Booting the real server with FIELD_DOCUMENT_REPLICA=r2 (#12): the Replit
 // workspace keeps starting with the replica off and one warning; the
 // published app refuses to start when a setting is missing, naming the
 // variable and never a value. Neither touches R2.

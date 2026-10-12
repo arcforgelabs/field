@@ -1,4 +1,4 @@
-// Code retirement step 5 (#178): the price book clean-up, applied once at
+// Code retirement step 5: the price book clean-up, applied once at
 // boot in ONE catalogue transaction behind the price-equality gate.
 //
 // The plan (price-book-cleanup.plan.json, next to this file) is built from an

@@ -1,4 +1,4 @@
-// A small S3 client for the R2 replica of issued document bytes (#240),
+// A small S3 client for the R2 replica of issued document bytes (#12),
 // signed with aws4fetch (SigV4, region "auto", path-style URLs).
 //
 // It can only do four things, and none of them removes or replaces data:

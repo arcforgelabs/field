@@ -53,7 +53,7 @@ export function canTransitionPipelineStage(fromStage, toStage) {
 }
 
 /**
- * DEL-67: fields that record where a quote sits in the delivery lifecycle,
+ * Fields that record where a quote sits in the delivery lifecycle,
  * and must survive a quote rebuild regardless of whether that particular
  * rebuild call forked a new version. "Does this call need a new version" is
  * a different question from "has this job already left draft" — two

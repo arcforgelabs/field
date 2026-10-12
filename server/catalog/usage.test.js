@@ -1,4 +1,4 @@
-// "Used on N quotes" (#178): which jobs' quotes price a row from each item.
+// "Used on N quotes": which jobs' quotes price a row from each item.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

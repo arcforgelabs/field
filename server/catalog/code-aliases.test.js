@@ -1,4 +1,4 @@
-// Legacy item codes as aliases (#178, code retirement step 2): migration 0006
+// Legacy item codes as aliases (code retirement step 2): migration 0006
 // backfills every code, keeps new items' codes recorded and stops codes
 // changing; the catalogue resolves an item by uid, then by any alias.
 import assert from "node:assert/strict";

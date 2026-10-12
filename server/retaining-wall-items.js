@@ -29,7 +29,7 @@ export const WALL_RATE_CARD_ITEMS = Object.freeze({
 });
 
 /**
- * The same items by uid (#178 code retirement step 4): the production
+ * The same items by uid (code retirement step 4): the production
  * catalogue items. The engine prices from maps keyed by each item's legacy
  * code, which never changes (item_code_aliases); health checks that each
  * uid still answers to the code beside it, and reports a slot found only by

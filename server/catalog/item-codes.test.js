@@ -1,4 +1,4 @@
-// Item codes leave Field's outputs (#178 code retirement step 6).
+// Item codes leave Field's outputs (code retirement step 6).
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

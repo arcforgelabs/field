@@ -158,7 +158,7 @@ export function describeCommercialIssues(issues) {
 /**
  * The quote with its send verdict worked out again from what it holds now.
  * The verdict stored with a quote dates from its last save, so a quote saved
- * before a check changed (#169) would otherwise stay blocked until edited.
+ * before a check changed would otherwise stay blocked until edited.
  * Only the commercial checks are re-run: a quote whose pricing attestation no
  * longer verifies, or predates the commercial checks, keeps its stored verdict.
  */
@@ -203,7 +203,7 @@ function dedupeIssues(issues) {
  * Source codes of the organizer's manual rows: rows the operator priced
  * themselves, typed in or added from the price catalogue (catalogue-linked
  * rows also carry the item uid and price id a send snapshots). Their price is
- * the row's own quantity and rates, so the row is its own lineage (#169).
+ * the row's own quantity and rates, so the row is its own lineage.
  */
 function manualOrganizerSourceCodes(organizer) {
   const codes = new Set();
@@ -283,8 +283,9 @@ export function isQuotePricingDisplayable(
   { pipelineStage, historical = false, issuedVersion = false, current = false } = {},
 ) {
   // A sent/landed/lost version is immutable history, but a job-level stage is
-  // not enough to classify the current quote: DEL-67 deliberately preserves
-  // delivery state while rebuilding a new draft. Callers serving a selected
+  // not enough to classify the current quote: a rebuild deliberately preserves
+  // delivery state while making a new draft (preserveQuoteDeliveryState in
+  // pipeline.js). Callers serving a selected
   // historical artifact must provide explicit issuance evidence. The
   // no-options branch remains only for legacy internal callers; all external
   // serializers pass `current` or `historical` explicitly.

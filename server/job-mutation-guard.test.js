@@ -57,7 +57,7 @@ test("runExclusiveJobMutation allows independent jobs to mutate concurrently", a
   assert.deepEqual(results.sort(), ["a", "b"]);
 });
 
-// DEL-30 P2-4: `POST /api/jobs/:id/email-quote` (the route behind
+// `POST /api/jobs/:id/email-quote` (the route behind
 // `sendJobQuote`, which mints and persists issued revisions for invoice and
 // receipt sends) is now wrapped in `runExclusiveJobMutation` at the SAME
 // shared default-guard instance every other milestone-mutating route uses —
@@ -68,7 +68,7 @@ test("runExclusiveJobMutation allows independent jobs to mutate concurrently", a
 // mutation (e.g. a revise) is in flight for the same job, using the exact
 // exported singleton index.js imports — not a fresh guard instance — so it
 // reflects the real shared lock state a concurrent request would hit.
-test("the shared default job-mutation guard blocks a send while another mutation is in flight for the same job (DEL-30 P2-4)", async () => {
+test("the shared default job-mutation guard blocks a send while another mutation is in flight for the same job", async () => {
   const jobId = `job-p2-4-${Date.now()}`;
   let release;
   const hold = new Promise((resolve) => {

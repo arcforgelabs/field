@@ -34,7 +34,7 @@ Two consequences that are easy to get wrong:
 
 `GET /api/auth/gmail` (`server/index.js`) uses a *different* test — it treats
 delegation as active only when `mail.gmailUser` is explicitly set. The two
-disagree. That disagreement concealed a live outage once (DEL-44); if you touch
+disagree. That disagreement concealed a live outage once; if you touch
 this area, reconcile them.
 
 Drive uploads (`server/drive-upload.js`) prefer the same service-account key and

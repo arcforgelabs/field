@@ -1,5 +1,5 @@
-// What today's job files say was issued, in the shape the issue service takes
-// (#223). Read-only: nothing here writes to a job directory. Used by the live
+// What today's job files say was issued, in the shape the issue service takes.
+// Read-only: nothing here writes to a job directory. Used by the live
 // dual-write (server/documents/recorder.js) and the backfill
 // (server/documents/backfill.js).
 import { readFile } from "../storage/fs-promises.js";

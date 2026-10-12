@@ -1,4 +1,4 @@
-// Quote snapshot rows (#151): what a send records, and the store.
+// Quote snapshot rows: what a send records, and the store.
 import assert from "node:assert/strict";
 import test from "node:test";
 

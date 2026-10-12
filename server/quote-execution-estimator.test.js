@@ -7,9 +7,9 @@ function buildQuoteCatalog(rules) {
   return { id: "test-catalog", rules };
 }
 
-// DEL-46 (P3, round 7): a derived hourly line item (labourer-hour /
+// A derived hourly line item (labourer-hour /
 // excavator-hour) whose rule has no positive rate is correctly omitted
-// (fail-closed, round 6), but the omission itself must surface as a
+// (fail-closed), but the omission itself must surface as a
 // pricing issue rather than disappear from the quote with no signal —
 // otherwise a future rate removal would silently under-bill a job with no
 // trace anywhere in the quote.

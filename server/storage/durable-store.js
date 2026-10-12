@@ -1,4 +1,4 @@
-// Durable file storage in PostgreSQL (#139).
+// Durable file storage in PostgreSQL.
 //
 // Field keeps its state as files under the data directory (FIELD_DATA). A
 // published Replit app loses runtime files on every publish, so with

@@ -46,7 +46,7 @@ test("quote catalog loader extracts static bulk and concrete recipe modes", () =
   // The disposal child's quantity is deferred, not a pre-baked json5
   // density — it is resolved live from the disposal item's own
   // pricing_basis / pricing_basis_factor by resolveRecipeChildQuantity()
-  // once a caller has a db handle (DEL-46). See the "disposal child
+  // once a caller has a db handle. See the "disposal child
   // quantity" tests below for that resolution.
   assert.deepEqual(
     recipeChildren.get("soil-removal").map((c) => ({
@@ -101,7 +101,7 @@ test("quote catalog loader extracts static bulk and concrete recipe modes", () =
   );
 });
 
-// DEL-46: the disposal child in a bulk_loading_disposal recipe defers its
+// The disposal child in a bulk_loading_disposal recipe defers its
 // quantity to the disposal item's own pricing_basis / pricing_basis_factor
 // instead of a json5 density baked in at recipe-parse time. These tests
 // prove the catalogue's own price build-up (not just the quote path) reads

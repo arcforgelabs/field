@@ -1,5 +1,4 @@
-// Single owner of an invoice revision's ARTIFACT state (DEL-30 round 4
-// architecture correction).
+// Single owner of an invoice revision's ARTIFACT state.
 //
 // Before this module, "is this revision's PDF real, present and safe to
 // serve?" was answered by recombining up to four independent signals —
@@ -8,7 +7,7 @@
 // path in quote-artifacts.js, the read path in job-document-context.js,
 // the persist step in job-actions.js) recombined them a little differently.
 // Every round of fixes added one more flag to patch a hole the previous
-// flag left (P1-1, P2-2). This module makes the revision's artifact state a
+// flag left. This module makes the revision's artifact state a
 // single enum field, computed and transitioned in exactly one place, so the
 // unrepresentable states simply cannot occur again.
 //
@@ -21,23 +20,23 @@ export const ARTIFACT_STATE = Object.freeze({
   // The revision has never had an artifact write attempted for it. An
   // ordinary fresh mint: render from the current quote and write once.
   UNWRITTEN: "unwritten",
-  // The revision was synthesized from pre-DEL-30 legacy stored data on this
+  // The revision was synthesized from legacy stored data on this
   // rebuild and has no prior persisted artifact state at all. Its very
   // first touch must attempt to ADOPT a file already sitting at its path
   // (the document the customer actually received, before this freeze
   // mechanism existed) rather than render over it as if it were a fresh,
-  // never-issued mint (DEL-30 F3).
+  // never-issued mint.
   ADOPT_PENDING: "adopt_pending",
   // Bytes are present and authoritative at `pdfPath`. `pdfSha256` and
   // `pdfIssuedAt` are trustworthy.
   STORED: "stored",
   // Bytes are absent. The last write/reconstruct attempt (if any) could not
   // recover them — no pinned quote version was available, or the file was
-  // simply never written. Read paths must 410, not render (DEL-30 P2-C).
+  // simply never written. Read paths must 410, not render.
   // Write paths must re-verify (never trust a stale MISSING claim — a file
   // can reappear out of band, e.g. an operator restoring it from backup)
   // and either adopt what is actually on disk, reconstruct, or fail loudly
-  // again (DEL-30 P1-1).
+  // again.
   MISSING: "missing",
 });
 

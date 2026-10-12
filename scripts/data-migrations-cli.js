@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Dry run of the data migrations Field applies at boot (server/data-migrations/,
-// #178): what each would change, and whether it verifies. Nothing real is
+// Dry run of the data migrations Field applies at boot (server/data-migrations/):
+// what each would change, and whether it verifies. Nothing real is
 // ever written.
 //
 //   npm run data:migrate -- --dry-run [--data <dir>] [--only <id>] [--json <file>]

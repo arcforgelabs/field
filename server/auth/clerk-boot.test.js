@@ -1,4 +1,4 @@
-// Boots the real server in both sign-in modes (#149). FIELD_AUTH unset must
+// Boots the real server in both sign-in modes. FIELD_AUTH unset must
 // behave as before; FIELD_AUTH=clerk (with dummy keys, so Clerk is never
 // contacted) must start, refuse unauthenticated API calls and never print a key.
 // The Clerk boot needs PostgreSQL: it runs when FIELD_DB_TEST_DATABASE_URL (CI)

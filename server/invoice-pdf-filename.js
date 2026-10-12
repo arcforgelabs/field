@@ -1,4 +1,4 @@
-// Filename builder for issued-invoice PDF responses (DEL-30 P1-A).
+// Filename builder for issued-invoice PDF responses.
 //
 // Node rejects any HTTP header value containing a code point above 0xFF
 // (`TypeError [ERR_INVALID_CHAR]`), so a `Content-Disposition` filename built

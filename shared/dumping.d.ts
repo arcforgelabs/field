@@ -1,6 +1,6 @@
 import type { SoilDump } from "../client/src/lib/types";
 
-// shared/dumping.js carries dump-site facts only (DEL-46) — no rate, cost,
+// shared/dumping.js carries dump-site facts only — no rate, cost,
 // charge, or markup export. Adding one back here would let TypeScript
 // green-light a client import that crashes at runtime against the real
 // module, recreating the exact second-owner defect criterion 2 removed.

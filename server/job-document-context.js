@@ -27,7 +27,7 @@ export async function readDocumentQuoteArtifacts({
   // "view" (default): resolve to what the customer last saw — the locked
   // customer-seen revision — for operator read/edit surfaces. "delivery":
   // resolve to the latest revision — what the customer is being given right
-  // now — for the send/PDF-attachment path (DEL-30 defect B). Only affects
+  // now — for the send/PDF-attachment path. Only affects
   // documentType "quote"; invoice/receipt always pin to the customer-seen
   // quote basis regardless of intent (requestedVersion is forced null for
   // them below), matching existing behaviour.
@@ -315,7 +315,7 @@ export async function resolveIssuedQuotePdf({
 //                                     artifactState other than UNWRITTEN —
 //                                     see invoice-artifact-state.js) but its
 //                                     stored file is missing (caller should
-//                                     410; DEL-30 P2-C / P1-C).
+//                                     410).
 //   - { render: true }             — not an issued invoice document (draft,
 //                                     legacy invoice with no issuedRevision,
 //                                     receipt, quote); caller renders as today.
@@ -347,18 +347,17 @@ export async function resolveIssuedMilestoneInvoiceArtifact({
   // A missing file for a revision that is genuinely issued must 410, never
   // fall through to a silent render of whatever quote this request happens
   // to resolve — that would serve a fabricated document under a number the
-  // customer already holds (DEL-30 P2-C). `artifactIsGenuinelyIssued`
-  // dispatches on the single owned `artifactState` (DEL-30 round-4
-  // architecture correction) rather than this file recombining
-  // `pdfIssuedAt` / `legacyOrigin` / `pdfUnrecoverable` its own way — the
-  // exact duplication that made P1-1 and P2-2 possible in the first place.
+  // customer already holds. `artifactIsGenuinelyIssued`
+  // dispatches on the single owned `artifactState` rather than this file
+  // recombining `pdfIssuedAt` / `legacyOrigin` / `pdfUnrecoverable` its own
+  // way, the duplication that once let these states disagree.
   // `supersededAt` is checked independently: a superseded revision proves
   // it was once a real money document by having been retired at all (it
   // only enters history via retirement), even in the rare case its own
   // artifact was never actually written before it was retired.
   //
   // This is a read (GET) path: it must never write or reconstruct a file.
-  // Recovery is the operator-triggered write path built for DEL-30 P2-B.
+  // Recovery is the operator-triggered write path, never a read.
   const isGenuinelyIssued = Boolean(
     revision && (revision.supersededAt || artifactIsGenuinelyIssued(revision))
   );

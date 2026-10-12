@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Verify the R2 replica of issued documents (#240): every issued document's
+// Verify the R2 replica of issued documents (#12): every issued document's
 // bytes are in the bucket and hash to its recorded SHA-256. Read-only: it
 // GETs and hashes each object and never writes, in R2 or in PostgreSQL.
 //

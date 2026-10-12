@@ -140,7 +140,8 @@ test("verification reset backs up first, seeds only deterministic fixtures, and 
 
     // The candidate starts from the retained verification state, so a catalog-
     // only image change must invalidate and rebuild that state before the
-    // fail-closed server imports. Simulate the stale pre-DEL-71 marker here.
+    // fail-closed server imports. Simulate a stale marker whose catalogue
+    // manifest no longer matches.
     const staleMarkerPath = join(dataDir, ".field-verification-fixture-marker.json");
     const staleMarker = JSON.parse(await readFile(staleMarkerPath, "utf8"));
     staleMarker.catalogManifestSha256 = "0".repeat(64);
@@ -153,7 +154,7 @@ test("verification reset backs up first, seeds only deterministic fixtures, and 
     assertFixtureMarker(JSON.parse(await readFile(staleMarkerPath, "utf8")));
     assert.equal((await readdir(backupDir)).length, 2, "host-snapshotted startup rebuild must not create a duplicate container backup");
 
-    // Reproduce the real post-reset boot contract. DEL-71 originally checked
+    // Reproduce the real post-reset boot contract. An earlier reset checked
     // the default customer catalogue instead of this configured synthetic one
     // and also omitted one required rate-card dependency, so reset succeeded
     // and the candidate exited 1 at startup before it could be promoted.
@@ -220,7 +221,7 @@ test("container verification reset produces byte-equal independent state trees",
     const second = await readTree(roots[1].dataDir);
     // Name the differing file before asserting. A bare deepEqual reports only
     // "Values have same structure but are not reference-equal", which says
-    // nothing about which file drifted -- DEL-58 went unexplained for days on
+    // nothing about which file drifted -- one drift went unexplained for days on
     // that message alone. Every failure of this test means some value came
     // from a clock or source the deterministic preload cannot freeze, such as
     // a database's own clock (SQLite datetime('now'), PostgreSQL now()) rather

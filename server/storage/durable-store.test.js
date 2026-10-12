@@ -1,4 +1,4 @@
-// Durable storage in PostgreSQL (#139). Most tests run on an in-process
+// Durable storage in PostgreSQL. Most tests run on an in-process
 // PGlite (createTestDb); the ones that need two sessions or a real process
 // kill run against a real PostgreSQL when FIELD_DB_TEST_DATABASE_URL (CI) or
 // FIELD_DB_TEST_DOCKER=1 is set, and are skipped otherwise.

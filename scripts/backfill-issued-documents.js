@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Copy every document Field's job files say a customer was issued into the
-// issued-document tables (#223, server/documents/backfill.js): the issuance
+// issued-document tables (server/documents/backfill.js): the issuance
 // ledger, issued invoice revisions (superseded ones too) and quotes sent
 // before the ledger, with their original bytes. Idempotent: a second run
 // records nothing new. Never writes to the data directory.

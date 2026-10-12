@@ -184,7 +184,7 @@ Milestone numbering in the CLI is human-facing:
 
 ### Moasure / Wall
 
-Moasure measurement files and the retaining-wall engine feed quote pricing. Wall geometry comes from `wall-zones.json` (or the legacy single-wall fallback from `bay-model.json`) and renders per zone at `GET /api/jobs/:id/wall-zones/:zoneId/render?format=html`. The site map, site plan, sketch extraction and photo visualisation were removed (#145).
+Moasure measurement files and the retaining-wall engine feed quote pricing. Wall geometry comes from `wall-zones.json` (or the legacy single-wall fallback from `bay-model.json`) and renders per zone at `GET /api/jobs/:id/wall-zones/:zoneId/render?format=html`. The site map, site plan, sketch extraction and photo visualisation were removed.
 
 ```bash
 field upload-moasure <jobId> measurements.csv

@@ -1,4 +1,4 @@
-// The quote row tables and service (#241): writing a version in one
+// The quote row tables and service (#6): writing a version in one
 // transaction, replacing a draft, marking it sent, the database refusing any
 // change to a sent quote, row-level security between organisations, and the
 // 0010 rollback.

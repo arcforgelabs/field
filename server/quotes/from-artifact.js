@@ -1,5 +1,5 @@
 // Today's quote artifact (quote.json and its presentation organizer) as quote
-// rows (#241; docs/PRICING_ENGINE.md "Moving today's data"). Pure: it reads
+// rows (#6; docs/PRICING_ENGINE.md "Moving today's data"). Pure: it reads
 // the artifact the way the PDF does and returns rows plus the totals Field
 // shows, so a caller can prove the rows reproduce them before writing.
 //
@@ -25,14 +25,14 @@
 //                                       and never counted (the editor keeps it)
 //
 // Each line and section also keeps what the documents print besides money
-// (#245): amount hidden or blank, collapsed, row style, how it is styled
+// (#10): amount hidden or blank, collapsed, row style, how it is styled
 // (`rowKind`), the rate printed beside a fixed price (`displayUnitSell`), its
 // internal notes and cost. Sections and lines share one `sortOrder` sequence,
 // so the printed order of sections and top-level lines is kept.
 //
 // Every line keeps the quantity and unit it prints, its rate to four decimals
 // (the row's own rate, which the PDF prints rounded to cents) and, as its
-// official amount, the total it printed (decided 2026-10-12, #178). When
+// official amount, the total it printed (decided 2026-10-12). When
 // round(quantity x rate, 2) gives that total the line's total is `computed`.
 // When it does not (a rate with more than two decimals whose amount the PDF
 // rounded differently, a fixed price no whole-cent rate reaches, an amount
@@ -466,7 +466,7 @@ export function mapQuoteArtifact({ quote, meta = null, customer = null, printed 
     taxTotalReason,
   };
   const mapped = { header, sections, lines, shown, totals, unpriced: computed.unpriced, printedLines, excludedRows, legacy };
-  // Whether the rows print exactly what the renderer prints (#245): only an
+  // Whether the rows print exactly what the renderer prints (#10): only an
   // organizer quote can be printed from its rows.
   mapped.printDifferences = legacy ? null : comparePrintedSchedule(scheduleFromRows(mapped), getCustomerScheduleItems(quote));
   // The job's cost (shown to the operator, never printed) must come out the same too.

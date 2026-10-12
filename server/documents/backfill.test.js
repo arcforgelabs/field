@@ -1,4 +1,4 @@
-// Backfill (#223): a fixture data directory with an issuance ledger, an
+// Backfill: a fixture data directory with an issuance ledger, an
 // invoice with an -R2 revision and its superseded R1, a corrupt and a missing
 // invoice PDF, and quotes sent before the ledger. Then the live recorder over
 // the same files, and the read routes.

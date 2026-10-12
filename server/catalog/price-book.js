@@ -1,4 +1,4 @@
-// The price book (#148 section 5, item 6 of the Replit move): one searchable,
+// The price book: one searchable,
 // editable grid over the catalogue, suppliers and their item links, and bulk
 // price edits with a preview. Reads are pure code over the store's snapshot
 // plus the supplier tables; every write runs in the store's serialised,

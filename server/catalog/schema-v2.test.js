@@ -1,4 +1,4 @@
-// Catalogue schema v2, part one (#178 phase 1): migration 0007 (kit_components,
+// Catalogue schema v2, part one (pricing engine phase 1): migration 0007 (kit_components,
 // items.type, the assembly tables dropped) and its rollback, the one price()
 // function and the price-equality gate.
 import assert from "node:assert/strict";

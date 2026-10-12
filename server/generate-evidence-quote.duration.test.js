@@ -9,7 +9,7 @@ import { refreshQuoteCatalogAuthority } from "./quote-catalogs.js";
 import { closeTestPriceCatalogs, createTestPriceCatalog, seedCatalogFromPriceMaps } from "./test-price-catalog.js";
 
 // Disposal rates and their costing basis are owned exclusively by the price
-// catalogue (DEL-46) — quote-catalogs/*.json5 no longer carries a disposal
+// catalogue — quote-catalogs/*.json5 no longer carries a disposal
 // unitPrice. Tests that price a disposal line therefore need a real price-
 // catalog authority behind them, matching how the server always runs in
 // production (server/index.js refreshes the catalog authority at startup).
@@ -25,7 +25,7 @@ async function withDisposalPriceCatalogAuthority(run) {
       // 240 exactly) because erpAuthorityActive flips true for every rule
       // once the price catalog has any active item — an explicit tip-truck
       // candidate would otherwise also become not-quoteable once this helper
-      // activates price-catalog authority for the disposal fix (DEL-46).
+      // activates price-catalog authority for the disposal fix.
       // site-levelling and soil-removal exist so their rules have a unit:
       // units come only from the catalogue item, never the quote catalog.
       buyMap: {
@@ -326,7 +326,7 @@ test("soil dump plan keeps disposal volume equal to gross cut when fill is not s
     // 30 m3 x 1.6 t/m3 = 48 t, at the same $36/t sell / $30/t buy rate the
     // removed dumping.js/json5 constants used to hardcode — proves a
     // per_tonne disposal line prices identically once the catalogue item is
-    // the sole source of both the rate and the costing basis (DEL-46).
+    // the sole source of both the rate and the costing basis.
     assert.equal(disposalLine?.quantity, 48);
     assert.equal(disposalLine?.unit, "tonne");
     assert.equal(disposalLine?.unitPrice, 36);
@@ -367,7 +367,7 @@ test("soil dump plan prices haulage and disposal from net export volume when fil
 
 test("soil dump plan omits haulage when cut and fill balance to zero disposal", async () => {
   // Loader-hours logistics now share the same single density owner as
-  // disposal billing (DEL-46 round 2) — no json5 fallback — so this needs
+  // disposal billing — no json5 fallback — so this needs
   // the same price-catalog authority as the other soil-dump-plan tests.
   await withDisposalPriceCatalogAuthority(() => {
     const quote = generateEvidenceQuote({
@@ -424,9 +424,9 @@ test("soil dump plan floors disposal at zero when fill exceeds cut and flags fut
 });
 
 test("manual soil sections are preserved while haulage is derived from the combined spoil volume", async () => {
-  // DEL-46 (P0, round 4): an unresolved disposal basis now correctly makes
+  // An unresolved disposal basis now correctly makes
   // the soil-removal line not-quoteable instead of silently mispricing it,
-  // so this needs the same price-catalog authority the round-2 fixtures use.
+  // so this needs the same price-catalog authority the disposal fixtures use.
   await withDisposalPriceCatalogAuthority(() => {
     const quote = generateEvidenceQuote({
       meta: baseMeta,
@@ -822,7 +822,7 @@ test("shallow soil depth flag does NOT fire for normal depth soil sections", () 
   assert.ok(!shallowFlag, "should NOT flag a soil section with reasonable depth (1.29m avg)");
 });
 
-// DEL-46 (P0, round 4): an unresolvable disposal basis must fail the
+// An unresolvable disposal basis must fail the
 // disposal line closed (not-quoteable, with a recorded reason) rather than
 // let the quote silently price from the loader component alone — a real,
 // cheaper-than-correct customer quote with no pricing issue recorded.
@@ -921,7 +921,7 @@ test("disposal rule quoted directly in catalog-only mode ⇒ pricing issue, neve
   );
 });
 
-// DEL-46 (P2, round 5): mass (tonnes) is only meaningful for a per_tonne
+// Mass (tonnes) is only meaningful for a per_tonne
 // disposal basis. resolveBulkRemovalMetrics already returned tonnes: null
 // for per_load/per_m3 items, but the description/rationale builders still
 // ran formatQty(null) through a hardcoded "(x t)" clause, rendering the
@@ -946,7 +946,7 @@ async function withDisposalPriceCatalogAuthorityBasis(pricingBasis, pricingBasis
 }
 
 for (const [pricingBasis, pricingBasisFactor] of [["per_load", 2], ["per_m3", null]]) {
-  test(`${pricingBasis} disposal basis never renders a false "0 t" mass in customer-visible soil-removal text (DEL-46 round 5)`, async () => {
+  test(`${pricingBasis} disposal basis never renders a false "0 t" mass in customer-visible soil-removal text`, async () => {
     await withDisposalPriceCatalogAuthorityBasis(pricingBasis, pricingBasisFactor, () => {
       const quote = generateEvidenceQuote({
         meta: baseMeta,
@@ -977,7 +977,7 @@ for (const [pricingBasis, pricingBasisFactor] of [["per_load", 2], ["per_m3", nu
   });
 }
 
-// DEL-46 (P1, round 6): a disposal item with a VALID basis/factor but no
+// A disposal item with a VALID basis/factor but no
 // sell price used to silently produce a real $0 disposal line and a cheap
 // parent quote, with no pricing issue recorded — root-caused to
 // quote-catalogs.js's normalizeRule() coercing an absent json5 unitPrice to
@@ -1010,7 +1010,7 @@ async function withDisposalPriceCatalogAuthorityNoSellPrice(run) {
   }
 }
 
-test("disposal basis present but sell price null ⇒ not-quoteable with a recorded pricing issue, never a $0 line or a cheap parent (DEL-46 round 6)", async () => {
+test("disposal basis present but sell price null ⇒ not-quoteable with a recorded pricing issue, never a $0 line or a cheap parent", async () => {
   await withDisposalPriceCatalogAuthorityNoSellPrice(() => {
     const quote = generateEvidenceQuote({
       meta: baseMeta,
@@ -1039,12 +1039,12 @@ test("disposal basis present but sell price null ⇒ not-quoteable with a record
   });
 });
 
-// DEL-46 (P2-B, round 7): an AUTHORED sell_price of exactly 0 (which the
+// An AUTHORED sell_price of exactly 0 (which the
 // price-catalog API permits — "zero or greater") is a different case from a
 // null sell_price, and used to still quote a real $0 line on the direct
 // (non-recipe) route. generate-evidence-quote.js's authorityUnitPrice
 // computation has two branches: the non-erp branch already applied a `> 0`
-// threshold (round 6), but the erp branch only checked `!= null`, so
+// threshold, but the erp branch only checked `!= null`, so
 // authoritySellRate === 0 passed straight through. The recipe route
 // (buildBulkDisposalLine) already rejected an authored zero via the same
 // `> 0` threshold, so the two routes disagreed about what a $0 rate means.
@@ -1069,7 +1069,7 @@ async function withDisposalPriceCatalogAuthorityZeroSellPrice(run) {
   }
 }
 
-test("disposal basis present with an authored $0 sell price ⇒ not-quoteable on the recipe route, never a $0 line (DEL-46 round 7)", async () => {
+test("disposal basis present with an authored $0 sell price ⇒ not-quoteable on the recipe route, never a $0 line", async () => {
   await withDisposalPriceCatalogAuthorityZeroSellPrice(() => {
     const quote = generateEvidenceQuote({
       meta: baseMeta,
@@ -1092,7 +1092,7 @@ test("disposal basis present with an authored $0 sell price ⇒ not-quoteable on
   });
 });
 
-test("disposal rule quoted directly with an authored $0 sell price under price-catalog authority ⇒ not-quoteable, never a $0 line (DEL-46 round 7)", async () => {
+test("disposal rule quoted directly with an authored $0 sell price under price-catalog authority ⇒ not-quoteable, never a $0 line", async () => {
   await withDisposalPriceCatalogAuthorityZeroSellPrice(() => {
     const quote = generateEvidenceQuote({
       meta: baseMeta,

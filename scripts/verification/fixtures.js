@@ -8,7 +8,7 @@ const FIXED_DATES = [
   "2026-01-15T09:15:00.000Z",
 ];
 
-// DEL-46: sanitized, fictional price-catalog items seeded via the same
+// Sanitized, fictional price-catalog items seeded via the same
 // supported path any catalogue item uses (createItem(), see
 // scripts/verification/reset.js) so the price catalogue is the authority for
 // field-verification.json5's rules — including the three disposal rules,
@@ -110,7 +110,7 @@ export const VERIFICATION_CATALOG_ITEMS = Object.freeze([
   { code: "APC-DELIVERY-MINIMUM", name: "APC delivery minimum (demo)", unit: "job", buy_price: 140, sell_price: 170, catalog_type: "goods_service", category: "Delivery" },
 ]);
 
-// DEL-46: a fourth, verification-only fixture that exercises all three
+// A fourth, verification-only fixture that exercises all three
 // disposal costing bases in one quote. Kept separate from DEMO_FIXTURES
 // (shared with scripts/reset-staging-baseline.js's "demo" fixture set,
 // which quotes against embark-default and does not have these rule codes)
@@ -225,7 +225,7 @@ export const REVIEWED_SEMANTIC_MANIFEST = Object.freeze({
   fixtureTotals: Object.freeze({
     // 4004 is the quoted-and-locked total for this fixture: it holds from the
     // moment the customer-facing revision is built through lock, send, land,
-    // and milestone generation (DEL-30). Locking is a delivery-state change,
+    // and milestone generation. Locking is a delivery-state change,
     // never a re-price, so this value must not drift across that sequence.
     // reset.js asserts it twice — once from the pre-lock in-memory build, and
     // again by reading the persisted quote.json back off disk after the lock

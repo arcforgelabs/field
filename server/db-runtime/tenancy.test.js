@@ -1,5 +1,5 @@
 // Two organisations in one database: row-level security must keep each one's
-// rows out of the other's reads and writes (#178 phase 0b).
+// rows out of the other's reads and writes (pricing engine phase 0b).
 import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

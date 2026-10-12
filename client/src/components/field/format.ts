@@ -1,4 +1,4 @@
-// Number formats for Field's tables and drawers (issue #161).
+// Number formats for Field's tables and drawers.
 const moneyFormat = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const percentFormat = new Intl.NumberFormat("en-AU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 

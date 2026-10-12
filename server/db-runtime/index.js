@@ -1,4 +1,4 @@
-// Field's one PostgreSQL runtime (#139).
+// Field's one PostgreSQL runtime.
 //
 // Every server module that needs the database goes through here:
 //
@@ -246,7 +246,7 @@ function acquirePgliteLock(dir) {
     // random suffix would also draw from the seeded source the verification
     // preload installs, shifting every id and token after boot in PGlite mode
     // only, so the quote/invoice proof could not compare PGlite with
-    // FIELD_STORAGE=postgres (#231).
+    // FIELD_STORAGE=postgres.
     const staging = `${holderPath}.${process.pid}.tmp`;
     writeFileSync(staging, `${process.pid}\n`, { mode: 0o600 });
     renameSync(staging, holderPath);

@@ -196,7 +196,7 @@ test("resolveDefaultSelectedQuoteVersion prefers the locked customer-seen versio
   }), 7);
 });
 
-test("resolveCustomerDeliveryQuoteVersion delivers the latest revision by default, unlike the view resolver (DEL-30 defect B)", () => {
+test("resolveCustomerDeliveryQuoteVersion delivers the latest revision by default, unlike the view resolver", () => {
   const meta = {
     pipelineStage: "lost",
     quoteVersion: 7,

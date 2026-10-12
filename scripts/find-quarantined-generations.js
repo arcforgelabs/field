@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// Read-only diagnostic: which jobs lost a committed job generation (#224)?
+// Read-only diagnostic: which jobs lost a committed job generation?
 //
 //   node scripts/find-quarantined-generations.js <dataDir> [--json]
 //
-// Before #224, archiving a job (and a few other paths) wrote meta.json and
-// quote-lifecycle.json straight into the job's committed generation. The next
-// read found the generation no longer matched its commit marker, renamed it to
+// Until archiving was fixed to write a new generation, archiving a job (and a
+// few other paths) wrote meta.json and quote-lifecycle.json straight into the
+// job's committed generation. The next read found the generation no longer
+// matched its commit marker, renamed it to
 // .field-generations/.quarantine-g-NNNNNN-<uuid>, and the job silently fell
 // back to the previous generation. This script lists, per job:
 //

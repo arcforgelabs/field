@@ -39,7 +39,7 @@ async function readRecord(path) {
 
 // A claim ("sending") must be durable before Gmail is called: if Field died
 // after sending but before storing the claim, a rebuilt data directory would
-// show the email as still due and send it twice (#139). If the claim cannot be
+// show the email as still due and send it twice. If the claim cannot be
 // stored, the record is put back as it was and nothing is sent.
 async function storeClaimDurably(path, claimed, unclaimed) {
   try {
@@ -533,7 +533,7 @@ export async function startScheduledEmailScheduler({
     } catch (error) {
       logger.error?.(`[scheduled-email] scheduler failed: ${error.message}`);
     } finally {
-      // Scheduler tick: store whatever background work wrote (#139).
+      // Scheduler tick: store whatever background work wrote.
       await flushDurableStorageQuietly({ reason: "scheduler tick", logger });
       running = false;
     }

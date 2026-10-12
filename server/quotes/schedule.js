@@ -1,4 +1,4 @@
-// A quote's printed schedule and totals from its rows (#245). Pure: it takes
+// A quote's printed schedule and totals from its rows (#10). Pure: it takes
 // sections and lines either as the mapping returns them (local `key`s) or as
 // the quote service reads them (uids), and returns what the PDF prints, in
 // the shape the renderer (shared/quote-presentation-renderer.js) gives it:

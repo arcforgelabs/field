@@ -1,4 +1,4 @@
-// The issue service (#223, #178 step 2): every document a customer was
+// The issue service (phase 3 step 2): every document a customer was
 // issued, with its exact bytes and an append-only history.
 //
 //   recordIssuedDocument(input)   blob + issued_documents row + `issued` event,
@@ -121,7 +121,7 @@ export function createIssuedDocumentService({
   blobs = createPostgresBlobStore(),
   now = () => new Date(),
   // Called with the SHA-256s a write stored, after its transaction commits
-  // (the R2 replicator, #240). Best effort: it is not awaited, and an error
+  // (the R2 replicator, #12). Best effort: it is not awaited, and an error
   // in it never reaches the caller.
   onBlobsStored = null,
 }) {

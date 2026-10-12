@@ -53,7 +53,7 @@ const BUSINESS_DEFAULTS = {
   },
 };
 
-// The business a document prints (issued documents record it, #223).
+// The business a document prints (issued documents record it).
 export function resolveDocumentBusiness(quote) {
   return resolveBusiness(quote);
 }
@@ -315,7 +315,7 @@ export async function writeQuoteVersionSnapshot({
 // keyed purely on the versions directory always misses even when the
 // pinned version IS the current, locked root quote. Mirror
 // `reviseJobMilestoneInvoice`'s own current-vs-requested-version fallback
-// instead of 410ing the common case (DEL-30 P2-1).
+// instead of 410ing the common case.
 async function resolvePinnedQuoteArtifactsForReconstruction(jobDir, pinnedQuoteVersion) {
   if (!pinnedQuoteVersion) return null;
   const versionedArtifacts = await readQuoteArtifacts(jobDir, pinnedQuoteVersion);
@@ -329,7 +329,7 @@ async function resolvePinnedQuoteArtifactsForReconstruction(jobDir, pinnedQuoteV
 }
 
 // Single owner of "does this milestone invoice's PDF need writing, and how?"
-// Dispatches on `artifactState` (DEL-30 round-4 architecture correction) —
+// Dispatches on `artifactState` —
 // every branch below follows directly from the state, rather than each
 // caller (this function previously, `resolveIssuedMilestoneInvoiceArtifact`,
 // `persistMilestoneInvoiceState`) recombining `pdfIssuedAt` / `legacyOrigin`
@@ -360,7 +360,7 @@ export async function writeMilestoneInvoiceArtifact({
   const issuedRevision = milestoneInvoice.issuedRevision || null;
   const state = deriveArtifactState(issuedRevision);
 
-  // Path-scoped, not milestone-scoped (DEL-30 F4): a *retired* revision can
+  // Path-scoped, not milestone-scoped: a *retired* revision can
   // share this exact path (e.g. right after an unsend restores an identical
   // revision number onto the same invoice number). Once ANY revision —
   // active or historical — was genuinely issued at this exact path, that
@@ -385,7 +385,7 @@ export async function writeMilestoneInvoiceArtifact({
     // this exact path, IT is the real issued document. Adopt it — read it,
     // hash it, and stamp its own recorded issue time — and never overwrite
     // it with a reconstruction that would silently launder the swap under
-    // the original issue timestamp with a fresh sha (DEL-30 P1-1). This is
+    // the original issue timestamp with a fresh sha. This is
     // not a bolted-on guard: it falls directly out of "any money-document
     // state re-verifies disk before acting," which is exactly what the
     // state model is for.
@@ -394,10 +394,10 @@ export async function writeMilestoneInvoiceArtifact({
       const pdfSha256 = createHash("sha256").update(existingBytes).digest("hex");
       // Prefer the revision's own official issue date over a previously
       // recorded artifact timestamp — consistent with the reconstruct
-      // branch below and with DEL-30 F3's original self-heal intent
-      // ("stamps pdfIssuedAt from the record's own issuedAt rather than the
-      // current time"). Both preserve history; only the preference order
-      // was inconsistent between the two branches (DEL-30 P3-2, round 5).
+      // branch below and with the self-heal's original intent, which stamps
+      // pdfIssuedAt from the record's own issuedAt rather than the current
+      // time. Both preserve history; only the preference order
+      // was inconsistent between the two branches.
       const pdfIssuedAt = identitySource?.issuedAt || identitySource?.pdfIssuedAt || null;
       return {
         pdfBuffer: existingBytes,
@@ -421,7 +421,7 @@ export async function writeMilestoneInvoiceArtifact({
 
     // No file at all. Reconstruct from the quote version this revision was
     // actually issued against, or fail loudly — never render from whatever
-    // quote this call happens to be carrying (DEL-30 P2-B).
+    // quote this call happens to be carrying.
     const pinnedQuoteVersion = issuedRevision?.quoteVersion || historicalMatch?.quoteVersion || null;
     const pinnedArtifacts = await resolvePinnedQuoteArtifactsForReconstruction(jobDir, pinnedQuoteVersion);
     if (!pinnedArtifacts?.quote) {
@@ -456,7 +456,7 @@ export async function writeMilestoneInvoiceArtifact({
       alreadyIssued: true,
       reconstructed: true,
       // A legacy-pinned quote version is a best-effort substitute, not a
-      // historically-accurate record (DEL-30 P3-1) — surfaced so the
+      // historically-accurate record — surfaced so the
       // caller can word the audit event accordingly.
       quoteVersionInferred: Boolean(identitySource?.quoteVersionInferred),
       pdfSha256,
@@ -566,26 +566,26 @@ export async function deleteMilestoneReceiptArtifact({
   await unlink(pdfPath).catch(() => {});
 }
 
-// DEL-30 made version snapshots the reconstruction basis for money
+// Version snapshots are the reconstruction basis for money
 // documents: a revision pins the quote version it needs to rebuild a lost
-// PDF from (DEL-30 P2-B). Deleting a version any issued revision — active
+// PDF from. Deleting a version any issued revision — active
 // or historical — is still pinned to silently converts every future lost
-// PDF pinned to it into a permanent 410, with no way back (DEL-30 P3-2).
+// PDF pinned to it into a permanent 410, with no way back.
 //
 // This guard is DELIBERATELY broader than what today's write-path
 // reconstruction alone would need: `writeMilestoneInvoiceArtifact` only
 // ever adopts or reconstructs at the ACTIVE revision's own path, so a
 // SUPERSEDED (historical) revision's lost PDF cannot actually be rebuilt
-// today even when its pinned version survives (DEL-30 P3-1, round 5). The
-// guard still protects historical pins anyway: DEL-30's own target requires
-// "historical reads, downloads, previews and resend paths select the
-// intended version deterministically" and treats a superseded revision's
+// today even when its pinned version survives. The
+// guard still protects historical pins anyway: historical reads, downloads,
+// previews and resend paths must select the intended version
+// deterministically, and Field treats a superseded revision's
 // PDF as no less a money document than the active one. Narrowing this guard
 // to active revisions only would not close that reconstruction gap — it
-// would just additionally allow deleting the one thing that could, in a
-// future round, let it be closed. Keeping the broad guard costs an operator
-// an occasional blocked deletion; narrowing it would foreclose ever fixing
-// P3-1 for a version that is deleted before that fix lands. If a historical
+// would just additionally allow deleting the one thing that could later
+// let it be closed. Keeping the broad guard costs an operator an occasional
+// blocked deletion; narrowing it would foreclose ever rebuilding a
+// superseded revision whose version is deleted before that fix lands. If a historical
 // reconstruction endpoint is later built, this guard already covers it with
 // no change needed.
 async function findQuoteVersionReference(jobDir, version) {
@@ -913,7 +913,7 @@ export async function generateQuotePdfBuffer({
       ? buildReceiptDocumentNumber({ meta, quote, milestoneInvoice })
       : (quote.quoteNumber || meta.id);
   const pdfBusiness = resolveBusiness(quote);
-  // A quote prints its schedule and totals from its rows (#245); invoices and
+  // A quote prints its schedule and totals from its rows (#10); invoices and
   // receipts still print the quote's schedule from the files until they are
   // rows themselves.
   const scheduleView = resolvedDocumentType === "quote" ? await loadQuoteRows({ quote, meta }) : null;

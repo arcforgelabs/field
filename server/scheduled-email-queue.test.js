@@ -243,7 +243,7 @@ test("restart leaves an interrupted Gmail call failed for manual review", async 
   });
 });
 
-// Durable storage (#139): a claim must be stored before Gmail is called, or a
+// Durable storage: a claim must be stored before Gmail is called, or a
 // restart could resend. A stand-in store records flushes or refuses them.
 function fakeDurableStore(t, { fail = false } = {}) {
   const store = {

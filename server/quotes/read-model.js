@@ -1,4 +1,4 @@
-// Quote reads from rows (#245, quotes as rows part two). The quote PDF, the
+// Quote reads from rows (#10, quotes as rows part two). The quote PDF, the
 // quote email's totals, the job's cached totals and the job detail's
 // customer pricing (which the client and the MCP quote tool read) take their
 // schedule and totals from here:

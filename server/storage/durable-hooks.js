@@ -1,4 +1,4 @@
-// The calls the rest of the server makes into durable storage (#139), kept in
+// The calls the rest of the server makes into durable storage, kept in
 // a module with no imports so that anything may use them without loading the
 // database driver. server/storage/durable-store.js installs the running store
 // here at boot when FIELD_STORAGE=postgres. Until then (and always when

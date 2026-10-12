@@ -1,4 +1,4 @@
-// Field's shared components (issue #161), first built for the Site theme
+// Field's shared components, first built for the Site theme
 // (formerly Field Crew), as React primitives. Styles are in ./field-ui.css and read the
 // [data-theme="field"] tokens, so screens compose these instead of inline
 // styles. Built for dense desktop screens (the price book grid and drawer,

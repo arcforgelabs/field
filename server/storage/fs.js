@@ -1,6 +1,6 @@
 // Field's only door to node:fs. Server modules import from here (or from
 // ./fs-promises.js) instead of node:fs, so every write under the data root can
-// be recorded through the hook in ./write-recorder.js (issue #139: the data
+// be recorded through the hook in ./write-recorder.js (the data
 // directory is mirrored to durable storage on hosts that discard local files).
 //
 // Everything node:fs exports passes straight through. The operations below that

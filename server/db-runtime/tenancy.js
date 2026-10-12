@@ -1,4 +1,4 @@
-// Tenancy (#178 phase 0b, docs/PRICING_ENGINE.md "Tenancy").
+// Tenancy (pricing engine phase 0b, docs/PRICING_ENGINE.md "Tenancy").
 //
 // Every tenant table has a row-level security policy that admits only rows of
 // the organisation named by the transaction's `field.org_uid` setting

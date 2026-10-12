@@ -1074,7 +1074,7 @@ test("a kit row that froze no components never pre-ticks a component it cannot v
   assert.deepEqual(quoteTotal(applied.organizer), { charge: operatorTotal.charge + 4, cost: operatorTotal.cost });
 });
 
-// #167 review: the banner's ticks come from the last check. A row edited
+// The banner's ticks come from the last check. A row edited
 // after that check must not be applied on the strength of the old list.
 test("a ticked row whose rate the operator typed after the check is skipped, and the edit is kept", async (t) => {
   const store = await freshStore(t);

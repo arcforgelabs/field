@@ -1,4 +1,4 @@
-// quoteTotals (#241): the one totals function for quote rows. A line's total
+// quoteTotals (#6): the one totals function for quote rows. A line's total
 // is round(qty x unit sell, 2), or the amount a document already printed;
 // GST is worked out once on the subtotal per rate (decided 2026-10-12);
 // amounts ex GST, exact decimals rounded half away from zero.

@@ -22,7 +22,7 @@ function normalizeBoolean(value, fallback = true) {
 }
 
 // A catalogue-linked manual row keeps its link to the catalogue item and the
-// values it froze when the row was added or last refreshed (#148, #139):
+// values it froze when the row was added or last refreshed:
 // identity is the item uid, `catalogPriceId`/`catalogPriceKey` name the price
 // it was priced from, and the `catalog*` values are what the catalogue said
 // then. Editing a row's rate or unit marks it overridden (rateMode "manual")

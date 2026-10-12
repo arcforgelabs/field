@@ -1,4 +1,4 @@
-// Quote snapshots (#151): the record of exactly what each customer was sent.
+// Quote snapshots: the record of exactly what each customer was sent.
 //
 // Every quote, invoice and receipt delivery writes one `quote_snapshots` row
 // (server/db/src/schema.ts), keyed by its delivery attempt:

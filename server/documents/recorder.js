@@ -1,4 +1,4 @@
-// Dual-write from today's send path into the issued-document tables (#223).
+// Dual-write from today's send path into the issued-document tables.
 //
 // In this step the job files stay the source of truth. Everything here runs
 // after today's code has done its own work, and never changes it: a failure

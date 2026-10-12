@@ -1,4 +1,4 @@
-// The R2 replicator's state machine (#240) on PGlite with an in-memory
+// The R2 replicator's state machine (#12) on PGlite with an in-memory
 // object store: replicate after commit, no-op when the same bytes are there,
 // alarm (never overwrite) when other bytes are, back off and retry after an
 // outage, backfill on the first tick, and the read fallback's hash check.

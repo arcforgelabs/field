@@ -158,7 +158,7 @@ function getActorName(): string {
 // The quote rows' version the server last reported for each job
 // (X-Field-Quote-Rows-Version on the job detail and on a save). A quote save
 // sends it back as If-Match, so a save over changes made elsewhere since the
-// quote was opened is refused (412) instead of overwriting them (#245).
+// quote was opened is refused (412) instead of overwriting them (#10).
 const quoteRowsVersions = new Map<string, string>();
 
 function rememberQuoteRowsVersion(path: string, res: Response) {

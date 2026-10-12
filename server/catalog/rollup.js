@@ -1,4 +1,4 @@
-// The catalogue's one kit roll-up (#148: "exactly one roll-up function").
+// The catalogue's one kit roll-up: there is exactly one roll-up function.
 // Every price Field reads goes through effectivePrices(): the quote pricing
 // snapshot and price maps, the rate card, item detail, health, the current
 // price exposed to quote lines and the kit snapshot.
@@ -60,7 +60,7 @@ export function componentsOf(state, item, recipeChildrenByParent = loadRecipeChi
     }));
   }
   // A recipe names its kit and components by uid where it can, the legacy
-  // code otherwise (#178 step 4).
+  // code otherwise (code retirement step 4).
   const recipe = recipeChildrenByParent?.get(recipeUidKey(item.uid)) || recipeChildrenByParent?.get(normalizeCode(item.code));
   if (!recipe || !recipe.length) return [];
   return recipe.map((child, index) => {

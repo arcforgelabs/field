@@ -281,7 +281,7 @@ export function applyExecutionEstimateToLineItems({
 }) {
   if (!quoteCatalog || !execution) return { lineItems, pricingIssues: [] };
 
-  // DEL-46 (P3, round 7): upsertHourlyLineItem fails closed (round 6) when
+  // upsertHourlyLineItem fails closed when
   // its rule has no positive rate, but a silently-omitted line is still an
   // undetected under-billing risk if a support rule's rate is ever removed
   // — currently latent (both catalogues price every hourly/support rule),
@@ -348,7 +348,7 @@ function upsertHourlyLineItem({ lineItems, quoteCatalog, code, quantity, field, 
   // rule must not reach here at all — that would silently add a real $0
   // line, worse than simply not adding the derived line (the pre-existing
   // behaviour when quantity <= 0, just below). Record the omission as a
-  // pricing issue (DEL-46, round 7) so a missing rate is reported, not
+  // pricing issue so a missing rate is reported, not
   // silent.
   const unitPrice = resolveCatalogueSellRate(rule);
   if (!(unitPrice > 0)) {

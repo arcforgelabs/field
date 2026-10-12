@@ -1,4 +1,4 @@
-// Backfill of issued documents from today's job files (#223).
+// Backfill of issued documents from today's job files.
 //
 // Walks every job in a data directory and records into issued_documents what
 // the files say a customer was issued, with the original bytes:

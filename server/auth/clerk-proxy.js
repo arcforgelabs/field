@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 
-// Clerk Frontend API proxy (#149). Replit's managed Clerk publishes the app with
+// Clerk Frontend API proxy. Replit's managed Clerk publishes the app with
 // CLERK_PROXY_URL (e.g. "/api/__clerk"), so the browser loads clerk-js and talks
 // to Clerk through this app instead of Clerk's own host. Clerk's SDK does the
 // forwarding (header rules, Clerk-Proxy-Url, redirects); this module only turns

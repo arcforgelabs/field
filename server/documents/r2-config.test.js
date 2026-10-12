@@ -1,4 +1,4 @@
-// FIELD_DOCUMENT_REPLICA and the FIELD_R2_* settings (#240): off when unset,
+// FIELD_DOCUMENT_REPLICA and the FIELD_R2_* settings (#12): off when unset,
 // refused when anything is missing or malformed, refused in a Replit
 // workspace, and no message ever carries a value.
 import assert from "node:assert/strict";

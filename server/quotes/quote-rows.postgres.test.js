@@ -1,4 +1,4 @@
-// Quote rows on a real PostgreSQL server (#241), migrated the way Replit runs
+// Quote rows on a real PostgreSQL server (#6), migrated the way Replit runs
 // it: by a login role that owns the tables, is not a superuser and cannot
 // create roles, so row-level security holds through FORCE alone. Off unless
 // FIELD_DB_TEST_DATABASE_URL or FIELD_DB_TEST_DOCKER=1 is set

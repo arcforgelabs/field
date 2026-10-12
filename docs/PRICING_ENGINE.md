@@ -1,9 +1,9 @@
 # Pricing engine v2
 
 The target data model for Field's price book, quotes and invoices, and the
-order in which we get there. It replaces the catalogue and quote design spread
-across #146, #148, #169 and #170 (tracked in #178). The schema comes
-first; the UI is rebuilt on it, on the #161 design system.
+order in which we get there. It replaces the earlier catalogue and quote
+design notes. The schema comes first; the UI is rebuilt on it, on Field's
+design system (`DESIGN.md`).
 
 Status: **in progress**. Phase 0b (tenancy) and phase 3 step 2 (issued
 documents, see "Phase 3, step by step") are built, and so are legacy
@@ -21,7 +21,7 @@ checked against what Field shows, and the quote PDF, the quote email's
 totals, the job's totals and the API and MCP customer pricing are read from
 those rows, while the files are still written alongside.
 
-The owner's six decisions of 2026-10-12 (#178, from the document audit) are
+The owner's six decisions of 2026-10-12 (from the document audit) are
 recorded where they change the design: credit notes ("Invoices and
 payments"), invoice numbers ("Identity"), document bytes and issue versus
 delivery ("`document_events` and `issued_documents`"), claim-line invoices
@@ -36,7 +36,7 @@ and milestone rules ("Invoices and payments"), and the order of work
    code (rule modes, hardcoded recipes, rate cards).
 2. **Standard trade-estimating model, nothing clever.** Price book → kits →
    quote lines → invoices, the way Fergus, simPRO, Tradify, ServiceM8 and Xero
-   do it (research in #148). Field drops everything that existed to turn a
+   do it. Field drops everything that existed to turn a
    voice recording into a quote: rules, layers, compiled line items,
    attestation, transcripts and evidence packs.
 3. **One way to compute a price.** Every number on screen, in a PDF or over
@@ -135,13 +135,13 @@ reference.
 
 Existing item uids are kept as they are; only new rows get prefixed ULIDs.
 
-> **Direction change, 2026-10-12 (#178):** items have a name the
+> **Direction change, 2026-10-12:** items have a name the
 > operator chooses and a uid the system keeps; there is no second naming
-> scheme. The price book no longer shows or asks for codes (#209). Existing
+> scheme. The price book no longer shows or asks for codes. Existing
 > codes are legacy aliases (`item_code_aliases`, migration 0006): every code
 > an item has had resolves to it, and codes no longer change. They stay until
-> everything that looks items up by code resolves by uid (the plan is on
-> #178). The `TYPE-THING-SPEC` format below is
+> everything that looks items up by code resolves by uid (code retirement,
+> steps 2 to 6 in "Status" above). The `TYPE-THING-SPEC` format below is
 > superseded and kept only as the record of what was proposed.
 
 A **code** is the human SKU an estimator types and reads: unique
@@ -171,7 +171,7 @@ A **number** is a customer-facing document identifier, allocated once, never
 reused, from a per-type sequence: quotes `EQ-YYMM-NN` (as today). Revisions
 of a quote keep its number and add a version (`EQ-2501-03 v2`).
 
-> **Decision, 2026-10-12 (#178):** invoice numbers are
+> **Decision, 2026-10-12:** invoice numbers are
 > `INV-YYYY-MM-N`, from one sequence per organisation, allocated when the
 > invoice is issued (`document_number_counters`). An invoice connected to a
 > job carries the job number as a required reference. Numbers already issued
@@ -189,7 +189,7 @@ of a quote keep its number and add a version (`EQ-2501-03 v2`).
 | Markup, margin | `numeric(7,3)` percent | `25` means 25 %. |
 | Conversion factor | `numeric(14,6)` | |
 
-> **Decisions, 2026-10-12 (#178):**
+> **Decisions, 2026-10-12:**
 >
 > - **GST is worked out once on the subtotal, not per line.** Every quote
 >   Field has sent did it this way, so the rows reproduce what customers
@@ -294,7 +294,7 @@ Irrigation, Planting), Demolition & disposal, Haulage.
 
 ### `units`, `unit_aliases`, `item_unit_conversions`, `tax_codes`
 
-Kept as built (#163): typed units with a dimension and base factor, aliases
+Kept as built: typed units with a dimension and base factor, aliases
 for input, item-specific conversions (1 m³ gravel = 1.6 t), and tax codes
 (`GST` 10 %, `GST_FREE`, `INPUT_TAXED`).
 
@@ -368,7 +368,7 @@ One table for kits. It replaces `item_components` and the five empty
 
 ### Suppliers and imports
 
-Kept as built (#166): `suppliers`, `item_suppliers` (supplier code, pack
+Kept as built: `suppliers`, `item_suppliers` (supplier code, pack
 quantity, default supplier) and staged `price_imports` / `price_import_rows`
 with a diff before apply. They are empty today, so the UI hides them until a
 supplier exists rather than showing empty columns.
@@ -422,13 +422,13 @@ and the next `version`. The previous row becomes `superseded`.
 | `sent_at`, `accepted_at` | timestamptz | |
 | `version_lock` | int | Optimistic concurrency (named so it doesn't clash with `version`) |
 
-**Built (#241, migration `0010_quote_rows`), with these differences:**
+**Built (#6, migration `0010_quote_rows`), with these differences:**
 
 - A version is unique per job, `(org_uid, job_id, version)`, not per
   number. The audit found quote numbers that collide across jobs, so
   `(number, version)` is only indexed until numbers come from
   `document_number_counters`. The backfill lists any number two jobs share.
-- `issued_document_uid` links the issued document (#230) the version was
+- `issued_document_uid` links the issued document the version was
   sent as. `source_digest` is a hash of the files the rows were mapped from,
   so an unchanged version is not rewritten.
 - `terms_text` and `catalog_version` are null for rows mapped from files:
@@ -496,7 +496,8 @@ Rules:
   `price_key` with the item's current price and lists the lines that changed
   (old → new). The estimator applies all, some or none. Lines with
   `is_price_override` are listed but never changed silently. This replaces
-  #167's organizer diff, and fixes #170's frozen-kit gap by construction.
+  the organizer's catalogue diff, and closes the gap where a kit's frozen
+  price went stale, by construction.
 - **Totals:** one function, `quoteTotals(lines)`. It sums `line_total` over
   priced, selected lines for the subtotal, works GST out once on that
   subtotal (round(subtotal × rate, 2) per tax rate, not per line), and adds
@@ -509,9 +510,10 @@ Rules:
   After that, a trigger refuses any `UPDATE` or `DELETE` on the quote's lines
   and sections. To change a sent quote, create a new version, which copies
   its lines into a new draft. Sending needs no lineage or attestation check:
-  every line already holds its own frozen price (#169 disappears).
+  every line already holds its own frozen price, so a quote can no longer be
+  refused for missing line-item lineage.
 
-**Built (#241), with these differences:**
+**Built (#6), with these differences:**
 
 - `section_uid` is null for a line outside any section (a top-level row).
   `parent_line_uid` also puts a row under a `note` heading, not only a
@@ -534,7 +536,7 @@ Rules:
 
 Milestone invoicing is used on 51 of 65 jobs, so it gets proper tables.
 
-> **Decisions, 2026-10-12 (#178):**
+> **Decisions, 2026-10-12:**
 >
 > - **An issued invoice is never revised in place.** It is corrected with a
 >   credit (adjustment) note against it, then a new invoice. Today's `-R2`
@@ -543,13 +545,13 @@ Milestone invoicing is used on 51 of 65 jobs, so it gets proper tables.
 >   at issue, with the job number as a required reference (see "Identity").
 > - **Milestone invoices show claim lines**, one per milestone, each
 >   referencing the quote. Milestone defaults come from account-wide rules
->   by contract value, with per-job overrides that are visibly marked
->   (#239). The first rules follow South Australia's domestic building deposit limits:
+>   by contract value, with per-job overrides that are visibly marked.
+>   The first rules follow South Australia's domestic building deposit limits:
 >   at most $1,000 under $20,000, at most 5 % from $20,000.
 
 - `payment_milestones`: `uid`, `quote_uid`, `label` ("Deposit",
   "On completion"), `percent` or `amount`, `sort_order`. Defaults come from
-  the account's rules (#239).
+  the account's rules.
 - `invoices`: `uid` (`inv_…`), `number` (`INV-YYYY-MM-N`), `quote_uid`,
   `job_id` (the required reference), `milestone_uid` null, `kind`
   (`deposit`, `progress`, `final`, `variation`), `status` (`draft`,
@@ -566,7 +568,7 @@ Milestone invoicing is used on 51 of 65 jobs, so it gets proper tables.
 
 ### `document_events` and `issued_documents`
 
-**Built (#223, migration `0009_issued_documents`).** Every document a
+**Built (migration `0009_issued_documents`).** Every document a
 customer was issued has its own uid, its exact bytes and an append-only
 history. In this step the job files are still the source of truth: the
 tables are filled alongside them and read only by the by-uid routes.
@@ -603,7 +605,7 @@ Rules:
   `TRUNCATE` on blobs and events, and on every `issued_documents` column
   except `details`, for the table owner too. `field_app` is granted no more.
 - **A document is issued when it is finalised; email is delivery** (decided
-  2026-10-12, #178). The `issued` event and the `emailed` event are separate
+  2026-10-12). The `issued` event and the `emailed` event are separate
   facts. Step 2 records both and does not change when today's code considers
   something issued: a quote is issued when it is emailed, an invoice revision
   when it is frozen. Issuing at finalisation arrives with documents built
@@ -615,7 +617,7 @@ Rules:
 - **The byte store is an interface.** `server/documents/blob-store.js` is the
   only code that touches `document_blobs`, through `put(bytes) → sha256`
   and `get(sha256) → bytes`.
-- **A locked R2 replica (#240, built, migration `0012_document_replicas`).**
+- **A locked R2 replica (#12, built, migration `0012_document_replicas`).**
   PostgreSQL stays the store of record. With `FIELD_DOCUMENT_REPLICA=r2`,
   each blob is copied after its issue transaction commits to a Cloudflare R2
   bucket with a bucket lock, at `<org_uid>/<sha256>`
@@ -664,7 +666,7 @@ in one transaction, and have no field-level history. The end state is
 | `sent-emails.jsonl`, `quote-delivery-outbox.json`, scheduled emails | `email_messages` (one row per email: status `scheduled`, `sending`, `sent`, `failed`; recipients, Gmail ids), linked to `document_events` |
 | `email-templates.json` | `email_templates` |
 | `gmail-oauth-users.json` | `oauth_tokens`, with the refresh token encrypted at rest |
-| `users.json` | `field_users` (done, #164) |
+| `users.json` | `field_users` (done) |
 | `config.json` business fields | `business_settings` (above). Secrets stay in Replit Secrets |
 | Capture-era files (`transcript*.json`, `evidence-pack.json`, `evidence-index.json`, `ingestion-ledger.json`, `quote-inputs.json`, `quote-context.json`, `site-conditions.json`, wall and Moasure files) | not migrated. Kept read-only with the job's archive |
 
@@ -689,13 +691,13 @@ quotes are rows. The figures are approximate lines of code on master `d7fbb80`.
 | Evidence and ingestion stack | evidence pack, ingestion ledger, evidence index, stale detection, clarification notes, baseline-scope reconcile, breakdown source, version context, review state and projection, job state and gaps, quote proof and trace | ~4.5k |
 | Rules engine | `generate-evidence-quote`, `quote-quantity-rules`, `quote-commercial-compiler`, execution estimator, internal breakdown, quote catalogs, catalogue overlay (`catalog-pricing.js` authority pricing), commercial adjustments, recipe pricing, assembly modes | ~10.5k |
 | Rule files | the rules, `quantityRules`, assemblies and execution profile in `quote-catalogs/embark-default.json5`. The business profile moves to `business_settings` | 1k lines of json5 |
-| Pricing attestation | `quote-pricing-attestation.js`, `quote-pricing-visibility.js`. This is the cause of #169 | ~0.6k |
+| Pricing attestation | `quote-pricing-attestation.js`, `quote-pricing-visibility.js`. This is what refuses quotes for missing line-item lineage | ~0.6k |
 | Retaining-wall engine | bay model, rate card, steel picker, wall zones and render. Walls are already priced as kits per bay in the price book (37 "Walls" items). 2 historical jobs used zones, and their sent PDFs are kept | ~4.9k |
 | Moasure import | used on 6 historical jobs. Measurement entry becomes plain quantities | ~0.6k |
 | Quote files | `quote.json`, `quote.md`, `quote-overrides.json`, `quote-breakdown-source.json`, `quote-versions/`, the organizer tree, `quote_snapshots` | – |
 | Dead code | `server/db/job-backfill.js`, `generate-landscaping-quote.js` | ~1.6k |
 | Client | evidence player, gap, assumption, execution and soil sheets, breakdown view, review sheet, measurement panel, models overlay, health bar. The second catalogue editor (`QuoteCatalogPanel` and `CatalogItemAdminForm`, inside the 14k-line `quote-presentation-sheet.tsx`) | ~7.5k + most of 14k |
-| MCP | `field_quote_recalculate`, `field_quote_catalog_list`, raw `field_quote_draft_update`. Replaced by typed quote-line tools (#146) | – |
+| MCP | `field_quote_recalculate`, `field_quote_catalog_list`, raw `field_quote_draft_update`. Replaced by typed quote-line tools | – |
 
 That is roughly 30k lines removed, against perhaps 5k of new tables, services and
 tests.
@@ -735,7 +737,7 @@ Rules for the migration:
 
   The migration verifies, per quote, that the new totals equal the totals on
   the PDF the customer received, to the cent. Any mismatch is reported and
-  refuses the migration. Built as `scripts/backfill-quote-rows.js` (#241;
+  refuses the migration. Built as `scripts/backfill-quote-rows.js` (#6;
   see "Phase 3, step by step"), which refuses per job.
 - Milestone state becomes `payment_milestones`, and issued revisions become
   issued `invoices` with their stored PDFs.
@@ -743,7 +745,7 @@ Rules for the migration:
 
 ## Price book UI
 
-Built from the #161 kit in `client/src/components/field/` (#181), not
+Built from the shared component kit in `client/src/components/field/`, not
 inline styles:
 - the grid is `DataTable`, `HeaderCell`, `Row` and `Cell` (`numeric`,
   `mono`), with `formatMoney` (always 2 decimals) and `formatPercent`;
@@ -789,17 +791,17 @@ The v2 price book:
    - Kit components: an inline table with quantity and unit, the component's
      sell and the extended amount, plus a search to add components without
      leaving the drawer.
-   - "Used in": kits, and draft and sent quotes. This is the deletion impact
-     #15 asks for.
+   - "Used in": kits, and draft and sent quotes, so an operator sees what
+     depends on an item before deleting it.
    - Price history: a dated list, and the point-in-time price.
 5. **Editing keeps your place:** renaming does not jump the row (it re-sorts
    on blur, then scrolls the row into view), and a kit's numbers refresh as
-   soon as a component changes (#12, #13).
+   soon as a component changes.
 6. **Bulk actions** on a selection: set markup, adjust cost or sell by %,
-   change category, archive. Each shows a preview diff before applying (built
-   in #166).
+   change category, archive. Each shows a preview diff before applying
+   (built).
 7. **Quote builder picker:** the same search component, dockable instead of
-   a fixed popup (#14). Adding a line shows its frozen price, and a draft
+   a fixed popup. Adding a line shows its frozen price, and a draft
    shows a "N prices changed" banner with the diff.
 
 ## Phases
@@ -809,17 +811,17 @@ offline quote and invoice proof passing (`npm run qa:quote-invoice-proof`).
 
 | Phase | What | Done when |
 | --- | --- | --- |
-| 0. Watch #169 | On 2026-10-11, 8 of the 9 live drafts are sendable; the ninth is an empty test job. Fix the attestation only if a real quote is refused before phase 4 removes it | No real quote refused |
+| 0. Watch the attestation | On 2026-10-11, 8 of the 9 live drafts are sendable; the ninth is an empty test job. Fix the attestation only if a real quote is refused for missing line-item lineage before phase 4 removes it | No real quote refused |
 | 0b. Tenancy foundation | `organizations`, `org_memberships`, `org_uid` and RLS on the existing catalogue, user and snapshot tables; a request-scoped transaction helper that sets `field.org_uid`; an RLS test that proves cross-tenant reads and writes fail | Two-org test suite passes |
 | 1. Catalogue schema | Migration: `type`, `category_uid`, `pricing_method`, `is_sold`, code `CHECK`, money precision, `kit_components` (from `item_components`), recipes out of json5, drop the empty `assembly_*` tables and unused columns, `audit_log`, `business_settings`. One `price()` function | Catalogue tests green. Every active item prices identically before and after, except cents rounding, which is recorded |
 | 2. Catalogue clean-up | Generate the code, type and category proposal CSV. The operator reviews it. Apply it | 0 generated or `-copy` codes, 0 untyped, 0 uncategorised |
 | 3. Quote tables | `quotes`, `quote_sections`, `quote_lines`, invoices, payments, events, issued documents (events and issued documents are built: step 2 below). The quote service and one `quoteTotals`. Migrate all jobs, verified against sent PDFs to the cent | Every quote's totals match its PDF. New quotes are built only from rows |
 | 3b. Jobs and the rest | `jobs`, `customers`, `contacts`, `job_notes`, `job_events`, `email_messages`, `email_templates`, `oauth_tokens`, `job_files`; migrate and verify every job; retire `field.db` and the file mirror | Nothing reads `DATA_DIR` except blobs |
 | 4. Strip the engine | Delete the removals list. Quote builder, PDF and email read only the new tables | ~30k lines gone; the proof passes |
-| 5. UI | Price book and drawer, then the quote builder, on the #161 design system | Issues #12–#16 are covered; one catalogue editor |
-| 6. API and MCP | Typed catalogue and quote-line operations for external AI (#146) | Contract tests |
+| 5. UI | Price book and drawer, then the quote builder, on Field's design system | The editing behaviour in "Price book UI" works; one catalogue editor |
+| 6. API and MCP | Typed catalogue and quote-line operations for external AI | Contract tests |
 
-Phases 1–2 and 3–4 can overlap. 5 waits for #161's shared components.
+Phases 1–2 and 3–4 can overlap. 5 waits for the shared components (`client/src/components/field/`).
 
 ### Phase 1 as built (part one)
 
@@ -864,18 +866,18 @@ Not built yet, and why:
 
 Phase 3 is several PRs. Each one is additive and leaves the quote and
 invoice proof byte-identical. The steps follow the rebuild order the owner
-set on 2026-10-12 (#178): document store, quotes as rows, invoices as rows,
+set on 2026-10-12: document store, quotes as rows, invoices as rows,
 then jobs and the rest. Work starts now, beside the catalogue work.
 
 | Step | What | State |
 | --- | --- | --- |
-| 1 | The PDF routes stop inferring the document type from the job stage (#220) | Built |
-| 2 | The document store and issue service (#223): `document_blobs`, `issued_documents`, `document_events`, `document_number_counters`; dual-write from today's send path; backfill; `GET /api/documents/:uid/pdf` and `GET /api/jobs/:id/documents` | Built |
+| 1 | The PDF routes stop inferring the document type from the job stage | Built |
+| 2 | The document store and issue service: `document_blobs`, `issued_documents`, `document_events`, `document_number_counters`; dual-write from today's send path; backfill; `GET /api/documents/:uid/pdf` and `GET /api/jobs/:id/documents` | Built |
 | 2b | The old PDF routes (`/api/jobs/:id/quote-pdf`, `/milestones/:index/pdf`) serve issued documents from the tables; the issuance ledger and the legacy sent-quote lookup are no longer read | Next |
-| 3, part one | Quotes as rows (#241): `quotes`, `quote_sections`, `quote_lines` (migration 0010), one `quoteTotals`, the quote service, dual-write after every committed quote change, and a backfill that verifies every version to the cent | Built |
-| 3, part two | Quote reads from rows (#245): display columns (migration 0011); the quote PDF, the quote email's totals, the job's cached totals and the job detail's customer pricing (client and MCP) come from the rows; editor saves carry `If-Match` | Built |
+| 3, part one | Quotes as rows (#6): `quotes`, `quote_sections`, `quote_lines` (migration 0010), one `quoteTotals`, the quote service, dual-write after every committed quote change, and a backfill that verifies every version to the cent | Built |
+| 3, part two | Quote reads from rows (#10): display columns (migration 0011); the quote PDF, the quote email's totals, the job's cached totals and the job detail's customer pricing (client and MCP) come from the rows; editor saves carry `If-Match` | Built |
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
-| 4 | Invoices, credit notes, payments and receipts as rows; `INV-YYYY-MM-N` numbers allocated at issue; claim-line milestone invoices and milestone rules (#239) | Later |
+| 4 | Invoices, credit notes, payments and receipts as rows; `INV-YYYY-MM-N` numbers allocated at issue; claim-line milestone invoices and milestone rules | Later |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
 How step 2 fills the tables:

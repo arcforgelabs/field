@@ -32,7 +32,7 @@ function writeSetting(update: (settings: Record<string, unknown>) => void) {
   try {
     const settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     update(settings);
-    delete settings.theme; // the pre-#161 seven-theme choice no longer applies
+    delete settings.theme; // the old seven-theme choice no longer applies
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch { /* storage blocked: the choice lasts for this page only */ }
 }

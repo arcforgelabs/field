@@ -8,7 +8,7 @@ import { preserveQuoteDeliveryState } from "./pipeline.js";
  * This is the wall-model sibling of buildAndPersistQuote's `updatedMeta` in
  * quote-workflow.js — same shape of problem (a quote rebuild that needs to
  * report its new totals/version while not disturbing the job's delivery
- * lifecycle), same DEL-67 fix: delivery state (pipeline stage, timestamps,
+ * lifecycle), same fix: delivery state (pipeline stage, timestamps,
  * invoice progress) is preserved unconditionally from the incoming job meta
  * via preserveQuoteDeliveryState, rather than keyed on whether this
  * particular rebuild call forked a new quote version. See

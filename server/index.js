@@ -16,7 +16,7 @@ import { createQuoteRowRecorder, createUnavailableQuoteRowRecorder, installQuote
 import { loadQuoteRows, quoteReadsStatus, quoteRowsFromArtifact } from "./quotes/read-model.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
-// A job detail's quote read from its rows (#245), kept beside the detail object.
+// A job detail's quote read from its rows (#10), kept beside the detail object.
 const jobDetailQuoteRows = new WeakMap();
 import { createReplicaFallbackBlobStore } from "./documents/blob-store.js";
 import { resolveDocumentReplicaConfig } from "./documents/r2-config.js";
@@ -232,7 +232,7 @@ const PRICE_CATALOG_STARTUP_POLICY = resolvePriceCatalogStartupPolicy({
 });
 const DATA_DIR = resolve(process.env.FIELD_DATA || config.dataDir || join(import.meta.dirname, "../data"));
 // Writes under DATA_DIR go through the storage shim, which reports them to
-// durable storage when FIELD_STORAGE=postgres (#139, server/storage/durable-store.js).
+// durable storage when FIELD_STORAGE=postgres (server/storage/durable-store.js).
 setDataRoot(DATA_DIR);
 const VERIFICATION_DATA_DIR = resolve("/var/lib/field-verification/data");
 let VERIFICATION_IMAGE_DIGEST = null;
@@ -257,7 +257,7 @@ try {
 
 const PORT = resolveFieldPort({ config });
 const AUTH_TOKEN = process.env.FIELD_TOKEN || config.authToken;
-// Human sign-in (#149): FIELD_AUTH=clerk signs people in with Clerk; unset keeps
+// Human sign-in: FIELD_AUTH=clerk signs people in with Clerk; unset keeps
 // password login. Decided once at boot; an unknown value stops Field.
 let FIELD_AUTH_MODE;
 try {
@@ -266,7 +266,7 @@ try {
   console.error(`[auth] ${err.message}`);
   process.exit(1);
 }
-// Issued documents in R2 (#240): FIELD_DOCUMENT_REPLICA=r2 copies issued
+// Issued documents in R2 (#12): FIELD_DOCUMENT_REPLICA=r2 copies issued
 // document bytes to a locked R2 bucket after they are stored in PostgreSQL.
 // Decided once at boot; with replication on, a missing or malformed FIELD_R2_*
 // variable stops Field here. The message names the variable, never its value.
@@ -296,14 +296,14 @@ await initFieldSentry();
 
 await mkdir(DATA_DIR, { recursive: true });
 
-// PostgreSQL (#139): FIELD_DB_URL or DATABASE_URL; PGlite only when asked for
+// PostgreSQL: FIELD_DB_URL or DATABASE_URL; PGlite only when asked for
 // (FIELD_PGLITE=1 or FIELD_PGLITE_DIR, local development). Pending migrations
 // are applied before anything else touches the database; Field does not start
 // on a database it cannot migrate. With no database configured nothing is
 // opened and getDb() fails closed; the price catalogue below then refuses to
 // boot unless its emergency override is set.
 //
-// Tenancy (#178): this deployment serves one organisation (FIELD_ORG, default
+// Tenancy: this deployment serves one organisation (FIELD_ORG, default
 // "embark"); every tenant table is behind row-level security, and Field does
 // not start on a database role for which RLS would not hold.
 let deploymentOrg = null;
@@ -325,7 +325,7 @@ try {
   process.exit(1);
 }
 
-// Durable storage (#139): with FIELD_STORAGE=postgres the data directory is a
+// Durable storage: with FIELD_STORAGE=postgres the data directory is a
 // working copy of PostgreSQL. Take the single-writer lock and rebuild it before
 // anything below reads it; refuse to start if that fails. Unset: no-op.
 let durableStorage = null;
@@ -448,7 +448,7 @@ try {
 }
 const { priceCatalog, catalogStore, priceCatalogFailure } = priceCatalogRuntime;
 
-// Quote snapshots (#151): every quote, invoice and receipt send records what
+// Quote snapshots: every quote, invoice and receipt send records what
 // was sent in PostgreSQL before the email goes out. With no database, sends
 // are refused rather than made without a record.
 try {
@@ -458,7 +458,7 @@ try {
   config.quoteSnapshots = createUnavailableQuoteSnapshotStore(err.code === "FIELD_NO_DATABASE" ? "no database configured" : err.message);
 }
 
-// The R2 replica of issued document bytes (#240). PostgreSQL stays the store
+// The R2 replica of issued document bytes (#12). PostgreSQL stays the store
 // of record; with FIELD_DOCUMENT_REPLICA=r2 each blob is copied to R2 after
 // its issue transaction commits, and a scheduler tick retries (and backfills)
 // whatever is pending. R2 being down marks the replica degraded in /health and
@@ -483,7 +483,7 @@ if (DOCUMENT_REPLICA_CONFIG.enabled) {
   }
 }
 
-// Issued documents (#223): every quote, invoice and receipt that is issued or
+// Issued documents: every quote, invoice and receipt that is issued or
 // emailed is also recorded in PostgreSQL by uid, with its exact bytes. The job
 // files stay the source of truth for now: a failure here is logged and shown
 // in /api/storage/status, never turned into a failed send.
@@ -504,7 +504,7 @@ try {
 }
 installIssuedDocumentRecorder(issuedDocumentRecorder);
 
-// Quote rows (#241): every committed change to a job's quote versions is also
+// Quote rows (#6): every committed change to a job's quote versions is also
 // written as quotes, quote_sections and quote_lines rows, checked against the
 // totals Field shows. The job files stay the source of truth: a failure is
 // logged and shown in /api/storage/status, never turned into a failed save.
@@ -568,7 +568,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     sentry: { enabled: isSentryEnabled() },
     // Public: storage state only. Counts, timestamps and the last error are
-    // admin-only (GET /api/storage/status). The R2 replica (#240) reports its
+    // admin-only (GET /api/storage/status). The R2 replica (#12) reports its
     // state, pending count, oldest pending age and last error code.
     storage: {
       ...(durableStorage ? durableStorage.publicStatus() : {}),
@@ -1106,7 +1106,7 @@ app.get("/api/commercial-authority", requireAuth, (_req, res) => {
 // seeds the random source, and drawing from it here would shift its ids.
 const CATALOG_BOOT_REVISION = `boot${Date.now().toString(36)}${process.pid.toString(36)}`;
 if (catalogStore) {
-  // DEL-46 (P2, round 4): the catalog health report's disposal checks are
+  // The catalog health report's disposal checks are
   // scoped to the one quote catalog this installation actually serves —
   // config.quoteCatalogId for verification, DEFAULT_QUOTE_CATALOG_ID
   // otherwise — so an installation never shows a permanent critical for
@@ -1356,7 +1356,7 @@ app.get("/api/jobs/:id", requireAuth, async (req, res) => {
   try {
     const selectedVersion = parseRequestedQuoteVersion(req.query?.version);
     const detail = await loadJobDetail(job, { version: selectedVersion });
-    // The quote rows' version, for the editor to send back as If-Match (#245).
+    // The quote rows' version, for the editor to send back as If-Match (#10).
     // Only for the latest version: that is the one a save writes.
     const rowsTag = jobDetailQuoteRows.get(detail)?.versionTag;
     if (rowsTag && (!detail.versionView || detail.versionView.isLatest)) res.setHeader("X-Field-Quote-Rows-Version", rowsTag);
@@ -2142,7 +2142,7 @@ app.get("/api/jobs/:id/quote-pdf", requireAuth, async (req, res) => {
         // The invoice number is customer-editable free text and can contain
         // characters (an em dash, a curly quote) above Latin-1, which Node
         // rejects in a raw header value. Slugify it the same way
-        // `buildQuotePdfFilename` slugifies the quote reference (DEL-30 P1-A).
+        // `buildQuotePdfFilename` slugifies the quote reference.
         `inline; filename="${buildIssuedInvoicePdfFilename(issued.revision.invoiceNumber)}"`,
       );
       return res.end(issued.storedArtifact.pdfBuffer);
@@ -2303,7 +2303,7 @@ app.post("/api/jobs/:id/quote-pdf-preview", requireAuth, async (req, res) => {
     if (issued.storedArtifact) {
       // The preview GET route below (`/quote-pdf-preview/:previewId`) sets
       // this straight into a Content-Disposition header with no try/catch,
-      // so it must already be header-safe here (DEL-30 P1-A).
+      // so it must already be header-safe here.
       const issuedPreviewPdfName = buildIssuedInvoicePdfFilename(issued.revision.invoiceNumber);
       res.setHeader("Cache-Control", "no-store");
       return res.json({
@@ -2381,7 +2381,7 @@ app.get("/api/jobs/:id/milestones/:index/pdf", requireAuth, async (req, res) => 
       res.setHeader(
         "Content-Disposition",
         // See the /quote-pdf route above: slugify the invoice number so a
-        // non-Latin-1 character never reaches a raw header value (DEL-30 P1-A).
+        // non-Latin-1 character never reaches a raw header value.
         `inline; filename="${buildIssuedInvoicePdfFilename(issued.revision.invoiceNumber)}"`,
       );
       res.setHeader("Cache-Control", "no-store");
@@ -2947,7 +2947,7 @@ app.post("/api/jobs/:id/email-quote", requireAuth, upload.array("attachments", 8
     // sends — every other milestone mutation is already serialized through
     // this same lock; this was the one unlocked path where a send racing a
     // revise could read pre-revise state and persist after the revise
-    // commits, silently erasing a freshly minted revision (DEL-30 P2-4).
+    // commits, silently erasing a freshly minted revision.
     const result = await runExclusiveJobMutation(job.meta.id, "send quote/invoice", async () => {
       return await sendJobQuote({
         jobDir: job.dir,
@@ -3902,7 +3902,7 @@ app.post("/api/jobs/:id/quote-update", requireAuth, async (req, res) => {
 
   try {
     const persisted = await runExclusiveJobMutation(job.meta.id, "quote update", async () => {
-      // Optimistic concurrency on the quote's rows (#245): a save made
+      // Optimistic concurrency on the quote's rows (#10): a save made
       // against rows that moved on since the editor read them is refused.
       await assertQuoteRowsIfMatch({
         jobId: job.meta.id,
@@ -3950,7 +3950,7 @@ app.post("/api/jobs/:id/quote-update", requireAuth, async (req, res) => {
   }
 });
 
-// Draft quote rows vs the current catalogue (#148). POST with { organizer }
+// Draft quote rows vs the current catalogue. POST with { organizer }
 // checks the editor's unsaved draft; GET checks the saved quote.
 async function sendQuoteCatalogChanges(req, res, organizer) {
   const job = await findJob(req.params.id);
@@ -4046,11 +4046,11 @@ app.post("/api/jobs/:id/quote/catalog-changes/apply", requireAuth, async (req, r
   }
 });
 
-// Issued documents by uid (#223): GET /api/documents/:uid/pdf and
+// Issued documents by uid: GET /api/documents/:uid/pdf and
 // GET /api/jobs/:id/documents (server/documents/routes.js).
 registerIssuedDocumentRoutes(app, { requireAuth, getDb, requestOrgUid, findJob, blobs: issuedDocumentBlobs });
 
-// What each customer was sent (#151), newest last.
+// What each customer was sent, newest last.
 app.get("/api/jobs/:id/quote-snapshots", requireAuth, async (req, res) => {
   const job = await findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "not found" });
@@ -4640,7 +4640,7 @@ async function loadJobDetail(job, { version = null } = {}) {
   result.deletion = await assessJobDeletion({ dir: job.dir, meta: result.meta }, jobDeletionDeps())
     .catch(() => ({ deletable: false, reasons: ["Field could not check this job's history."] }));
   // The quote's customer pricing (shown by the client, read by the MCP quote
-  // tool) comes from its rows (#245). Kept beside the detail, not in it, so
+  // tool) comes from its rows (#10). Kept beside the detail, not in it, so
   // the detail's JSON is unchanged.
   if (result.quote) jobDetailQuoteRows.set(result, await loadQuoteRows({ quote: result.quote, meta: result.meta }));
   return result;
@@ -4686,7 +4686,7 @@ function buildClientQuoteView(storedQuote, pipelineStage = null, { historical = 
     issuedVersion,
     current: !historical,
   });
-  // From the quote's rows (#245): the database's when the caller loaded them,
+  // From the quote's rows (#10): the database's when the caller loaded them,
   // else the rows the files map to.
   const customerPricing = pricingDisplayable ? (rowsFinancials || quoteRowsFromArtifact({ quote }).financials) : null;
 
@@ -5512,7 +5512,7 @@ if (existsSync(clientIndex)) {
   });
 }
 
-// Data migrations (#178, server/data-migrations/): changes to existing records
+// Data migrations (server/data-migrations/): changes to existing records
 // that run once, after the schema migrations and before anything is served
 // or scheduled. Each verifies itself before writing and is recorded in
 // data_migrations; a failure stops boot with nothing half-applied. With

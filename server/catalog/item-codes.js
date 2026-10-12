@@ -1,4 +1,4 @@
-// Item codes leave Field's outputs (#178 code retirement step 6). An item is
+// Item codes leave Field's outputs (code retirement step 6). An item is
 // its uid and its name; a code is only a legacy alias that every input still
 // accepts (item_code_aliases). MCP catalogue tools no longer return codes.
 // The HTTP catalogue API still includes them by default, marked deprecated,

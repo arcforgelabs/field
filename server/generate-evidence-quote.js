@@ -73,7 +73,7 @@ export function generateEvidenceQuote({
     lineItemOverrides: normalizedOverrides.lineItems,
   });
   const pricingLineItems = supportLineItemsResult.lineItems;
-  // DEL-46 (P3, round 7): a derived/support line silently omitted for lack
+  // A derived/support line silently omitted for lack
   // of a rate (see both functions above) still needs to surface through the
   // same pricingIssue + review-reason convention buildLineItems's own
   // pricing issues already use, not disappear from the quote with no signal.
@@ -626,7 +626,7 @@ function applyScenarioStateToQuote({
   };
 }
 
-// Exported for direct unit testing only (DEL-46, round 7): the fail-closed
+// Exported for direct unit testing only: the fail-closed
 // omission of an unpriced support rule is currently unreachable through the
 // public generateEvidenceQuote() surface (both catalogues price every
 // support rule), so its pricing-issue signal is tested against a
@@ -646,9 +646,9 @@ export function ensureCommercialSupportLineItems({
   );
   if (!hasRealScopedItems) return { lineItems, pricingIssues: [] };
 
-  // DEL-46 (P3, round 7): see the matching comment in
+  // See the matching comment in
   // quote-execution-estimator.js's applyExecutionEstimateToLineItems — an
-  // unpriced support rule is fail-closed-omitted (round 6) but must also
+  // unpriced support rule is fail-closed-omitted but must also
   // surface as a pricing issue, not disappear silently.
   const pricingIssues = [];
   let nextLineItems = [...lineItems];
@@ -691,7 +691,7 @@ function upsertFixedSupportLineItem({
   // machinery has already run and goes straight into pricingLineItems/subtotal
   // with no not-quoteable check of its own, so an unpriced rule must not reach
   // here — that would silently add a real $0 line to the quote. Record the
-  // omission as a pricing issue (DEL-46, round 7) so a missing rate is
+  // omission as a pricing issue so a missing rate is
   // reported, not silent.
   const defaultSellRate = rule.priceCatalog?.sellPrice != null
     ? Number(rule.priceCatalog.sellPrice)
@@ -1133,9 +1133,8 @@ function buildLineItems({
       : rule.authorityPricing?.sellingRate != null
         ? Number(rule.authorityPricing.sellingRate)
         : null;
-    // DEL-46 (P0, round 4; sentinel updated round 6; erp branch fixed round
-    // 7): quote-catalogs.js's normalizeRule() now keeps a missing json5
-    // unitPrice as null (round 6), and both branches here must apply the
+    // quote-catalogs.js's normalizeRule() now keeps a missing json5
+    // unitPrice as null, and both branches here must apply the
     // same `> 0` threshold quote-catalogs.js's isRuleQuoteable() already
     // uses — not just an `!= null` check — so an authored-but-zero rate is
     // also rejected, not only an absent one. Round 6 only fixed the
@@ -1166,7 +1165,7 @@ function buildLineItems({
     const derivedPricingIssueCode = dedupe(
       entries.map(({ candidate }) => String(candidate._pricingIssueCode || "").trim()).filter(Boolean)
     )[0] || rule.code;
-    // DEL-46 (P0, round 4): this must not be gated behind erpAuthorityActive.
+    // This must not be gated behind erpAuthorityActive.
     // Disposal rules carry no json5 unitPrice by design (criterion 4) — a
     // disposal rule quoted directly (not through the bulk_loading_disposal
     // recipe) in catalog-only mode used to reach the roundMoney(quantity *

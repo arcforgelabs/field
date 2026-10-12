@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { resolveActiveJobGeneration } from "./job-generation.js";
 import { readSentEmailArchive } from "./sent-email-archive.js";
 
-// Quotes emailed before the issuance ledger (DEL-71) have no hashed copy of
+// Quotes emailed before the issuance ledger have no hashed copy of
 // what was sent, so the issued-PDF routes refuse them rather than rebuild a
 // monetary document from a since-changed draft. The send did save the PDF
 // into the job folder under the attachment's file name, and the sent-email

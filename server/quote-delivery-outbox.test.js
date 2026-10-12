@@ -43,7 +43,7 @@ test("quote delivery outbox persists exact prepared bytes and stable identity", 
     await rm(jobDir, { recursive: true, force: true });
   }
 });
-// #139: the claim must be in PostgreSQL before Gmail is called, or a restart
+// The claim must be in PostgreSQL before Gmail is called, or a restart
 // could rebuild the attempt as "pending" and the customer would be emailed twice.
 test("quote delivery claim is stored durably before sending, and undone if it cannot be", async () => {
   const jobDir = await mkdtemp(join(tmpdir(), "field-delivery-claim-"));

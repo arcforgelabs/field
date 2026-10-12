@@ -1,4 +1,4 @@
-// Express `trust proxy` for Field (#149).
+// Express `trust proxy` for Field.
 //
 // On Replit every request reaches Field through Replit's proxy, so the socket
 // address is the proxy's, and without `trust proxy` req.ip is the same for
