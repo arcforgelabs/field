@@ -486,7 +486,7 @@ deployment Configuration is written into `.replit` and committed.
 | Name | Value |
 | --- | --- |
 | `SENTRY_DSN` | The Sentry project's DSN (Project settings > Client Keys). A DSN only lets a client send events; Field hands it to the browser in the page |
-| `SENTRY_ENVIRONMENT` | `production` |
+| `SENTRY_ENVIRONMENT` | Unset on Replit: the published app reports `production` and the workspace `replit-workspace`. Set it only to override both |
 | `SENTRY_RELEASE` | Unset. Each build records its git commit (below), which becomes the release |
 | `SENTRY_TRACES_SAMPLE_RATE` | Unset: `0.2` (about one page load or request in five). From 0 to 1 |
 | `SENTRY_REPLAYS_SESSION_SAMPLE_RATE` | Unset: `0.05` (one session in twenty is recorded). From 0 to 1 |
@@ -500,9 +500,10 @@ During a Sentry trial (no volume limit) set `SENTRY_TRACES_SAMPLE_RATE` and
 `SENTRY_REPLAYS_SESSION_SAMPLE_RATE` to `1` to see everything; delete both
 when the trial ends, and the defaults above apply.
 
-Leave `SENTRY_DSN` out of the workspace's Secrets. If the workspace does get
-one, its events are tagged `replit-workspace`, never `production`, unless
-`SENTRY_ENVIRONMENT` says otherwise.
+If the workspace also gets `SENTRY_DSN` (Replit's Secrets page feeds both),
+its events are tagged `replit-workspace`, never `production`, as long as
+`SENTRY_ENVIRONMENT` is unset. Limit the Sentry alert rule to the
+`production` environment so workspace errors do not send email.
 
 Start-up: `scripts/replit-start.sh` and `npm start` run
 `node --import ./server/observability/instrument.js server/index.js`, so
