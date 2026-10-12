@@ -315,7 +315,7 @@ table; the bytes stay in `document_blobs` and in R2. Run it before 0011's.
 payments") adds seven tenant tables: `payment_milestones` (`pms_…`, a
 job's schedule), `invoices` (`inv_…`, one row per invoice as issued, number
 as printed, unique per job), `invoice_lines` (`iln_…`), `credit_notes` and
-`credit_note_lines` (`crn_…`, `cnl_…`; no writer until step 4b),
+`credit_note_lines` (`crn_…`, `cnl_…`; written by the issue service since 0015),
 `payments` (`pay_…`) and `receipts` (`rct_…`, one per payment). Money is
 `numeric(12,2)`; line rates, quantities and tax rates follow `quote_lines`,
 with the same `computed` / `printed` line-total check. Once an invoice or
@@ -338,6 +338,22 @@ from the sequence: its number is `INV-YYYY-M-N`, unique in the organisation,
 and it carries the job reference. Invoices issued before 0014 keep their
 `EI-…` numbers and a null key. `rollback/0014_invoice_issue.down.sql` refuses
 once any invoice has been issued with an `INV` number; run it before 0013's.
+
+### Credit notes and business settings
+
+`0015_credit_notes` (#28) corrects an issued invoice with a credit note,
+never in place. `credit_notes` gains the replacement invoice and the issue
+service's idempotency key, and the new append-only `payment_allocations`
+moves the payments a credited invoice held to its replacement. Invoices
+revised in place before 0015 get no credit note.
+`rollback/0015_credit_notes.down.sql` refuses once a credit note has been
+issued; run it before 0014's.
+
+`0016_business_settings` (#28) adds `business_settings`, one row per
+organisation (none means every default). Its first setting says whether an
+invoice returned to draft and issued again with different content is
+credited first: `when-emailed` (the default), `always` or `never`. Run
+`rollback/0016_business_settings.down.sql` before 0015's.
 
 ### Adding tables
 
