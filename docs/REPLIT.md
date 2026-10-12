@@ -407,6 +407,18 @@ To deploy a change merged on GitHub:
 3. Publishing > Republish. When Replit says it is done, Field still needs about
    a minute to rebuild its data directory from PostgreSQL; until then requests
    get "Internal Server Error". `GET /health` answers once it is up.
+   - **If the publish stops at "Development database changes detected", press
+     Cancel.** Never pick an option there. The workspace and the published app
+     have separate databases, and Replit offers to make production's tables
+     match the workspace's; when the workspace is behind, every option drops
+     or renames production tables. Field migrates production itself at boot.
+4. Once `/health` answers, bring the workspace database to the same level:
+   `npm run db:apply`, then `npm run db:smoke` must report `"pending":0`. Do
+   this after each publish, not before: the workspace database has to match
+   production at the next publish, and production only gains a release's
+   migrations when that release boots. If a publish was cancelled at the
+   prompt above, apply only production's migrations instead, from a checkout
+   of the release production runs.
 
 Production secrets (Publishing > Adjust settings) are separate from the
 workspace's: `FIELD_STORAGE=postgres`, `FIELD_CONFIG_JSON`, the Clerk keys,
