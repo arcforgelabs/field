@@ -80,7 +80,9 @@ credential value anywhere public.
 
 Dependabot (`.github/dependabot.yml`) raises weekly update pull requests for
 the server (`/`), the client (`/client`) and the GitHub Actions workflows.
-Check the lockfiles with:
+CI's `audit` lane (`scripts/dependency-audit.mjs`) fails on any high or
+critical advisory that the table below does not accept, and on an accepted
+one whose recheck date has passed. Check the lockfiles yourself with:
 
 ```bash
 npm audit --package-lock-only
