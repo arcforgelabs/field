@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// release-prepare.yml: did every required check pass on the commit?
+// field-release-prepare.yml: did every required check pass on the commit?
 //
 //   node scripts/release/require-checks.mjs <check-runs.json>
 //

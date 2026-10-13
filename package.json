@@ -1,6 +1,6 @@
 {
   "name": "@arcforgelabs/field",
-  "version": "2026.10.13",
+  "version": "2026.10.15",
   "description": "Quotes and invoices an earthworks operator can trust: a deterministic, explainable quote engine with an API, CLI and MCP.",
   "license": "MIT",
   "type": "module",

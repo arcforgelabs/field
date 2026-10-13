@@ -1,10 +1,11 @@
-name: Release prepare
+name: Field Release Prepare
 run-name: Prepare a ${{ inputs.channel }} release
 
 # Starts a release (docs/RELEASING.md). It takes a commit on main whose
 # required checks passed, tags it with the next calendar version for the
 # channel (package.json's version, plus -beta.N for a beta), and starts
-# release-publish.yml for that tag. It publishes nothing itself.
+# Field Release Publish (field-release-publish.yml) for that tag. It
+# publishes nothing itself.
 
 on:
   workflow_dispatch:
@@ -24,7 +25,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-prepare
+  group: field-release-prepare
   cancel-in-progress: false
 
 jobs:
@@ -40,7 +41,7 @@ jobs:
       - name: Require the workflow from main
         if: github.ref != 'refs/heads/main'
         run: |
-          echo "::error::Run Release prepare from main, not ${GITHUB_REF}." >&2
+          echo "::error::Run Field Release Prepare from main, not ${GITHUB_REF}." >&2
           exit 1
 
       - name: Check out main with its tags
@@ -107,18 +108,18 @@ jobs:
 
       # A tag pushed with GITHUB_TOKEN starts no workflow, so start the
       # publish run explicitly.
-      - name: Start Release publish
+      - name: Start Field Release Publish
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.plan.outputs.tag }}
           COMMIT: ${{ steps.commit.outputs.commit }}
         run: |
           set -euo pipefail
-          gh workflow run release-publish.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$TAG"
+          gh workflow run field-release-publish.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$TAG"
           {
             echo "## ${TAG}"
             echo
-            echo "Tagged ${COMMIT} and started Release publish."
-            echo "Approve its npm-publish and release environments when its checks pass:"
-            echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/release-publish.yml"
+            echo "Tagged ${COMMIT} and started Field Release Publish."
+            echo "Approve its release environment when its checks pass, then npm-release in Field NPM Release:"
+            echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/field-release-publish.yml"
           } >> "$GITHUB_STEP_SUMMARY"

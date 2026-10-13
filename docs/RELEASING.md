@@ -30,70 +30,74 @@ The notes are generated from the pull requests merged since the last release.
 
 ## Versions and channels
 
-Versions are calendar versions with no leading zeros: `2026.10.14`. A beta is
-a pre-release of one: `2026.10.14-beta.1`. Tags add a `v`. `package.json` holds
-the stable form of the version being released. `scripts/release/release.mjs`
-holds the rules, and `scripts/release/release.test.js` tests them.
+Field names its releases as `openclaw/openclaw` names its own. Versions are
+calendar versions with no leading zeros. A stable release is `2026.10.15`; a
+beta is a pre-release of the **upcoming** stable version, so
+`2026.10.15-beta.1` and `2026.10.15-beta.2` come before `2026.10.15`. Tags add
+a `v`, and each GitHub Release is titled `field <version>`. `package.json`
+holds the upcoming stable version. `scripts/release/release.mjs` holds the
+rules, and `scripts/release/release.test.js` tests them.
 
 | Channel | npm dist-tag | Image tags | GitHub Release |
 | --- | --- | --- | --- |
 | beta | `beta` | `<version>`, `beta` | pre-release |
-| stable, published | `next` | `<version>` | release, not marked latest |
-| stable, promoted | `latest` | `<version>`, `stable`, `latest` | latest release |
+| stable | `latest` | `<version>`, `stable`, `latest` | release, marked latest |
 
-A beta reaches the beta channel when it is published. A stable release
-reaches operators by default only when it is promoted, after it is verified.
-Promotion also moves `beta` up when beta is behind stable, so beta users are
-never behind stable.
+A release reaches its channel when it is published; there is no separate
+step. Field does not use OpenClaw's `extended-stable` channel.
 
 ## The workflows
 
 | Workflow | Starts | Does |
 | --- | --- | --- |
-| `release-prepare.yml` | By hand, from `main` | Takes a `main` commit (default: the head) whose required checks passed, by the rule a Replit publish uses (`scripts/deploy-checks.js`). Plans the next tag for the channel, creates it, and starts `release-publish.yml`. |
-| `release-checks.yml` | From `release-publish.yml`, or by hand to rehearse | Requires the tag to be a calendar version on `main` that matches `package.json`. Runs every CI lane on its commit (`docs/CI.md`). Packs the npm tarball with a shrinkwrap of the tested dependencies, then installs it in an empty directory and starts it. Publishes nothing. |
-| `release-publish.yml` | From `release-prepare.yml`, or by hand for an existing tag | `npm` job (environment `npm-publish`): publishes the exact tarball the checks proved. `image` job (environment `release`): pushes the image, attests it and its SBOM, verifies the attestation, and runs the Playwright smoke against the pushed digest. Then it creates the GitHub Release and attaches the post-publish evidence. |
-| `release-promote.yml` | By hand, from `main` | Verifies a published stable release (the manifest's checksum, the npm integrity, signatures and provenance, and the image attestation), then in environment `npm-release` moves npm `latest`, GHCR `stable` and `latest`, and GitHub's latest release. |
+| `field-release-prepare.yml` (Field Release Prepare) | By hand, from `main` | Takes a `main` commit (default: the head) whose required checks passed, by the rule a Replit publish uses (`scripts/deploy-checks.js`). Plans the next tag for the channel, creates it, and starts Field Release Publish. |
+| `field-release-checks.yml` (Field Release Checks) | From Field Release Publish, or by hand to rehearse | Requires the tag to be a calendar version on `main` that matches `package.json`. Runs every CI lane on its commit (`docs/CI.md`). Packs the npm tarball with a shrinkwrap of the tested dependencies, then installs it in an empty directory and starts it. Publishes nothing. |
+| `field-release-publish.yml` (Field Release Publish) | From Field Release Prepare, or by hand for an existing tag | `image` job (environment `release`): pushes the image by digest, attests it and its SBOM, verifies the attestation, runs the Playwright smoke against the pushed digest, then adds the channel's tags. Then it creates the GitHub Release with the manifest, and starts Field NPM Release for the tarball it proved. |
+| `field-npm-release.yml` (Field NPM Release) | From Field Release Publish | Requires the tarball from that run to match the GitHub Release's manifest. `approve` (environment `npm-release`), then `publish` (environment `npm-publish`): npm trusted publishing with provenance, to the channel's dist-tag. Then it verifies what npm serves and attaches the post-publish evidence. |
+| `field-release-promote.yml` (Field Release Promote) | By hand, from `main` | Points `latest` at a published stable release: verifies it (the manifest's checksum, the npm integrity, signatures and provenance, and the image attestation), then in environment `npm-release` moves npm `latest`, GHCR `stable` and `latest`, and GitHub's latest release. Use it to roll back. It also moves `beta` up when the beta channel is behind. |
 
 Each protected environment needs Samuel's approval and accepts only runs from
 `main`. Release tags (`v20*`) cannot be moved or deleted
 (`.github/rulesets/release-tags.json`).
 
-Running `release-publish.yml` again for the same tag is safe. It checks again,
-skips an npm version that is already published with the same bytes, refuses
-one published with different bytes, and updates the GitHub Release's assets.
-A published version is never replaced: fix forward with a new tag.
+Running Field Release Publish again for the same tag is safe. It checks again,
+updates the GitHub Release's assets, and starts Field NPM Release, which skips
+an npm version that is already published with the same bytes and refuses one
+published with different bytes. A published version is never replaced: fix
+forward with a new tag.
 
 ## Cut a release
 
-1. Open a pull request that sets the version: `npm version 2026.10.14
-   --no-git-tag-version`, which updates `package.json` and
-   `package-lock.json`. Title it `chore: release 2026.10.14`. Merge it when
-   CI passes. Do this once per version; betas reuse it.
+1. Open a pull request that sets the upcoming stable version:
+   `npm version 2026.10.15 --no-git-tag-version`, which updates
+   `package.json` and `package-lock.json`. Title it
+   `chore: release 2026.10.15`. Merge it when CI passes. Do this once per
+   version; its betas reuse it.
 2. Start a beta:
 
    ```bash
-   gh workflow run release-prepare.yml --repo arcforgelabs/field --ref main -f channel=beta
+   gh workflow run field-release-prepare.yml --repo arcforgelabs/field --ref main -f channel=beta
    ```
 
-3. When `release-checks` passes, approve `npm-publish` and `release` in the
-   Release publish run. The beta is then on npm `beta`, GHCR `beta` and a
-   GitHub pre-release.
-4. Run the beta where it matters. To take a stable release from the same
-   commit, give that commit:
+3. When the checks pass, approve `release` in the Field Release Publish run.
+   When it starts Field NPM Release, approve `npm-release` there, then
+   `npm-publish`. The beta is then on npm `beta`, GHCR `beta` and a GitHub
+   pre-release.
+4. Run the beta where it matters. To release that commit as stable, give it:
 
    ```bash
-   gh workflow run release-prepare.yml --repo arcforgelabs/field --ref main -f channel=stable -f commit=<commit>
+   gh workflow run field-release-prepare.yml --repo arcforgelabs/field --ref main -f channel=stable -f commit=<commit>
    ```
 
-   Approve it as in step 3.
-5. Promote it, and approve `npm-release`:
+   Approve it as in step 3. It is then npm `latest`, GHCR `stable` and
+   `latest`, and GitHub's latest release.
 
-   ```bash
-   gh workflow run release-promote.yml --repo arcforgelabs/field --ref main -f tag=v2026.10.14
-   ```
+To roll back, point `latest` at the previous stable release, and approve
+`npm-release`. Nothing is unpublished:
 
-To roll back, promote the previous stable tag. Nothing is unpublished.
+```bash
+gh workflow run field-release-promote.yml --repo arcforgelabs/field --ref main -f tag=v2026.10.15
+```
 
 ## Run a release
 
@@ -119,13 +123,20 @@ two-factor authentication; never with a token in a file or a command):
 2. On the package's **Settings**, under **Trusted publishing**, add two
    GitHub Actions publishers for organization `arcforgelabs`, repository
    `field`:
-   - workflow `release-publish.yml`, environment `npm-publish`;
-   - workflow `release-promote.yml`, environment `npm-release`, with
-     **Allow npm dist-tag** on.
+   - workflow `field-npm-release.yml`, environment `npm-publish`, allowed to
+     publish;
+   - workflow `field-release-promote.yml`, environment `npm-release`, with
+     **Allow npm dist-tag** on and publishing off.
+
+   npm checks the workflow file of the run's top-level workflow, so these
+   names must match the files exactly. Renaming a file breaks publishing
+   until its trusted publisher is changed here.
 3. Under **Publishing access**, choose **Require two-factor authentication
    and disallow tokens**.
 
-GHCR: the first publish creates the `field` container package as private. On
-the package's page, open **Package settings**, then **Change visibility**, and
-choose **Public**. Under **Manage Actions access**, make sure
-`arcforgelabs/field` has the **Write** role.
+GHCR: the first publish creates the `field` container package as private,
+linked to this repository. On the package's page, open **Package settings**,
+then **Change visibility**, and choose **Public**. Under **Manage Actions
+access**, make sure `arcforgelabs/field` has the **Write** role. If a `field`
+package already exists that this repository did not create, empty or remove it
+before you make it public: everything in it becomes public too.

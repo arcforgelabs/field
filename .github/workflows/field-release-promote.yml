@@ -1,18 +1,23 @@
-name: Release promote
-run-name: Promote ${{ inputs.tag }} to stable
+name: Field Release Promote
+run-name: Point latest at field ${{ inputs.tag }}
 
-# Makes a published stable release the one operators get by default
+# Points the default channel at a published stable release
 # (docs/RELEASING.md): npm `latest`, GHCR `stable` and `latest`, and GitHub's
-# latest release. It first verifies the release as published: the manifest's
-# checksum, the npm integrity, registry signatures and provenance, and the
-# image's GitHub attestation by digest. To roll back, promote an earlier
-# stable tag.
+# latest release. A stable release already lands there when it is published,
+# so this is for rolling back to an earlier stable release, or putting one
+# back. It first verifies the release as published: the manifest's checksum,
+# the npm integrity, registry signatures and provenance, and the image's
+# GitHub attestation by digest. It also moves `beta` up when the beta channel
+# is behind.
+#
+# npm's trusted publisher for this file (environment npm-release) has
+# "Allow npm dist-tag" on and does not publish.
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Published stable tag, for example v2026.10.14
+        description: Published stable tag, for example v2026.10.15
         required: true
         type: string
 
@@ -20,7 +25,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-promote
+  group: field-release-promote
   cancel-in-progress: false
 
 env:
@@ -41,7 +46,7 @@ jobs:
       - name: Require the workflow from main
         if: github.ref != 'refs/heads/main'
         run: |
-          echo "::error::Run Release promote from main, not ${GITHUB_REF}." >&2
+          echo "::error::Run Field Release Promote from main, not ${GITHUB_REF}." >&2
           exit 1
 
       - name: Read and check the release manifest
@@ -52,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ ! "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]?$ ]]; then
-            echo "::error::${TAG} is not a stable release tag (vYYYY.M.D). Betas are never promoted; cut a stable tag from the same commit." >&2
+            echo "::error::${TAG} is not a stable release tag (vYYYY.M.D). Only a stable release can be latest; cut a stable tag from the beta's commit." >&2
             exit 1
           fi
           cd "$RUNNER_TEMP"

@@ -27,7 +27,7 @@ function manifest(overrides = {}) {
   };
 }
 
-function statement({ digest = createHash("sha512").update(tarball).digest("hex"), repository = "https://github.com/arcforgelabs/field", path = ".github/workflows/release-publish.yml", commit = COMMIT } = {}) {
+function statement({ digest = createHash("sha512").update(tarball).digest("hex"), repository = "https://github.com/arcforgelabs/field", path = ".github/workflows/field-npm-release.yml", commit = COMMIT } = {}) {
   return {
     subject: [{ name: `pkg:npm/%40arcforgelabs/field@${VERSION}`, digest: { sha512: digest } }],
     predicate: {

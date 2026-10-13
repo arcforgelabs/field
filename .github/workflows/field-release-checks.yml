@@ -1,16 +1,16 @@
-name: Release checks
+name: Field Release Checks
 
 # Proves a release tag before anything is published (docs/RELEASING.md):
 # the tag is a calendar version that matches package.json, it sits on main,
 # every CI lane passes on its exact commit, and the npm tarball installs and
-# starts. release-publish.yml calls this first; run it on its own to rehearse
+# starts. Field Release Publish calls this first; run it on its own to rehearse
 # a release. It never publishes.
 
 on:
   workflow_call:
     inputs:
       tag:
-        description: Release tag, for example v2026.10.14-beta.1
+        description: Release tag, for example v2026.10.15-beta.1
         required: true
         type: string
     outputs:
@@ -29,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v2026.10.14-beta.1
+        description: Release tag, for example v2026.10.15-beta.1
         required: true
         type: string
 
