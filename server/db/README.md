@@ -356,13 +356,25 @@ invoice returned to draft and issued again with different content is
 credited first: `when-emailed` (the default), `always` or `never`. Run
 `rollback/0016_business_settings.down.sql` before 0015's.
 
-`0017_milestone_rules` (#29) adds the organisation's milestone rules as
+### Xero
+
+`0017_xero_connection` (#93) adds `xero_connections`, one row per
+organisation: the Xero organisation Field writes to, the OAuth tokens
+encrypted with AES-256-GCM (`server/xero/token-crypto.js`), the sign-in in
+progress (its state only as a hash) and the owner's Xero settings. The Xero
+app's client id and secret stay deployment secrets. `field_app` may read,
+insert and update. Run `rollback/0017_xero_connection.down.sql` before
+0016's. Operating it: `docs/XERO.md`.
+
+### Milestone rules
+
+`0018_milestone_rules` (#29) adds the organisation's milestone rules as
 rows: `milestone_rules` (one band of contract value in one region: every
 region, a country, or a state), `milestone_rule_milestones` (its default
 milestones) and `milestone_rule_caps` (at most one cap per milestone kind,
 `hard` or `soft`), and `business_settings.country` and `.region`. Rules are
 settings, not issued documents: an owner replaces them, so `field_app` may
-delete them. Run `rollback/0017_milestone_rules.down.sql` before 0016's.
+delete them. Run `rollback/0018_milestone_rules.down.sql` before 0017's.
 
 ### Adding tables
 

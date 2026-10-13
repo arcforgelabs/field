@@ -37,7 +37,7 @@ export function attachmentsOf(mime) {
   return [...mime.matchAll(pattern)].map((match) => ({ contentType: match[1], filename: match[2], bytes: Buffer.from(match[3], "base64") }));
 }
 
-export async function boot(t, { extraUsers = [] } = {}) {
+export async function boot(t, { extraUsers = [], env: extraEnv = {}, config: extraConfig = {} } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "field-email-documents-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const dataDir = join(dir, "data");
@@ -53,6 +53,7 @@ export async function boot(t, { extraUsers = [] } = {}) {
     bootstrapUsers: [{ email: "proof.sender@example.invalid", password: "email-documents-test-password", role: "admin", name: "Proof Operator" }, ...extraUsers],
     mail: { fromEmail: "proof.sender@example.invalid", fromName: "Proof Operator", gmailUser: "proof.sender@example.invalid", deliveryPolicy: { mode: "live" } },
     googleServiceAccountKey: keyPath,
+    ...extraConfig,
   }));
   const env = {
     PATH: process.env.PATH,
@@ -67,7 +68,7 @@ export async function boot(t, { extraUsers = [] } = {}) {
   const output = [];
   const child = spawn(process.execPath, ["--import", pathToFileURL(join(PROOF, "hooks.mjs")).href, "server/index.js"], {
     cwd: ROOT,
-    env: { ...env, FIELD_CONFIG: configPath, FIELD_DATA: dataDir, FIELD_PORT: String(port) },
+    env: { ...env, ...extraEnv, FIELD_CONFIG: configPath, FIELD_DATA: dataDir, FIELD_PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.on("data", (chunk) => output.push(chunk.toString()));
@@ -118,7 +119,7 @@ export async function boot(t, { extraUsers = [] } = {}) {
   const lastMail = async () => readFile(join(mailDir, (await mail()).at(-1)), "latin1");
   // The next Gmail send fails as given (fake-googleapis.mjs).
   const failNextSend = (failure) => writeFile(join(mailDir, "next-send-failure.json"), JSON.stringify(failure));
-  return { api, mail, lastMail, output, failNextSend, signIn, dataDir };
+  return { api, mail, lastMail, output, failNextSend, signIn, dataDir, base };
 }
 
 export function multipart(payload, files = []) {

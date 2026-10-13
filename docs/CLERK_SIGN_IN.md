@@ -76,8 +76,9 @@ owner whether their sign-in qualifies.
 
 Why this is enough: Field only trusts Google sign-in for owners whose Field
 email is on the Workspace domain, Google Workspace enforces 2-Step
-Verification for that domain, and with email/password disabled and no
-password on the account nobody can reach it another way.
+Verification for that domain, and with email/password, email codes and
+magic links disabled in the Auth pane and no password on the account nobody
+can reach it another way.
 
 ### Machine access
 
@@ -85,25 +86,35 @@ password on the account nobody can reach it another way.
   the person or service account they belong to. A token is bound to the id of
   the person it was issued to (never matched by email), so removing someone
   and adding the same email again, or approving them again after they sign in,
-  never revives their old tokens. Turning someone's access off revokes their
-  tokens; removing them also deletes their `users.json` record. Machine tokens
-  can never do owner-only actions. A service account cannot use an email that
-  belongs to a person.
-- **PDF and wall-render links** the browser opens directly carry no token
-  with Clerk sign-in: the Clerk session cookie authorizes those reads, and the
-  browser drops any `fr_token` left from password sign-in. If an old link
-  still has a `?token=` that is no longer a Field token, a GET or HEAD falls
-  back to the session cookie (or gets `401` without one) instead of failing;
-  that grants nothing the cookie alone would not. A `?token=` that is a Field
-  token for someone without access is still refused.
+  never revives their old tokens. Machine tokens can never do owner-only
+  actions. A person and a service account never share an email, whichever
+  was added first.
+- **Every use of a token or MCP grant is checked** against the person's access
+  now: their membership of the deployment's organisation, its status and its
+  role in PostgreSQL, and, once they have signed in with Clerk, their Clerk
+  account. Removing someone, setting them back to `pending`, turning their
+  access off, taking them out of the organisation, or removing, banning or
+  locking their account in Clerk stops their tokens and MCP grants at once. A
+  demoted owner keeps only what a staff member may do. Field also revokes the
+  tokens and MCP installations of someone removed, `pending` or turned off,
+  and removing them deletes their `users.json` record. Field asks Clerk about
+  the account at most once a minute per person. If Clerk cannot be asked, the
+  last good answer stands for up to an hour, then the credential is refused
+  with `503`.
+- **Tokens go in the `Authorization` header only.** Field never reads a token
+  from a URL (`?token=`): URLs end up in logs, browser history and `Referer`
+  headers. The app fetches PDFs with the header; with Clerk sign-in a link the
+  browser opens directly (an emailed document's PDF, a preview) is authorized
+  by the Clerk session cookie, for reads only. A `?token=` on a link is
+  ignored.
 - **MCP clients (OAuth)** stays Field-issued: client registration, PKCE, scopes,
   tokens and `/mcp` are unchanged, and existing grants carry over. The
   approval page no longer asks for a password: an owner with a verified owner
   sign-in sees "Signed in as ..." and clicks Authorize. Anyone else gets a
   page linking to Field's sign-in, which returns to the approval page
   afterwards; a form submitted after signing out goes back to the same
-  request. The `/oauth/*` pages cannot be framed by other sites. Turning off
-  or removing a person revokes every MCP installation they approved.
+  request. The `/oauth/*` pages cannot be framed by other sites. An MCP grant
+  only ever works within what the person who approved it may do now (above).
 
 ## Turning it on in Replit
 
@@ -132,7 +143,10 @@ request instead.
    step needs no Clerk secret. Field never prints either key; boot logs name
    the variables only.
 3. In the Auth pane's **Configure** tab, enable **Google** sign-in only and
-   **disable email/password**. Staff sign in with their Google
+   **disable email/password, email verification code and email magic link**.
+   The Google Workspace owner check below relies on Google being the only
+   way into an owner's account: an email code or magic link is a way in
+   without Google's 2-Step Verification. Staff sign in with their Google
    Workspace accounts. Sign-ups are safe either way, since Field gives new
    people no access until an owner approves them.
 4. In Google Admin (owner action, on the owner's checklist): enforce **2-Step
@@ -167,7 +181,9 @@ lets a client forge `X-Forwarded-For` and dodge the limit. Elsewhere it stays
 off. Check it after publishing: a wrong break-glass attempt logs `from <ip>`;
 that should be your address, not a proxy's. If it is always the same
 Google/Replit address, set `FIELD_TRUST_PROXY=2`. `FIELD_TRUST_PROXY=0` turns
-it off; `true` is refused.
+it off. `true`, and subnets that match every address (`0.0.0.0/0`, `::/0`),
+are refused; so is anything that is not a hop count, `loopback`, `linklocal`,
+`uniquelocal`, or an IP address or subnet.
 
 ## Cutover checklist
 
@@ -186,7 +202,7 @@ Cutover:
 
 - [ ] Have Replit's Agent add Clerk (provision only; no auth code changes);
       confirm the secret names above.
-- [ ] Configure tab: Google on, email/password off.
+- [ ] Configure tab: Google on; email/password, email code and magic link off.
 - [ ] Set `FIELD_AUTH=clerk` and `FIELD_OWNER_GOOGLE_DOMAINS=<your domain>`
       (and `FIELD_PUBLIC_ORIGIN` for the published app), restart, read the
       boot log lines above.

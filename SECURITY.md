@@ -42,7 +42,9 @@ credential value anywhere public.
 - **Machine access.** A CLI/API bearer token, or the owner break-glass key
   (`authToken`, `FIELD_TOKEN`), acts as an operator of that installation;
   whoever holds one is trusted. AI agents connect through OAuth MCP, limited
-  to the scopes the approving person holds (`docs/REMOTE_MCP.md`).
+  to the scopes the approving person holds now (`docs/REMOTE_MCP.md`). Field
+  checks a person's token or MCP grant against their current access on every
+  use, and reads tokens only from the `Authorization` header, never a URL.
 - **Sent documents are records.** A quote or invoice a customer has been sent
   is never changed in place; a change produces a new version. Tampering with
   that history is a security issue.
@@ -56,8 +58,11 @@ credential value anywhere public.
   `FIELD_CONFIG_JSON`, `DATABASE_URL`, and the others in `docs/REPLIT.md`),
   never in the repository, a log, an issue or a pull request. Name the
   variable, never its value.
-- Credentials Field stores at runtime, such as Gmail OAuth refresh tokens, stay
-  inside the installation's data directory, written with mode `0600`.
+- Credentials Field stores at runtime stay inside the installation. Gmail OAuth
+  refresh tokens are in its data directory, written with mode `0600`. Xero
+  OAuth tokens are in its PostgreSQL, encrypted with AES-256-GCM under a key
+  derived from `XERO_CLIENT_SECRET` (`docs/XERO.md`). Neither is ever sent to
+  the browser or written to a log.
 - Surveyor artifacts (`.artifacts/`) are customer data. Never commit them, and
   never attach raw evidence to an issue.
 - Errors, traces and logs sent to Sentry pass through `shared/sentry-scrub.js`
@@ -67,6 +72,28 @@ credential value anywhere public.
   to Sentry extends that scrubbing and its tests in the same pull request.
 - CI runs gitleaks on every push and pull request
   (`.github/workflows/secret-scan.yml`).
+
+## Dependency Advisories
+
+Dependabot (`.github/dependabot.yml`) raises weekly update pull requests for
+the server (`/`), the client (`/client`) and the GitHub Actions workflows.
+Check the lockfiles with:
+
+```bash
+npm audit --package-lock-only
+npm --prefix client audit --package-lock-only
+```
+
+A high advisory in a package the server or the browser bundle runs is fixed,
+not accepted. The advisories below remain because no fix exists, and the
+vulnerable code never runs in the server or the browser bundle. Do not silence
+`npm audit` for them. Recheck each one by its date, or sooner when Dependabot
+offers an update for the named direct package.
+
+| Advisory | Path | Why it is not fixed | Why it is not reachable | Recheck |
+| --- | --- | --- | --- | --- |
+| [GHSA-67mh-4wv8-2f99](https://github.com/advisories/GHSA-67mh-4wv8-2f99) (moderate): esbuild's development server answers any website | `drizzle-kit` > `@esbuild-kit/esm-loader` > `@esbuild-kit/core-utils` > `esbuild` 0.18 | `drizzle-kit` 0.31.11 (latest) still depends on `@esbuild-kit/esm-loader`; npm's only suggestion is a downgrade to `drizzle-kit` 0.18.1 | `drizzle-kit` is a development dependency, run only for `npm run db:*` scripts on a developer's machine and in CI. It never calls esbuild's `serve`, and the Docker image prunes it (`npm prune --omit=dev`) | 2027-01-13 |
+| [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) (high): braces stack exhaustion from deeply nested patterns | `shadcn` > `@shadcn/registry`, `ts-morph` and `fast-glob` > `micromatch` > `braces` 3.0.3 | No patched `braces` release exists (3.0.3 is the latest), and `shadcn` 4.21.4 is the latest | The client uses only `shadcn/tailwind.css`, which Vite compiles into the stylesheet at build time. The `shadcn` command-line tool, and the globbing code under it, never enter the browser bundle or the server, and it reads only patterns a developer types | 2027-01-13 |
 
 ## Out of Scope
 

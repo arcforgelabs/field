@@ -159,11 +159,17 @@ export async function createRemoteMcpRouter({
   // owner's session instead of an email and password. Resolves to { user },
   // { error: { status, message } } or { handled: true } (response already sent).
   approveWithSession = null,
+  // async (subject) => the MCP scopes the person who approved a grant may use
+  // right now, or null when they no longer may use Field at all (removed,
+  // disabled, pending, or out of this organisation). Checked on every /mcp
+  // call and refresh, so a grant never outlives its approver's access.
+  currentScopes,
   service,
   now,
 }) {
   if (typeof authenticate !== "function") throw new Error("authenticate is required");
   if (typeof authorizeScopes !== "function") throw new Error("authorizeScopes is required");
+  if (typeof currentScopes !== "function") throw new Error("currentScopes is required");
   const origin = parsePublicOrigin(publicOrigin);
   const issuer = origin.origin;
   const resource = `${issuer}/mcp`;
@@ -333,10 +339,25 @@ export async function createRemoteMcpRouter({
     if (body.grant_type === "refresh_token") {
       const scope = body.scope ? requestedScopes(body.scope) : [];
       if (body.scope && !scope) return formError(res, 400, "invalid_scope", "unsupported scope");
+      // A refresh is issued only within what the approver may use now.
+      const held = store.refreshGrant(body.refresh_token, body.client_id);
+      let allowed = null;
+      if (held) {
+        try {
+          allowed = await currentScopes(held.subject);
+        } catch {
+          return formError(res, 503, "temporarily_unavailable", "Field could not check this grant just now");
+        }
+      }
+      const narrowed = (scope.length ? scope : held?.scope ?? []).filter((name) => allowed?.includes(name));
+      if (held && !narrowed.length) {
+        await store.revoke(body.refresh_token, body.client_id);
+        return formError(res, 400, "invalid_grant", "invalid, expired, replayed, or revoked refresh token");
+      }
       const tokens = await store.refresh({
         refreshToken: body.refresh_token,
         clientId: body.client_id,
-        scope,
+        scope: held ? narrowed : scope,
       });
       return tokens
         ? res.json(tokens)
@@ -354,11 +375,22 @@ export async function createRemoteMcpRouter({
 
   router.all("/mcp", async (req, res) => {
     const token = bearerToken(req);
-    const authorization = token ? store.access(token, { resource }) : null;
-    if (!authorization) {
+    const granted = token ? store.access(token, { resource }) : null;
+    let allowed = null;
+    if (granted) {
+      try {
+        allowed = await currentScopes(granted.subject);
+      } catch {
+        return res.status(503).json({ error: "temporarily_unavailable" });
+      }
+    }
+    // The grant's scopes, cut down to what its approver may use now.
+    const scope = granted ? granted.scope.filter((name) => allowed?.includes(name)) : [];
+    if (!granted || !scope.length) {
       res.set("WWW-Authenticate", invalidTokenChallenge(issuer));
       return res.status(401).json({ error: "invalid_token" });
     }
+    const authorization = { ...granted, scope };
     if (req.method !== "POST") return res.status(405).set("Allow", "POST").end();
 
     const message = req.body || {};

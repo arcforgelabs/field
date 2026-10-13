@@ -250,6 +250,38 @@ export interface InvoiceRevision {
   current?: boolean;
 }
 
+/** What Field creates in Xero for an issued invoice (#93). */
+export type XeroCreateMode = "off" | "draft" | "authorised";
+export type XeroConnectionStatus = "disconnected" | "choose_organisation" | "connected" | "needs_reconnect";
+
+/** Settings, Integrations, Xero (owner only). Never a token or a secret: only whether each secret is set. */
+export interface XeroIntegration {
+  ok: boolean;
+  redirectUri: string | null;
+  publicUrlConfigured: boolean;
+  secrets: { clientIdSet: boolean; clientSecretSet: boolean };
+  scopes: string[];
+  connection: {
+    status: XeroConnectionStatus;
+    tenantName: string | null;
+    connectedAt: string | null;
+    connectedBy: string | null;
+    reconnectReason: string | null;
+    reconnectMessage: string | null;
+    organisations: Array<{ tenantId: string; tenantName: string }>;
+  };
+  settings: XeroSettings;
+  choices: { createMode: Array<{ value: XeroCreateMode; label: string; description: string }> };
+}
+
+export interface XeroSettings {
+  createMode: XeroCreateMode;
+  salesAccountCode: string;
+  taxType: string;
+  invoiceNumbering: "field";
+  autoFrom: string | null;
+}
+
 /** Whether an invoice returned to draft and reissued with different content is credited first (#28). */
 export type CreditNoteOnReissue = "when-emailed" | "always" | "never";
 

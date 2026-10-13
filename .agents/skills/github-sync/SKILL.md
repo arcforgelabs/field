@@ -12,8 +12,8 @@ This skill is account-wide and repo-agnostic. Before anything else, work out:
 - `<default>`: the default branch, `git remote show <remote> | sed -n 's/.*HEAD branch: //p'`
   (`master` or `main`; never assume)
 
-GitHub `<default>` is the source of truth. The Replit workspace is a clone of it and
-publishes from its own files, so keep the two identical.
+GitHub `<default>` is the source of truth. The Replit workspace is a clone of it, so
+keep the two identical (see "After any pull" for what a publish deploys).
 
 ## Facts you must not re-discover
 
@@ -110,5 +110,8 @@ Find the commands in `docs/REPLIT.md`, then `AGENTS.md` / `README.md`, then the
 package manifests (`package.json` scripts, `pyproject.toml`, `Makefile`). If a
 repo has no documented check, say so rather than guessing.
 
-Publishing deploys the workspace files, not GitHub, so the workspace must
-contain the merged commit before you publish.
+Unless the repo's deployment fetches from GitHub itself, publishing deploys
+the workspace files, so the workspace must contain the merged commit before
+you publish. Field's deployment fetches `main` itself (`docs/REPLIT.md`
+"Publishing"); pull after a publish to keep the workspace's database and
+`.replit` in step.

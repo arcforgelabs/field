@@ -1,5 +1,5 @@
 {
-  "id": "d70bcd6f-62d6-47a4-8039-2d9e7d030a0f",
+  "id": "d4b56951-4a36-4313-8b56-bf73365fbf97",
   "prevId": "91a87ed1-79c3-4288-95c5-fe3d60235be6",
   "version": "7",
   "dialect": "postgresql",
@@ -21,18 +21,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'when-emailed'"
-        },
-        "country": {
-          "name": "country",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "region": {
-          "name": "region",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -87,14 +75,6 @@
         "business_settings_credit_note_on_reissue_check": {
           "name": "business_settings_credit_note_on_reissue_check",
           "value": "\"business_settings\".\"credit_note_on_reissue\" in ('when-emailed','always','never')"
-        },
-        "business_settings_country_check": {
-          "name": "business_settings_country_check",
-          "value": "\"business_settings\".\"country\" is null or \"business_settings\".\"country\" ~ '^[A-Z]{2}$'"
-        },
-        "business_settings_region_check": {
-          "name": "business_settings_region_check",
-          "value": "\"business_settings\".\"region\" is null or (\"business_settings\".\"country\" is not null and \"business_settings\".\"region\" ~ '^[A-Z0-9]{1,3}$')"
         }
       },
       "isRLSEnabled": false
@@ -4289,468 +4269,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.milestone_rule_caps": {
-      "name": "milestone_rule_caps",
-      "schema": "",
-      "columns": {
-        "uid": {
-          "name": "uid",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "org_uid": {
-          "name": "org_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "field_org_uid()"
-        },
-        "rule_uid": {
-          "name": "rule_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "max_percent": {
-          "name": "max_percent",
-          "type": "numeric(7, 3)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "max_amount": {
-          "name": "max_amount",
-          "type": "numeric(12, 2)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "milestone_rule_caps_rule_kind_key": {
-          "name": "milestone_rule_caps_rule_kind_key",
-          "columns": [
-            {
-              "expression": "org_uid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "rule_uid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "milestone_rule_caps_org_uid_organizations_uid_fk": {
-          "name": "milestone_rule_caps_org_uid_organizations_uid_fk",
-          "tableFrom": "milestone_rule_caps",
-          "tableTo": "organizations",
-          "columnsFrom": [
-            "org_uid"
-          ],
-          "columnsTo": [
-            "uid"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "milestone_rule_caps_rule_fk": {
-          "name": "milestone_rule_caps_rule_fk",
-          "tableFrom": "milestone_rule_caps",
-          "tableTo": "milestone_rules",
-          "columnsFrom": [
-            "org_uid",
-            "rule_uid"
-          ],
-          "columnsTo": [
-            "org_uid",
-            "uid"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {
-        "milestone_rule_caps_tenant_isolation": {
-          "name": "milestone_rule_caps_tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "org_uid = (select field_org_uid())",
-          "withCheck": "org_uid = (select field_org_uid())"
-        }
-      },
-      "checkConstraints": {
-        "milestone_rule_caps_uid_check": {
-          "name": "milestone_rule_caps_uid_check",
-          "value": "\"milestone_rule_caps\".\"uid\" ~ '^mrc_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "milestone_rule_caps_kind_check": {
-          "name": "milestone_rule_caps_kind_check",
-          "value": "\"milestone_rule_caps\".\"kind\" in ('deposit','progress','final','variation')"
-        },
-        "milestone_rule_caps_mode_check": {
-          "name": "milestone_rule_caps_mode_check",
-          "value": "\"milestone_rule_caps\".\"mode\" in ('hard','soft')"
-        },
-        "milestone_rule_caps_limit_check": {
-          "name": "milestone_rule_caps_limit_check",
-          "value": "(\"milestone_rule_caps\".\"max_percent\" is not null and \"milestone_rule_caps\".\"max_percent\" > 0 and \"milestone_rule_caps\".\"max_percent\" <= 100) or (\"milestone_rule_caps\".\"max_amount\" is not null and \"milestone_rule_caps\".\"max_amount\" > 0)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.milestone_rule_milestones": {
-      "name": "milestone_rule_milestones",
-      "schema": "",
-      "columns": {
-        "uid": {
-          "name": "uid",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "org_uid": {
-          "name": "org_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "field_org_uid()"
-        },
-        "rule_uid": {
-          "name": "rule_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sort_order": {
-          "name": "sort_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "percent": {
-          "name": "percent",
-          "type": "numeric(7, 3)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "amount": {
-          "name": "amount",
-          "type": "numeric(12, 2)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "due_days": {
-          "name": "due_days",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "milestone_rule_milestones_rule_sort_key": {
-          "name": "milestone_rule_milestones_rule_sort_key",
-          "columns": [
-            {
-              "expression": "org_uid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "rule_uid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "sort_order",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "milestone_rule_milestones_org_uid_organizations_uid_fk": {
-          "name": "milestone_rule_milestones_org_uid_organizations_uid_fk",
-          "tableFrom": "milestone_rule_milestones",
-          "tableTo": "organizations",
-          "columnsFrom": [
-            "org_uid"
-          ],
-          "columnsTo": [
-            "uid"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "milestone_rule_milestones_rule_fk": {
-          "name": "milestone_rule_milestones_rule_fk",
-          "tableFrom": "milestone_rule_milestones",
-          "tableTo": "milestone_rules",
-          "columnsFrom": [
-            "org_uid",
-            "rule_uid"
-          ],
-          "columnsTo": [
-            "org_uid",
-            "uid"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {
-        "milestone_rule_milestones_tenant_isolation": {
-          "name": "milestone_rule_milestones_tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "org_uid = (select field_org_uid())",
-          "withCheck": "org_uid = (select field_org_uid())"
-        }
-      },
-      "checkConstraints": {
-        "milestone_rule_milestones_uid_check": {
-          "name": "milestone_rule_milestones_uid_check",
-          "value": "\"milestone_rule_milestones\".\"uid\" ~ '^mrm_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "milestone_rule_milestones_label_check": {
-          "name": "milestone_rule_milestones_label_check",
-          "value": "length(btrim(\"milestone_rule_milestones\".\"label\")) > 0"
-        },
-        "milestone_rule_milestones_share_check": {
-          "name": "milestone_rule_milestones_share_check",
-          "value": "(\"milestone_rule_milestones\".\"percent\" is not null and \"milestone_rule_milestones\".\"percent\" > 0 and \"milestone_rule_milestones\".\"percent\" <= 100) or (\"milestone_rule_milestones\".\"amount\" is not null and \"milestone_rule_milestones\".\"amount\" > 0)"
-        },
-        "milestone_rule_milestones_sort_order_check": {
-          "name": "milestone_rule_milestones_sort_order_check",
-          "value": "\"milestone_rule_milestones\".\"sort_order\" >= 0"
-        },
-        "milestone_rule_milestones_due_days_check": {
-          "name": "milestone_rule_milestones_due_days_check",
-          "value": "\"milestone_rule_milestones\".\"due_days\" is null or \"milestone_rule_milestones\".\"due_days\" > 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.milestone_rules": {
-      "name": "milestone_rules",
-      "schema": "",
-      "columns": {
-        "uid": {
-          "name": "uid",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "org_uid": {
-          "name": "org_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "field_org_uid()"
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "country": {
-          "name": "country",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "region": {
-          "name": "region",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "min_value": {
-          "name": "min_value",
-          "type": "numeric(12, 2)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'0'"
-        },
-        "max_value": {
-          "name": "max_value",
-          "type": "numeric(12, 2)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "value_basis": {
-          "name": "value_basis",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'inc-gst'"
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sort_order": {
-          "name": "sort_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_by": {
-          "name": "updated_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "milestone_rules_org_uid_key": {
-          "name": "milestone_rules_org_uid_key",
-          "columns": [
-            {
-              "expression": "org_uid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "uid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "milestone_rules_org_uid_organizations_uid_fk": {
-          "name": "milestone_rules_org_uid_organizations_uid_fk",
-          "tableFrom": "milestone_rules",
-          "tableTo": "organizations",
-          "columnsFrom": [
-            "org_uid"
-          ],
-          "columnsTo": [
-            "uid"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {
-        "milestone_rules_tenant_isolation": {
-          "name": "milestone_rules_tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "org_uid = (select field_org_uid())",
-          "withCheck": "org_uid = (select field_org_uid())"
-        }
-      },
-      "checkConstraints": {
-        "milestone_rules_uid_check": {
-          "name": "milestone_rules_uid_check",
-          "value": "\"milestone_rules\".\"uid\" ~ '^mrl_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "milestone_rules_name_check": {
-          "name": "milestone_rules_name_check",
-          "value": "length(btrim(\"milestone_rules\".\"name\")) > 0"
-        },
-        "milestone_rules_country_check": {
-          "name": "milestone_rules_country_check",
-          "value": "\"milestone_rules\".\"country\" is null or \"milestone_rules\".\"country\" ~ '^[A-Z]{2}$'"
-        },
-        "milestone_rules_region_check": {
-          "name": "milestone_rules_region_check",
-          "value": "\"milestone_rules\".\"region\" is null or (\"milestone_rules\".\"country\" is not null and \"milestone_rules\".\"region\" ~ '^[A-Z0-9]{1,3}$')"
-        },
-        "milestone_rules_band_check": {
-          "name": "milestone_rules_band_check",
-          "value": "\"milestone_rules\".\"min_value\" >= 0 and (\"milestone_rules\".\"max_value\" is null or \"milestone_rules\".\"max_value\" > \"milestone_rules\".\"min_value\")"
-        },
-        "milestone_rules_value_basis_check": {
-          "name": "milestone_rules_value_basis_check",
-          "value": "\"milestone_rules\".\"value_basis\" in ('inc-gst','ex-gst')"
-        },
-        "milestone_rules_sort_order_check": {
-          "name": "milestone_rules_sort_order_check",
-          "value": "\"milestone_rules\".\"sort_order\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.org_memberships": {
       "name": "org_memberships",
       "schema": "",
@@ -7923,6 +7441,230 @@
         "units_dimension_check": {
           "name": "units_dimension_check",
           "value": "\"units\".\"dimension\" in ('count','length','area','volume','mass','time','lot','other')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.xero_connections": {
+      "name": "xero_connections",
+      "schema": "",
+      "columns": {
+        "org_uid": {
+          "name": "org_uid",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "field_org_uid()"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'disconnected'"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tenant_name": {
+          "name": "tenant_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "available_tenants": {
+          "name": "available_tenants",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "access_token_enc": {
+          "name": "access_token_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_token_enc": {
+          "name": "refresh_token_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_expires_at": {
+          "name": "access_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_issued_at": {
+          "name": "refresh_issued_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "key_fingerprint": {
+          "name": "key_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reconnect_reason": {
+          "name": "reconnect_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_state_hash": {
+          "name": "pending_state_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_by": {
+          "name": "pending_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_expires_at": {
+          "name": "pending_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "connected_at": {
+          "name": "connected_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "connected_by": {
+          "name": "connected_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "create_mode": {
+          "name": "create_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "invoice_numbering": {
+          "name": "invoice_numbering",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'field'"
+        },
+        "sales_account_code": {
+          "name": "sales_account_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'200'"
+        },
+        "tax_type": {
+          "name": "tax_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'OUTPUT'"
+        },
+        "auto_from": {
+          "name": "auto_from",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "xero_connections_org_uid_organizations_uid_fk": {
+          "name": "xero_connections_org_uid_organizations_uid_fk",
+          "tableFrom": "xero_connections",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "org_uid"
+          ],
+          "columnsTo": [
+            "uid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "xero_connections_tenant_isolation": {
+          "name": "xero_connections_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "org_uid = (select field_org_uid())",
+          "withCheck": "org_uid = (select field_org_uid())"
+        }
+      },
+      "checkConstraints": {
+        "xero_connections_status_check": {
+          "name": "xero_connections_status_check",
+          "value": "\"xero_connections\".\"status\" in ('disconnected','choose_organisation','connected','needs_reconnect')"
+        },
+        "xero_connections_create_mode_check": {
+          "name": "xero_connections_create_mode_check",
+          "value": "\"xero_connections\".\"create_mode\" in ('off','draft','authorised')"
+        },
+        "xero_connections_invoice_numbering_check": {
+          "name": "xero_connections_invoice_numbering_check",
+          "value": "\"xero_connections\".\"invoice_numbering\" in ('field')"
+        },
+        "xero_connections_connected_check": {
+          "name": "xero_connections_connected_check",
+          "value": "\"xero_connections\".\"status\" <> 'connected' or (\"xero_connections\".\"tenant_id\" is not null and \"xero_connections\".\"refresh_token_enc\" is not null)"
+        },
+        "xero_connections_account_code_check": {
+          "name": "xero_connections_account_code_check",
+          "value": "\"xero_connections\".\"sales_account_code\" ~ '^[A-Za-z0-9._-]{1,10}$'"
+        },
+        "xero_connections_tax_type_check": {
+          "name": "xero_connections_tax_type_check",
+          "value": "\"xero_connections\".\"tax_type\" ~ '^[A-Z0-9_]{1,40}$'"
+        },
+        "xero_connections_reconnect_reason_check": {
+          "name": "xero_connections_reconnect_reason_check",
+          "value": "\"xero_connections\".\"reconnect_reason\" is null or \"xero_connections\".\"reconnect_reason\" ~ '^[A-Z0-9_]{1,64}$'"
         }
       },
       "isRLSEnabled": false

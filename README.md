@@ -31,6 +31,7 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `docs/PRICING_ENGINE.md` | Target data model for the price book, quotes and invoices |
 | `docs/CLERK_SIGN_IN.md` | Clerk sign-in runbook and cutover |
 | `docs/GMAIL_SENDING.md` | How quote and invoice email is sent, and how to restore sending |
+| `docs/XERO.md` | Connecting your own Xero app, and how Field creates its invoices in Xero |
 | `docs/CATALOG_BACKUP_RESTORE.md` | Backing up and restoring the price catalogue |
 | `docs/REMOTE_MCP.md` | The OAuth MCP surface AI agents and other systems connect through |
 | `docs/concepts/surveyor.md` | Surveyor, Field's before/after proof lane |
@@ -175,11 +176,13 @@ Client development lives in `client/`.
 
 ## Deploying
 
-- **Replit:** `.replit`, `scripts/replit-build.sh` and
-  `scripts/replit-start.sh` run Field as a published app on a Reserved VM;
-  `docs/REPLIT.md` is the runbook (secrets, PostgreSQL, durable storage, Clerk,
-  publishing). `scripts/github-sync.sh` keeps a Replit workspace in step with
-  GitHub.
+- **Replit:** `.replit` and `scripts/replit-deploy.sh` run Field as a
+  published app on a Reserved VM, built from a commit fetched from GitHub
+  (`main`, or a pinned ref), not from the workspace's files;
+  `scripts/replit-build.sh` and `scripts/replit-start.sh` build and start a
+  tree. `docs/REPLIT.md` is the runbook (secrets, PostgreSQL, durable storage,
+  Clerk, publishing, rollback). `scripts/github-sync.sh` keeps a Replit
+  workspace in step with GitHub.
 - **Docker:** `docker build .` produces a self-contained image that listens on
   19200 as an unprivileged user. Give it `DATABASE_URL`, a config
   (`FIELD_CONFIG_JSON`, or a mounted `config.json` named by `FIELD_CONFIG`),

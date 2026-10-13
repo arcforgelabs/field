@@ -192,13 +192,22 @@ describe("no stale Field token in Clerk mode", () => {
     expect(wall.searchParams.get("format")).toBe("html");
   });
 
-  it("keeps the Field token in those URLs with password sign-in", () => {
+  it("puts no Field token in those URLs with password sign-in either: it goes in the Authorization header", async () => {
     localStorage.setItem("fr_token", "field_password-mode-token");
     setSessionTokenProvider(null);
-    expect(new URL(api.quotePdfUrl("job-1"), "http://field.test").searchParams.get("token")).toBe("field_password-mode-token");
-    expect(new URL(api.wallRenderUrl("job-1", "z"), "http://field.test").searchParams.get("token")).toBe("field_password-mode-token");
-    localStorage.removeItem("fr_token");
-    expect(new URL(api.quotePdfUrl("job-1"), "http://field.test").searchParams.has("token")).toBe(false);
+    const pdfUrl = api.quotePdfUrl("job-1");
+    expect(new URL(pdfUrl, "http://field.test").searchParams.has("token")).toBe(false);
+    expect(new URL(api.wallRenderUrl("job-1", "z"), "http://field.test").searchParams.has("token")).toBe(false);
+    const fetchMock = vi.fn(async () => new Response(new Blob(["%PDF"]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await api.documentPdf(pdfUrl);
+    } finally {
+      vi.unstubAllGlobals();
+      localStorage.removeItem("fr_token");
+    }
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer field_password-mode-token");
   });
 });
 

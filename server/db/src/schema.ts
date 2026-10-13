@@ -1916,3 +1916,82 @@ export type CreditNote = typeof creditNotes.$inferSelect;
 export type CreditNoteLine = typeof creditNoteLines.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
 export type Receipt = typeof receipts.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Xero (#93): each installation connects to its owner's own Xero organisation
+// through a Xero app the owner creates at developer.xero.com. The app's client
+// id and secret are deployment secrets (XERO_CLIENT_ID, XERO_CLIENT_SECRET)
+// and never stored here. Stored: one row per organisation with the chosen
+// Xero organisation (tenant), the OAuth tokens encrypted with AES-256-GCM
+// (server/xero/token-crypto.js; the key is derived from the client secret, and
+// `key_fingerprint` tells a changed secret apart), the sign-in in progress
+// while the owner is at Xero (its state only as a hash), and the owner's
+// settings. Disconnect clears the tokens and the tenant and keeps the
+// settings.
+
+export const XERO_CONNECTION_STATUSES = ["disconnected", "choose_organisation", "connected", "needs_reconnect"] as const;
+export type XeroConnectionStatus = (typeof XERO_CONNECTION_STATUSES)[number];
+/** What Field creates in Xero for an issued invoice. */
+export const XERO_CREATE_MODES = ["off", "draft", "authorised"] as const;
+export type XeroCreateMode = (typeof XERO_CREATE_MODES)[number];
+/**
+ * Where invoice numbers come from. Only `field` (INV-YYYY-M-N, #39) exists
+ * now. `xero` (Xero allocates the number when Field issues) is a later change
+ * that widens this check (docs/XERO.md "Invoice numbers").
+ */
+export const XERO_INVOICE_NUMBERING = ["field"] as const;
+export type XeroInvoiceNumbering = (typeof XERO_INVOICE_NUMBERING)[number];
+
+export const xeroConnections = pgTable(
+  "xero_connections",
+  {
+    orgUid: orgUid().primaryKey(),
+    status: text("status").$type<XeroConnectionStatus>().notNull().default("disconnected"),
+    /** The Xero organisation Field writes to, from GET /connections. */
+    tenantId: text("tenant_id"),
+    tenantName: text("tenant_name"),
+    /** The connection's own id (DELETE /connections/{id} on disconnect). */
+    connectionId: text("connection_id"),
+    /** The organisations the last sign-in reached, while the owner chooses one: [{ tenantId, tenantName, connectionId }]. */
+    availableTenants: jsonb("available_tenants").$type<Array<Record<string, string>>>().notNull().default(sql`'[]'::jsonb`),
+    /** AES-256-GCM, `v1.<iv>.<ciphertext>.<tag>` in base64url. Never logged, never sent to the browser. */
+    accessTokenEnc: text("access_token_enc"),
+    refreshTokenEnc: text("refresh_token_enc"),
+    accessExpiresAt: timestamp("access_expires_at", { withTimezone: true, mode: "date" }),
+    /** When the current refresh token was issued (each refresh rotates it). */
+    refreshIssuedAt: timestamp("refresh_issued_at", { withTimezone: true, mode: "date" }),
+    /** A fingerprint of the key that encrypted the tokens, never the key. */
+    keyFingerprint: text("key_fingerprint"),
+    /** Why the owner must connect again: a short code (REFRESH_REJECTED, CLIENT_SECRET_CHANGED, ...). */
+    reconnectReason: text("reconnect_reason"),
+    /** The sign-in in progress: the SHA-256 of its state, who started it and until when. */
+    pendingStateHash: text("pending_state_hash"),
+    pendingBy: text("pending_by"),
+    pendingExpiresAt: timestamp("pending_expires_at", { withTimezone: true, mode: "date" }),
+    connectedAt: timestamp("connected_at", { withTimezone: true, mode: "date" }),
+    connectedBy: text("connected_by"),
+    createMode: text("create_mode").$type<XeroCreateMode>().notNull().default("draft"),
+    invoiceNumbering: text("invoice_numbering").$type<XeroInvoiceNumbering>().notNull().default("field"),
+    /** The sales account every line is coded to ("Sales" is 200 in Xero's standard Australian chart). */
+    salesAccountCode: text("sales_account_code").notNull().default("200"),
+    /** The tax type of lines with GST ("GST on Income" is OUTPUT in Australia). */
+    taxType: text("tax_type").notNull().default("OUTPUT"),
+    /** Invoices issued from this moment go to Xero by themselves; earlier ones only when an owner sends them. */
+    autoFrom: timestamp("auto_from", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => [
+    check("xero_connections_status_check", sql`${t.status} in ('disconnected','choose_organisation','connected','needs_reconnect')`),
+    check("xero_connections_create_mode_check", sql`${t.createMode} in ('off','draft','authorised')`),
+    check("xero_connections_invoice_numbering_check", sql`${t.invoiceNumbering} in ('field')`),
+    check("xero_connections_connected_check", sql`${t.status} <> 'connected' or (${t.tenantId} is not null and ${t.refreshTokenEnc} is not null)`),
+    check("xero_connections_account_code_check", sql`${t.salesAccountCode} ~ '^[A-Za-z0-9._-]{1,10}$'`),
+    check("xero_connections_tax_type_check", sql`${t.taxType} ~ '^[A-Z0-9_]{1,40}$'`),
+    check("xero_connections_reconnect_reason_check", sql`${t.reconnectReason} is null or ${t.reconnectReason} ~ '^[A-Z0-9_]{1,64}$'`),
+    tenantIsolation("xero_connections"),
+  ],
+);
+
+export type XeroConnection = typeof xeroConnections.$inferSelect;

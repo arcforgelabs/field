@@ -220,6 +220,18 @@ export class OAuthStore {
     });
   }
 
+  // The subject and scope behind a refresh token that could still be used,
+  // without using it; null otherwise.
+  refreshGrant(refreshToken, clientId) {
+    const record = this.data.tokens.find(
+      (candidate) => candidate.kind === "refresh" && hashesEqual(candidate.hash, hash(String(refreshToken || ""))),
+    );
+    if (!record || record.clientId !== clientId || record.revokedAt || record.rotatedAt || record.expiresAt <= this.now()) {
+      return null;
+    }
+    return { subject: record.subject, scope: [...record.scope] };
+  }
+
   access(token, { resource, requiredScopes = [] }) {
     const record = this.data.tokens.find(
       (candidate) => candidate.kind === "access" && hashesEqual(candidate.hash, hash(token)),

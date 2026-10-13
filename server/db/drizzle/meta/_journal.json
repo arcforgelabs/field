@@ -124,8 +124,15 @@
     {
       "idx": 17,
       "version": "7",
-      "when": 1791863752768,
-      "tag": "0017_milestone_rules",
+      "when": 1791862500086,
+      "tag": "0017_xero_connection",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791868756687,
+      "tag": "0018_milestone_rules",
       "breakpoints": true
     }
   ]

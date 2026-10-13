@@ -62,3 +62,27 @@
   .fx-mr__row > :first-child { grid-column: 1 / -1; }
   .fx-mr__row > :last-child { justify-self: end; }
 }
+/* Integrations: Xero (#93). */
+.xero__card { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px; border: 1px solid var(--fx-line-strong); border-radius: var(--t-radius-lg, var(--t-radius)); background: var(--t-paper); }
+.xero__row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.xero__row > :first-child { flex: 1 1 260px; }
+.xero__title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.xero__org { font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.xero__meta { margin: 6px 0 0; font-size: 12.5px; }
+.xero__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.xero__choose { border: 0; margin: 0; padding: 0; display: grid; gap: 10px; }
+.xero__choose legend { font-size: 12.5px; margin-bottom: 8px; }
+.xero__group { border: 0; margin: 0; padding: 0; display: grid; gap: 10px; min-width: 0; }
+.xero__h { font-size: 13px; font-weight: 650; color: var(--t-text); padding: 0; }
+.xero__p { margin: 0; font-size: 12.5px; }
+.xero__hint { font-size: 11.5px; font-weight: 400; }
+.xero__steps ol { margin: 0; padding-left: 20px; display: grid; gap: 10px; list-style: decimal; }
+.xero__steps a { color: var(--t-accent); }
+.xero__link { display: inline-flex; align-items: center; gap: 3px; }
+.xero__link svg { width: 12px; height: 12px; flex: none; }
+.xero__copy { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.xero__copy code { flex: 1 1 240px; min-width: 0; padding: 7px 10px; border: 1px solid var(--fx-line-strong); border-radius: var(--t-radius); background: var(--t-bg); color: var(--t-text); font: 12px var(--t-data); overflow-wrap: anywhere; }
+.xero__warn { display: block; margin-top: 6px; color: var(--t-warn); }
+.xero__secrets { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.xero__secrets li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.xero__secrets code { font: 12px var(--t-data); color: var(--t-text); }
