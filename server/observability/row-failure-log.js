@@ -21,5 +21,7 @@ export function describeRowFailure(failure, { documentUid = failure.issuedDocume
   ].filter(Boolean).join(" ");
   const field = failure.field ? `: ${FIELD_NAMES[failure.field] || "other"}` : "";
   const against = failure.against ? ` against ${failure.against}` : "";
-  return `${where ? `${where} ` : ""}${failure.conflict || failure.kind || "mismatch"}${field}${against}`;
+  // A code is from a fixed list (an unmappable milestone's, from-milestones.js).
+  const code = failure.code ? ` (${failure.code})` : "";
+  return `${where ? `${where} ` : ""}${failure.conflict || failure.kind || "mismatch"}${code}${field}${against}`;
 }

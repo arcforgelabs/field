@@ -11,6 +11,9 @@
 // no ledger, every job file byte-identical). Then a boot without the hold
 // backfills the jobs, logging one line per migration, and the route reports
 // them as applied.
+//
+// A refused invoice shows its unmappable code (no-issue-time) and number, and
+// issue times taken from evidence show as counts by source.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -21,12 +24,13 @@ import { join, relative, resolve } from "node:path";
 import test from "node:test";
 import express from "express";
 import { sql } from "drizzle-orm";
-import { closeDb, getDb, queryRows } from "../db-runtime/index.js";
+import { closeDb, createTestDb, getDb, queryRows } from "../db-runtime/index.js";
 import { DEFAULT_ORG_UID, withOrg } from "../db-runtime/tenancy.js";
-import { scenarios } from "../invoices/test-fixtures.js";
+import { createAprilMilestoneJob, scenarios } from "../invoices/test-fixtures.js";
 import { createDataMigrationDryRunHandler, DRY_RUN_PATH } from "./dry-run-route.js";
 import { DataMigrationError } from "./errors.js";
-import { INVOICE_ROWS_BACKFILL_ID, QUOTE_ROWS_BACKFILL_ID } from "./row-backfills.js";
+import { runDataMigrations } from "./index.js";
+import { INVOICE_ROWS_BACKFILL_ID, invoiceRowsBackfill, QUOTE_ROWS_BACKFILL_ID, quoteRowsBackfill } from "./row-backfills.js";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const quiet = { log() {}, warn() {}, error() {} };
@@ -107,6 +111,32 @@ test("a failed verification is ok: false with the migration and a count, never t
   assert.equal(status, 200);
   assert.deepEqual(body.verificationFailed, { migration: "2026-10-12-quote-rows-by-uid", failures: 2 });
   assert.equal(body.ok, false);
+});
+
+test("a refused invoice shows its code and number; one mapped from evidence shows the source's count; never the reason's text", async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), "field-dry-run-codes-"));
+  const handle = await createTestDb();
+  t.after(async () => {
+    await handle.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+  await createAprilMilestoneJob(dataDir, { id: "job-april-none", number: "2604-83", withPdf: false });
+  await createAprilMilestoneJob(dataDir, { id: "job-april-pdf", number: "2604-84" });
+  const call = await serve(t, createDataMigrationDryRunHandler({
+    run: ({ signal }) => runDataMigrations({ db: handle.db, orgUid: DEFAULT_ORG_UID, dataDir, migrations: [quoteRowsBackfill, invoiceRowsBackfill], mode: "dry-run", logger: quiet, signal }),
+    logger: quiet,
+  }));
+  const { status, body } = await call();
+  assert.equal(status, 200);
+  assert.equal(body.ok, false);
+  const invoices = body.migrations.find((entry) => entry.id === INVOICE_ROWS_BACKFILL_ID);
+  assert.equal(invoices.status, "would-refuse");
+  assert.deepEqual(invoices.refused, [{
+    jobId: "job-april-none",
+    mismatches: [0, 1, 2].map((milestone) => ({ kind: "unmappable", code: "no-issue-time", number: `EI-2604-83-M${milestone + 1}`, milestone })),
+  }]);
+  assert.deepEqual(invoices.summary.issueTimesFromEvidence, { "stored-pdf-date": 3 });
+  assert.equal(JSON.stringify(body).includes("has no issue time"), false, "no reason text");
 });
 
 function jobFileHashes(dataDir) {

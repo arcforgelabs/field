@@ -59,11 +59,12 @@ function stopWhenAborted(signal) {
   };
 }
 
-// Only numbers and identifiers: a mismatch's reason or a line's name can hold
-// customer text.
+// Only numbers, identifiers and codes: a mismatch's reason or a line's name
+// can hold customer text. `code` is from a fixed list (an unmappable
+// milestone's UNMAPPABLE_CODES in ../invoices/from-milestones.js).
 function numbersOnly(entry) {
   const out = {};
-  for (const key of ["kind", "against", "number", "issuedDocumentUid", "version", "milestone", "field", "rows", "shown", "computed", "printed", "conflict"]) {
+  for (const key of ["kind", "code", "against", "number", "issuedDocumentUid", "version", "milestone", "field", "rows", "shown", "computed", "printed", "conflict"]) {
     if (entry[key] !== undefined && entry[key] !== null && typeof entry[key] !== "object") out[key] = entry[key];
   }
   return out;
@@ -117,6 +118,14 @@ function refusedJobs(report, dataDir, { dryRunConflicts = [] } = {}) {
   return refused;
 }
 
+function issueTimeSources(warnings) {
+  const out = {};
+  for (const warning of warnings) {
+    if (warning.kind === "issue-time-from-evidence") out[warning.code] = (out[warning.code] || 0) + 1;
+  }
+  return out;
+}
+
 function countActions(actions, names) {
   return Object.entries(actions).filter(([action]) => names.has(action)).reduce((sum, [, count]) => sum + count, 0);
 }
@@ -167,6 +176,9 @@ async function runInvoiceRows(context, { dryRun }) {
       // Legacy invoices whose milestone record disagreed with the PDF Field
       // emailed: their rows hold the amounts emailed.
       invoicesFromSentCopy: report.warnings.filter((warning) => warning.kind === "rows-from-sent-copy").length,
+      // Issued invoices whose record held no issue time, by the record that
+      // gave it (../invoices/issue-time-evidence.js).
+      issueTimesFromEvidence: issueTimeSources(report.warnings),
       rows: report.written,
     },
     refused,
@@ -178,8 +190,10 @@ function describeQuoteRows(summary) {
 }
 
 function describeInvoiceRows(summary) {
+  const fromEvidence = Object.entries(summary.issueTimesFromEvidence || {});
   return `${summary.jobsWithMilestones} job(s) with milestones, ${summary.invoices} invoice(s): ${summary.written} job(s) written, ${summary.alreadyPresent} already present, ${summary.refusedJobs} job(s) refused; ${summary.warnings} warning(s)`
     + `${summary.invoicesFromSentCopy ? `; ${summary.invoicesFromSentCopy} invoice(s) take the amounts Field emailed` : ""}`
+    + `${fromEvidence.length ? `; issue times from evidence: ${fromEvidence.map(([source, count]) => `${source} ${count}`).join(", ")}` : ""}`
     + `${summary.refusedJobs ? "; an owner settles refused legacy invoices at GET /api/admin/invoices/amount-disagreements" : ""}`;
 }
 
