@@ -23,3 +23,6 @@ attached_assets/
 
 # Build revision written by scripts/replit-build.sh
 .field-revision
+
+# Replit deployment build output (scripts/replit-deploy.sh)
+.field-deploy/
