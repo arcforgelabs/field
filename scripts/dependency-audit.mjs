@@ -56,17 +56,43 @@ export function judge(advisories, accepted, today) {
   return problems;
 }
 
+// An `npm audit --json` report, or an error when npm could not produce one
+// (an unreachable registry, a broken lockfile): then npm prints an error
+// document with no `vulnerabilities`, and the audit must fail, never pass.
+export function parseAuditReport(stdout) {
+  let report;
+  try {
+    report = JSON.parse(stdout);
+  } catch {
+    throw new Error(`npm audit printed no JSON report: ${String(stdout).slice(0, 200)}`);
+  }
+  if (!report || typeof report.vulnerabilities !== "object" || report.vulnerabilities === null) {
+    const reason = report?.message || report?.error?.summary || report?.error?.code || JSON.stringify(report).slice(0, 200);
+    throw new Error(`npm audit did not produce a report: ${reason}`);
+  }
+  return report;
+}
+
 function audit(directory) {
   try {
-    return JSON.parse(execFileSync("npm", ["audit", "--package-lock-only", "--json"], { cwd: directory, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+    return parseAuditReport(execFileSync("npm", ["audit", "--package-lock-only", "--json"], { cwd: directory, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   } catch (error) {
     // npm audit exits 1 when it finds anything; its report is still on stdout.
-    if (error.stdout) return JSON.parse(error.stdout);
+    if (error.stdout) return parseAuditReport(error.stdout);
     throw error;
   }
 }
 
 function main() {
+  try {
+    run();
+  } catch (error) {
+    console.error(`Dependency audit failed: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+function run() {
   const root = resolve(import.meta.dirname, "..");
   const todayFlag = process.argv.indexOf("--today");
   const today = todayFlag > 0 ? process.argv[todayFlag + 1] : new Date().toISOString().slice(0, 10);

@@ -277,23 +277,31 @@ jobs:
         run: npm run build
         working-directory: client
 
+  # A required check by name, so it always runs and ends in success or
+  # failure; on a documentation-only pull request only the build is skipped.
   docker-build:
     name: docker-build
     needs: changes
-    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Skip the build for a documentation-only pull request
+        if: needs.changes.outputs.heavy != 'true'
+        run: echo "Documentation-only pull request; the image build is skipped." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Check out repository
+        if: needs.changes.outputs.heavy == 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ env.CHECKOUT_REF }}
 
       - name: Set up Docker Buildx
+        if: needs.changes.outputs.heavy == 'true'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       # The layer cache lets the smoke lane load this same build in seconds.
       - name: Build image
+        if: needs.changes.outputs.heavy == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -401,15 +409,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # A lane may be skipped only when `changes` found a documentation-only
-      # pull request; any other skip, failure or cancellation fails the gate.
+      # postgres, quote-invoice-proof and smoke may be skipped only when
+      # `changes` found a documentation-only pull request; any other skip,
+      # failure or cancellation fails the gate.
       - name: Require every lane
         env:
           HEAVY: ${{ needs.changes.outputs.heavy }}
           RESULTS: ${{ toJSON(needs) }}
         run: |
           set -euo pipefail
-          optional='["postgres","quote-invoice-proof","docker-build","smoke"]'
+          optional='["postgres","quote-invoice-proof","smoke"]'
           failed="$(jq -r --argjson optional "$optional" --arg heavy "$HEAVY" '
             to_entries[]
             | select(.value.result != "success")

@@ -58,7 +58,9 @@ All lane data is synthetic: the verification catalogue
 ## Documentation-only pull requests
 
 A pull request that changes only files under `docs/` and Markdown files skips
-`postgres`, `quote-invoice-proof`, `docker-build` and `smoke`. Nothing in the
+`postgres`, `quote-invoice-proof` and `smoke`, and `docker-build` skips its
+build steps but still reports success, because the ruleset requires it by
+name. Nothing in the
 server, the client bundle or the image reads those files. The unit lanes, the
 client build and the audit still run. A push to `main`, a manual run and a
 release check always run every lane, because the Replit publish needs a

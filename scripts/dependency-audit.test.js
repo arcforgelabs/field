@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { acceptedAdvisories, advisoriesFromAudit, judge } from "./dependency-audit.mjs";
+import { acceptedAdvisories, advisoriesFromAudit, judge, parseAuditReport } from "./dependency-audit.mjs";
 
 const security = readFileSync(join(import.meta.dirname, "..", "SECURITY.md"), "utf8");
 
@@ -55,4 +55,13 @@ test("one advisory reached through several packages is judged once and names the
   ));
   assert.equal(found.length, 1);
   assert.deepEqual([...found[0].packages].sort(), ["braces", "micromatch"]);
+});
+
+test("an npm audit error document fails the audit instead of passing as a clean report", () => {
+  // What npm 11 prints when the registry cannot be reached.
+  const error = JSON.stringify({ message: "request to https://registry.npmjs.org/-/npm/v1/security/advisories/bulk failed, reason: connect ECONNREFUSED", error: { summary: "", detail: "" } });
+  assert.throws(() => parseAuditReport(error), /npm audit did not produce a report: request to https:\/\/registry.npmjs.org/);
+  assert.throws(() => parseAuditReport("npm ERR! something"), /printed no JSON report/);
+  assert.throws(() => parseAuditReport("null"), /did not produce a report/);
+  assert.deepEqual(parseAuditReport(JSON.stringify({ vulnerabilities: {} })).vulnerabilities, {});
 });
