@@ -140,3 +140,96 @@ test("a deployed key that is not the generated one: the screen says so, and star
     await t.close();
   }
 });
+
+test("stale pending credentials never overwrite newer ones (pending under K, B deployed, newer credentials, then K as previous)", async () => {
+  const t = await createTestDb();
+  try {
+    const k = generateSecretsKey();
+    const b = generateSecretsKey();
+    const sealed = await sealForServer({ keyBytes: k.bytes, orgUid: ORG, integration: "xero", values: { client_id: CLIENT_ID, client_secret: CLIENT_SECRET } });
+    await setupFor(t.db, loadSecretsKeyring({})).storePending({ keyId: sealed.keyId, values: sealed.values }, { actor: "Owner Person" });
+
+    // B is deployed: the pending values were written with K, so they wait.
+    const withB = loadSecretsKeyring({ FIELD_SECRETS_KEY: b.text });
+    assert.equal((await setupFor(t.db, withB).state()).problem, "PENDING_KEY_MISMATCH");
+
+    // The owner enters newer credentials (PUT /credentials): pending goes in the same transaction.
+    const NEWER = "newer-synthetic-client-secret-0000000000000000";
+    await createCredentialStore({ db: t.db, orgUid: ORG, keyring: withB, now }).set("xero", { client_id: CLIENT_ID, client_secret: NEWER }, { actor: "Owner Person" });
+    const afterPut = await setupFor(t.db, withB).state();
+    assert.deepEqual([afterPut.pending, afterPut.problem], [null, null]);
+
+    // K is added as the previous key, and Field boots: nothing is overwritten.
+    const both = loadSecretsKeyring({ FIELD_SECRETS_KEY: b.text, FIELD_SECRETS_KEY_PREVIOUS: k.text });
+    assert.deepEqual(await setupFor(t.db, both).promote(), { promoted: false });
+    assert.equal((await createCredentialStore({ db: t.db, orgUid: ORG, keyring: both }).read("xero")).client_secret, NEWER);
+    const events = await withOrg(t.db, ORG, (tx) => queryRows(sql`select action, details from integration_audit_events order by at, uid`, tx));
+    assert.deepEqual(events.map((row) => row.action), ["pending_credentials_stored", "credentials_set", "pending_credentials_discarded"]);
+    assert.equal(events[2].details.reason, "credentials_entered");
+  } finally {
+    await t.close();
+  }
+});
+
+test("removing the credentials forgets pending ones too", async () => {
+  const t = await createTestDb();
+  try {
+    const k = generateSecretsKey();
+    const sealed = await sealForServer({ keyBytes: k.bytes, orgUid: ORG, integration: "xero", values: { client_id: CLIENT_ID, client_secret: CLIENT_SECRET } });
+    await setupFor(t.db, loadSecretsKeyring({})).storePending({ keyId: sealed.keyId, values: sealed.values }, { actor: "Owner Person" });
+    await createCredentialStore({ db: t.db, orgUid: ORG, keyring: loadSecretsKeyring({}), now }).remove("xero", { actor: "Owner Person" });
+    assert.equal((await setupFor(t.db, loadSecretsKeyring({})).state()).pending, null);
+    assert.equal((await setupFor(t.db, loadSecretsKeyring({ FIELD_SECRETS_KEY: k.text })).promote()).promoted, false);
+  } finally {
+    await t.close();
+  }
+});
+
+test("promotion skips, and forgets, pending credentials older than the stored ones", async () => {
+  const t = await createTestDb();
+  try {
+    const k = generateSecretsKey();
+    const sealed = await sealForServer({ keyBytes: k.bytes, orgUid: ORG, integration: "xero", values: { client_id: CLIENT_ID, client_secret: CLIENT_SECRET } });
+    await setupFor(t.db, loadSecretsKeyring({})).storePending({ keyId: sealed.keyId, values: sealed.values }, { actor: "Owner Person" });
+    // Credentials written later some other way (not through the store, so the pending row stays).
+    const withK = loadSecretsKeyring({ FIELD_SECRETS_KEY: k.text });
+    const box = createSecretBox({ keyring: withK, orgUid: ORG, integration: "xero" });
+    const LATER = "later-synthetic-client-secret-00000000000000000";
+    const later = new Date(Date.UTC(2027, 0, 1));
+    await withOrg(t.db, ORG, async (tx) => {
+      for (const [field, value] of [["client_id", CLIENT_ID], ["client_secret", LATER]]) {
+        const valueEnc = box.seal(value, field);
+        await tx.execute(sql`insert into integration_credentials (integration, field, value_enc, key_id, set_at, set_by) values ('xero', ${field}, ${valueEnc}, ${withK.currentId}, ${later.toISOString()}, 'Owner Person')`);
+      }
+    });
+    assert.deepEqual(await setupFor(t.db, withK).promote(), { promoted: false, discarded: true });
+    assert.equal((await createCredentialStore({ db: t.db, orgUid: ORG, keyring: withK }).read("xero")).client_secret, LATER);
+    assert.equal((await setupFor(t.db, withK).state()).pending, null);
+    const [last] = await withOrg(t.db, ORG, (tx) => queryRows(sql`select action, details from integration_audit_events order by at desc, uid desc limit 1`, tx));
+    assert.deepEqual([last.action, last.details.reason], ["pending_credentials_discarded", "newer_credentials"]);
+  } finally {
+    await t.close();
+  }
+});
+
+test("pending credentials only replace a missing or unusable key, never a working one", async () => {
+  const t = await createTestDb();
+  try {
+    const k = generateSecretsKey();
+    const sealed = await sealForServer({ keyBytes: k.bytes, orgUid: ORG, integration: "xero", values: { client_id: CLIENT_ID, client_secret: CLIENT_SECRET } });
+    const body = { keyId: sealed.keyId, values: sealed.values };
+    const working = generateSecretsKey().text;
+    // A working key with a wrong previous key: fix the previous key, never a new key.
+    const previousWrong = loadSecretsKeyring({ FIELD_SECRETS_KEY: working, FIELD_SECRETS_KEY_PREVIOUS: "too-short" });
+    assert.equal(previousWrong.problem, "SECRETS_KEY_PREVIOUS_INVALID");
+    await assert.rejects(setupFor(t.db, previousWrong).storePending(body), (error) => error.code === "SECRETS_KEY_PREVIOUS_INVALID" && /fix FIELD_SECRETS_KEY_PREVIOUS/.test(error.message));
+    await assert.rejects(setupFor(t.db, loadSecretsKeyring({ FIELD_SECRETS_KEY: working })).storePending(body), (error) => error.code === "SECRETS_KEY_SET");
+    assert.equal((await setupFor(t.db, loadSecretsKeyring({})).state()).pending, null, "nothing stored");
+    // An unusable value (too short) is replaced by the key made in the browser.
+    const unusable = loadSecretsKeyring({ FIELD_SECRETS_KEY: "too-short" });
+    assert.equal(unusable.problem, "SECRETS_KEY_INVALID");
+    assert.equal((await setupFor(t.db, unusable).storePending(body)).pending.keyId, sealed.keyId);
+  } finally {
+    await t.close();
+  }
+});

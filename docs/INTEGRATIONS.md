@@ -67,7 +67,22 @@ deployment secret `FIELD_SECRETS_KEY`.
      copies the same instructions for an assistant; it names the secret and
      never holds the key.
   3. Save the key in your password manager too, tick the box and press
-     **Done**. The key leaves the screen and the browser's memory.
+     **Done**. The key leaves the screen, and Field overwrites the key's
+     bytes. A browser cannot erase text from its own memory on request, so
+     the key's text can stay in this tab's memory until you close the page:
+     close it when you are done.
+  4. **Copy** leaves the key on the clipboard. After you paste it, clear the
+     clipboard, or copy something else. **Done** also tries to empty the
+     clipboard, but the browser may not allow it.
+
+  The wizard makes a key only while `FIELD_SECRETS_KEY` is missing, or its
+  value cannot be used (too short), and then the new key replaces that
+  value. When the key works but `FIELD_SECRETS_KEY_PREVIOUS` is wrong, the
+  wizard says "Your previous key setting is wrong: fix
+  FIELD_SECRETS_KEY_PREVIOUS" and offers no new key, so a working key is
+  never replaced. Credentials entered or removed later (Replace, Remove)
+  forget any credentials still waiting for a key, and waiting credentials
+  older than the stored ones are never used.
 
   The key never reaches Field's server: the server cannot store, log or send
   to Sentry what it never receives. Generate key records only an audit event

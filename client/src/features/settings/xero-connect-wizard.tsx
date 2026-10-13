@@ -53,6 +53,7 @@ export function XeroConnectWizard({ data, onChanged, onClose, onConnect, busy }:
   const [clientSecret, setClientSecret] = useState("");
   const [keyText, setKeyText] = useState<string | null>(null);
   const keyBytes = useRef<Uint8Array | null>(null);
+  const keyCopied = useRef(false);
   const [saved, setSaved] = useState(false);
   const [keyDone, setKeyDone] = useState(false);
   const [mode, setMode] = useState<XeroCreateMode>(data.settings.createMode === "authorised" ? "authorised" : "draft");
@@ -97,6 +98,7 @@ export function XeroConnectWizard({ data, onChanged, onClose, onConnect, busy }:
   async function copy(text: string, what: string) {
     try {
       await navigator.clipboard.writeText(text);
+      if (text === keyText) keyCopied.current = true;
       shell.toast(`${what} copied.`);
     } catch {
       shell.toast("Select it and copy it.");
@@ -149,6 +151,16 @@ export function XeroConnectWizard({ data, onChanged, onClose, onConnect, busy }:
     setClientId("");
     setClientSecret("");
     setKeyDone(true);
+    // Copy left the key on the clipboard: replace it with nothing, if the
+    // browser allows. A refusal is fine: the docs say to clear it by hand.
+    if (keyCopied.current) {
+      keyCopied.current = false;
+      try {
+        void navigator.clipboard?.writeText("")?.catch(() => {});
+      } catch {
+        // No clipboard access: nothing to do.
+      }
+    }
     await onChanged();
     setLocalStep(null);
   }, "The credentials did not save. Try again.");
@@ -277,8 +289,22 @@ export function XeroConnectWizard({ data, onChanged, onClose, onConnect, busy }:
                 <button type="button" className="fx-btn" disabled={working} onClick={startAgain}><RotateCcw aria-hidden />Start again</button>
               </Actions>
             </>
+          ) : data.secretsKey.problem === "SECRETS_KEY_PREVIOUS_INVALID" ? (
+            <>
+              <div className="fx-notice fx-notice--bad" role="alert" style={{ margin: 0 }}>
+                <span>Your previous key setting is wrong: fix FIELD_SECRETS_KEY_PREVIOUS.</span>
+              </div>
+              <More>
+                <p>FIELD_SECRETS_KEY works, but a value in FIELD_SECRETS_KEY_PREVIOUS is too short to be a key. Correct it or remove it where Field runs, then republish or restart Field. Field does not make a new key here, so the key that works is never replaced.</p>
+              </More>
+            </>
           ) : (
             <>
+              {data.secretsKey.problem === "SECRETS_KEY_INVALID" && !keyText && (
+                <div className="fx-notice fx-notice--warn" role="note" style={{ margin: 0 }}>
+                  <span>The FIELD_SECRETS_KEY set now cannot be used: it is too short to be a key. Generate a key here and put it in place of the current value.</span>
+                </div>
+              )}
               {!keyText ? (
                 <Actions>
                   {!override && <button type="button" className="fx-btn fx-btn--ghost" onClick={() => setLocalStep(2)}><ChevronLeft aria-hidden />Back</button>}

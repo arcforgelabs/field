@@ -19,6 +19,9 @@ import { createSecretBox, sealedKeyId } from "./box.js";
 
 const { integrationSetup, integrationCredentials, integrationAuditEvents } = schema;
 
+/** The keyring problems under which the browser may store credentials encrypted with a key it made. */
+const PENDING_ALLOWED = new Set(["SECRETS_KEY_MISSING", "SECRETS_KEY_INVALID"]);
+
 /** Steps the browser may record. `done` ends the wizard. */
 export const SETUP_STEPS = Object.freeze(["app", "credentials", "done"]);
 
@@ -114,7 +117,14 @@ export function createIntegrationSetup({ db, orgUid = undefined, keyring, integr
      * server encrypts them itself).
      */
     async storePending({ keyId, values }, { actor = null } = {}) {
-      if (keyring.available) throw new SetupError("FIELD_SECRETS_KEY is already set. Enter the credentials as usual.", { code: "SECRETS_KEY_SET", statusCode: 409 });
+      // Only while there is no working key to replace: FIELD_SECRETS_KEY is
+      // missing, or its value cannot be used. A wrong previous key, or any
+      // other problem, is fixed where it is; the wizard never replaces a key
+      // that works.
+      if (!PENDING_ALLOWED.has(keyring.problem)) {
+        if (keyring.problem === "SECRETS_KEY_PREVIOUS_INVALID") throw new SetupError("Your previous key setting is wrong: fix FIELD_SECRETS_KEY_PREVIOUS.", { code: "SECRETS_KEY_PREVIOUS_INVALID", statusCode: 409 });
+        throw new SetupError("FIELD_SECRETS_KEY is already set. Enter the credentials as usual.", { code: "SECRETS_KEY_SET", statusCode: 409 });
+      }
       if (typeof keyId !== "string" || !KEY_ID.test(keyId)) throw new SetupError("That is not a key id.", { code: "PENDING_INVALID" });
       if (!values || typeof values !== "object" || Array.isArray(values)) throw new SetupError("Send the encrypted credentials.", { code: "PENDING_INVALID" });
       const names = Object.keys(values);
@@ -153,7 +163,17 @@ export function createIntegrationSetup({ db, orgUid = undefined, keyring, integr
       try {
         return await scope.transaction(async (tx) => {
           const [row] = await tx.select().from(integrationSetup).where(eq(integrationSetup.integration, integration)).for("update");
-          if (!row?.pendingKeyId || !keyring.key(row.pendingKeyId)) return { promoted: false };
+          if (!row?.pendingKeyId) return { promoted: false };
+          // Credentials stored after these were pending are newer: the pending
+          // ones are stale. Forget them, never overwrite.
+          const stored = await tx.select({ field: integrationCredentials.field, setAt: integrationCredentials.setAt }).from(integrationCredentials).where(eq(integrationCredentials.integration, integration));
+          if (row.pendingAt && stored.some((entry) => fields.includes(entry.field) && entry.setAt > row.pendingAt)) {
+            await tx.update(integrationSetup).set({ pendingValues: null, pendingKeyId: null, pendingAt: null, pendingBy: null, updatedAt: now() })
+              .where(eq(integrationSetup.integration, integration));
+            await audit(tx, "pending_credentials_discarded", null, { reason: "newer_credentials", keyId: row.pendingKeyId });
+            return { promoted: false, discarded: true };
+          }
+          if (!keyring.key(row.pendingKeyId)) return { promoted: false };
           let values;
           try {
             values = openPending(row);
@@ -163,7 +183,7 @@ export function createIntegrationSetup({ db, orgUid = undefined, keyring, integr
           if (!valid(values)) return { promoted: false, problem: "PENDING_UNREADABLE" };
           const at = now();
           const actor = row.pendingBy || null;
-          const existing = await tx.select({ field: integrationCredentials.field }).from(integrationCredentials).where(eq(integrationCredentials.integration, integration));
+          const existing = stored;
           for (const field of fields) {
             const valueEnc = box.seal(values[field], field);
             await tx.insert(integrationCredentials).values({ integration, field, valueEnc, keyId: sealedKeyId(valueEnc), setAt: at, setBy: actor })

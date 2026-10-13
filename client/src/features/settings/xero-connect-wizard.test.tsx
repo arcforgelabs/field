@@ -196,6 +196,8 @@ describe("Connect Xero wizard", () => {
     fireEvent.click(within(three).getByRole("checkbox"));
     fireEvent.click(done);
     await waitFor(() => expect(screen.getByText(/Waiting for the key/)).toBeTruthy());
+    // Copy left the key on the clipboard; Done replaces it with nothing.
+    await waitFor(() => expect(clipboard.at(-1)).toBe(""));
     const pending = server.calls.find((call) => call.url === "/api/integrations/xero/pending-credentials" && call.method === "PUT");
     const sent = JSON.parse(pending!.body!);
     expect(Object.keys(sent).sort()).toEqual(["clientId", "clientSecret", "keyId"]);
@@ -263,6 +265,32 @@ describe("Connect Xero wizard", () => {
     show();
     expect(await screen.findByText(/Encryption key: not set/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Connect Xero|Generate key/ })).toBeNull();
+  });
+
+  it("a wrong FIELD_SECRETS_KEY_PREVIOUS: says to fix it, and offers no new key", async () => {
+    const server = fakeServer(integration({
+      secretsKey: { configured: false, problem: "SECRETS_KEY_PREVIOUS_INVALID", keyId: null, previousKeys: 0 },
+      setup: { orgUid: ORG_UID, step: "credentials", pending: null, problem: null },
+      credentials: { ...integration().credentials, source: null, problem: "SECRETS_KEY_PREVIOUS_INVALID", environmentOverride: true },
+    }));
+    vi.stubGlobal("fetch", server.fetchMock);
+    show();
+    const three = await screen.findByRole("region", { name: "3. Your encryption key" });
+    expect(within(three).getByText("Your previous key setting is wrong: fix FIELD_SECRETS_KEY_PREVIOUS.")).toBeTruthy();
+    expect(within(three).queryByRole("button", { name: /Generate key/ })).toBeNull();
+  });
+
+  it("an unusable FIELD_SECRETS_KEY: says so, and the key made here replaces it", async () => {
+    const server = fakeServer(integration({
+      secretsKey: { configured: false, problem: "SECRETS_KEY_INVALID", keyId: null, previousKeys: 0 },
+      setup: { orgUid: ORG_UID, step: "app", pending: null, problem: null },
+      credentials: { ...integration().credentials, environmentOverride: true },
+    }));
+    vi.stubGlobal("fetch", server.fetchMock);
+    show();
+    const three = await screen.findByRole("region", { name: "3. Your encryption key" });
+    expect(within(three).getByText(/cannot be used: it is too short to be a key/)).toBeTruthy();
+    expect(within(three).getByRole("button", { name: /Generate key/ })).toBeTruthy();
   });
 
   it("resumes where the server says", () => {
