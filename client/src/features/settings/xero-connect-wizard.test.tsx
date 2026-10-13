@@ -117,7 +117,6 @@ describe("Connect Xero wizard", () => {
     vi.stubGlobal("fetch", server.fetchMock);
     show();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Connect Xero/ }));
     // Step 1: every value to type into Xero, from publicUrl.
     const one = await screen.findByRole("region", { name: "1. Create your Xero app" });
     expect(within(one).getByText(REDIRECT)).toBeTruthy();
@@ -259,11 +258,12 @@ describe("Connect Xero wizard", () => {
     expect(server.calls.some((call) => call.url.includes("pending-credentials") || call.url.includes("secrets-key"))).toBe(false);
   });
 
-  it("someone who is not an owner sees only whether the key is set, and no wizard", async () => {
+  it("someone who is not an owner sees the status only, and no wizard or key", async () => {
     const server = fakeServer(integration({ canManage: false, setup: null }));
     vi.stubGlobal("fetch", server.fetchMock);
     show();
-    expect(await screen.findByText(/Encryption key: not set/)).toBeTruthy();
+    expect(await screen.findByText("Not connected")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/FIELD_SECRETS_KEY|encryption key/i);
     expect(screen.queryByRole("button", { name: /Connect Xero|Generate key/ })).toBeNull();
   });
 

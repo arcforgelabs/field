@@ -15,8 +15,9 @@ from this page. What every integration shares (the
 ## Connect Xero
 
 You need a Xero login that can manage the organisation, and owner access to
-Field. In Field, open Settings, Integrations, Xero and press **Connect
-Xero**. A wizard of four steps opens. Everyone else sees only the status.
+Field. In Field, open Settings, Integrations. Xero is the first card in the
+catalogue: press it, or its **+**. A wizard of four steps opens. Everyone
+else sees only the status.
 
 1. **Create your Xero app.** The wizard lists every value to type at
    [developer.xero.com/app/manage](https://developer.xero.com/app/manage),
@@ -58,7 +59,7 @@ Xero**. A wizard of four steps opens. Everyone else sees only the status.
 
 The wizard's place is kept on the server (`integration_setup`), so it
 survives a republish; the key never is. Every step writes an audit event,
-without a value. Close the wizard at any time; Connect Xero opens it again
+without a value. Close the wizard at any time; Xero's card opens it again
 where you were.
 
 A self-hoster can instead set `XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` as
@@ -76,19 +77,25 @@ connection, and a few calls for each invoice.
 
 ## What the screen does
 
-Everyone who can open Settings sees Settings, Integrations, Xero. Only owners
-can change anything; the server checks the owner on every route that does.
-Everyone else sees it read-only, without who changed what or the history.
-API and MCP tokens get nothing here unless their permissions include
-`integrations:read` (`docs/INTEGRATIONS.md`).
+Settings, Integrations is a catalogue: a card for each integration, with a
+search box and **Connected** and **Browse** tabs. A connected card shows a
+check; an owner sees **+** on the others. The catalogue shows no credential,
+key or warning: those are on the integration's own screen.
 
-- **App credentials.** The Xero app's client id and client secret:
-  write-only, with **Replace** and **Remove**, and the recent changes (who
-  and when). Removing them disconnects Xero first.
+Everyone who can open Settings can open Xero's card. Only owners can change
+anything; the server checks the owner on every route that does. Everyone
+else sees "Connected to <organisation>" (or "Not connected") read-only,
+without who changed what or the history. API and MCP tokens get nothing
+here unless their permissions include `integrations:read`
+(`docs/INTEGRATIONS.md`).
 
-- **Connection.** Connect Xero (the wizard above), the organisation, Connect again, and Disconnect.
-  Disconnect revokes Field's sign-in at Xero and forgets it. Invoices already
-  in Xero stay there. The settings are kept.
+Connected, Xero's card opens "Connected to <organisation>", with **Connect
+again** when Xero needs it and the codes' warnings. **Configure** shows:
+
+- **Connection.** Connect (the wizard above), the organisation, Connect
+  again, and Disconnect (under Advanced). Disconnect revokes Field's sign-in
+  at Xero and forgets it. Invoices already in Xero stay there. The settings
+  are kept.
 - **Create in Xero:**
   - **Off.** Field creates nothing in Xero.
   - **Draft invoice.** This is the default. Xero status `DRAFT`.
@@ -110,6 +117,11 @@ API and MCP tokens get nothing here unless their permissions include
   chooses codes it has. If Xero cannot be read for the check, invoices keep
   waiting, the screen says so, and Field checks again on each pass. Lines without GST use `EXEMPTOUTPUT` ("GST Free
   Income").
+- **Invoices issued before.** Preview and send them (below).
+- **Advanced**, closed until opened: the app credentials (client id and
+  client secret: write-only, with **Replace app credentials** and
+  **Remove**, and the recent changes, who and when; removing them
+  disconnects Xero first), the encryption key's id, and **Disconnect**.
 
 Only invoices issued after Create in Xero is turned on go to Xero by
 themselves. Invoices issued before that, or while it was Off, go only when an
