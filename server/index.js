@@ -70,11 +70,13 @@ import { applyStoredGmailOAuthUsers, saveGmailOAuthUser } from "./gmail-oauth-st
 import { hasGoogleServiceAccountKey } from "./google-service-account.js";
 import {
   initFieldSentry,
+  reportBackgroundError,
   sentryBrowserBootstrapScript,
   sentryErrorResponseReporter,
   sentryPublicStatus,
   setupSentryExpress,
 } from "./observability/sentry.js";
+import { JOB_LIST_PER_JOB_MS, listJobsWithinDeadline, withDeadline } from "./job-list-guard.js";
 import { assertCommit, assertDigest, assertVerificationConfig } from "../scripts/verification/contract.js";
 import { ensureVerificationFixtureState } from "../scripts/verification/start.js";
 import { uploadMoasureBatchToDrive, getDriveClient } from "./drive-upload.js";
@@ -1548,16 +1550,28 @@ async function listIndexedJobRows(reason) {
 
 // List jobs
 app.get("/api/jobs", requireAuth, async (_req, res) => {
-  // Fast path: read from DB
+  // Fast path: read from DB. Every step has a time limit
+  // (server/job-list-guard.js): a job whose files cannot be read in time is
+  // left out and reported, so one stuck read never hangs the whole board.
   if (fieldDb) {
     try {
-      const rows = await listIndexedJobRows("job list");
-      const deletionDeps = await buildJobListDeletionDeps();
-      const jobs = [];
-      for (const row of rows) {
-        const meta = await readNormalizedJobMeta(row.dir);
-        if (meta) jobs.push(await listJobWithDeletable(row.dir, meta, deletionDeps));
-      }
+      const rows = await withDeadline(listIndexedJobRows("job list"), JOB_LIST_PER_JOB_MS, "index")
+        .catch((error) => {
+          if (error?.code !== "FIELD_JOB_LIST_TIMEOUT") throw error;
+          reportJobListSkip({ id: null, step: "index", reason: "timeout" }, error);
+          return listJobsFromDb(fieldDb);
+        });
+      const deletionDeps = await withDeadline(buildJobListDeletionDeps(), JOB_LIST_PER_JOB_MS, "scheduled emails")
+        .catch((error) => {
+          reportJobListSkip({ id: null, step: "scheduled emails", reason: error?.code === "FIELD_JOB_LIST_TIMEOUT" ? "timeout" : "error" }, error);
+          return { ...jobDeletionDeps(), listScheduledEmails: async () => [] };
+        });
+      const { jobs, skipped } = await listJobsWithinDeadline(rows, {
+        readMeta: (row) => readNormalizedJobMeta(row.dir),
+        listJob: (row, meta) => listJobWithDeletable(row.dir, meta, deletionDeps),
+        onSkip: reportJobListSkip,
+      });
+      if (skipped.length) res.set("X-Field-Jobs-Skipped", String(skipped.length));
       return res.json(jobs);
     } catch { /* fall through to directory scan */ }
   }
@@ -1583,6 +1597,18 @@ app.get("/api/jobs", requireAuth, async (_req, res) => {
   } catch { /* empty data dir */ }
   res.json(jobs);
 });
+
+// One line and one Sentry event per job left out of the list: the job id and
+// the step, never its folder (older folders are named after the site address).
+function reportJobListSkip(entry, error) {
+  console.warn(`[jobs] job list left out ${entry.id ? `job ${entry.id}` : "a step"}: ${entry.step} ${entry.reason}`);
+  reportBackgroundError(error instanceof Error ? error : new Error(`job list ${entry.step} ${entry.reason}`), {
+    area: "job-list",
+    step: entry.step,
+    reason: entry.reason,
+    job: entry.id || undefined,
+  });
+}
 
 // The list only needs a yes/no, so the assessment stops at the first reason;
 // most jobs are ruled out by their meta alone without reading more files.
