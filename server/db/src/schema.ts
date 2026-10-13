@@ -2157,7 +2157,9 @@ export type IntegrationCredential = typeof integrationCredentials.$inferSelect;
 
 /**
  * Who changed an integration and when (#112): credentials set, replaced or
- * removed, connected, disconnected. Append-only, and never a value.
+ * removed, connected, disconnected; and the Connect wizard's steps (a step
+ * reached, a key generated in the browser, pending credentials stored,
+ * promoted or discarded). Append-only, and never a value.
  */
 export const integrationAuditEvents = pgTable(
   "integration_audit_events",
@@ -2173,9 +2175,48 @@ export const integrationAuditEvents = pgTable(
   },
   (t) => [
     index("integration_audit_events_org_integration_idx").on(t.orgUid, t.integration, t.at),
-    check("integration_audit_events_action_check", sql`${t.action} in ('credentials_set','credentials_replaced','credentials_removed','connected','disconnected','tokens_rewrapped','tokens_unreadable')`),
+    check("integration_audit_events_action_check", sql`${t.action} in ('credentials_set','credentials_replaced','credentials_removed','connected','disconnected','tokens_rewrapped','tokens_unreadable','setup_step','secrets_key_generated','pending_credentials_stored','pending_credentials_promoted','pending_credentials_discarded')`),
     tenantIsolation("integration_audit_events"),
   ],
 );
 
 export type IntegrationAuditEvent = typeof integrationAuditEvents.$inferSelect;
+
+/**
+ * Where an owner is in an integration's Connect wizard, per organisation
+ * (Xero first). It survives a republish, so the wizard resumes where it was.
+ *
+ * Pending credentials: when FIELD_SECRETS_KEY is not set yet, the browser
+ * generates the key and encrypts the app's credentials with it before it
+ * sends them (shared/secrets-web.js). Only those `fs1` values and the key's
+ * id are stored here, never the key or a plain value. Once the deployment
+ * has the key, Field reads them and moves them into integration_credentials
+ * (server/secrets/setup.js), with an audit event.
+ */
+export const integrationSetup = pgTable(
+  "integration_setup",
+  {
+    orgUid: orgUid(),
+    integration: text("integration").notNull(),
+    /** The step reached: app (the Xero app is made), credentials, key (pending credentials stored), connect. */
+    step: text("step").notNull(),
+    /** { field: "fs1...." }, written by the browser with a key the server does not have yet. */
+    pendingValues: jsonb("pending_values").$type<Record<string, string>>(),
+    /** The id of the key the browser generated (a hash of it, never the key). */
+    pendingKeyId: text("pending_key_id"),
+    pendingAt: timestamp("pending_at", { withTimezone: true, mode: "date" }),
+    pendingBy: text("pending_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgUid, t.integration] }),
+    check("integration_setup_integration_check", sql`${t.integration} ~ '^[a-z0-9_]{1,40}$'`),
+    check("integration_setup_step_check", sql`${t.step} in ('app','credentials','key','connect')`),
+    check("integration_setup_key_id_check", sql`${t.pendingKeyId} is null or ${t.pendingKeyId} ~ '^[0-9a-f]{12}$'`),
+    check("integration_setup_pending_check", sql`(${t.pendingValues} is null) = (${t.pendingKeyId} is null)`),
+    tenantIsolation("integration_setup"),
+  ],
+);
+
+export type IntegrationSetup = typeof integrationSetup.$inferSelect;

@@ -48,19 +48,21 @@ function show(initial = "/settings?section=integrations") {
 afterEach(() => vi.restoreAllMocks());
 
 describe("XeroPanel", () => {
-  it("shows the install steps, the redirect address, and whether each credential is set, by whom and when, never a value", async () => {
+  it("shows whether each credential is set, by whom and when, never a value; Connect Xero opens the wizard at the app's addresses", async () => {
     vi.spyOn(api, "xeroIntegration").mockResolvedValue(integration({
       credentials: { ...integration().credentials, source: null, problem: "XERO_CREDENTIALS_MISSING", settings: { clientId: { set: true, setAt: "2026-10-13T00:00:00.000Z", setBy: "Owner Person" }, clientSecret: { set: false, setAt: null, setBy: null } } },
     }));
     show();
-    await waitFor(() => expect(screen.getByText(REDIRECT)).toBeTruthy());
-    const credentials = screen.getByRole("group", { name: "App credentials" }) ?? null;
-    expect(credentials).toBeTruthy();
-    expect(screen.getByText(/last changed by Owner Person on/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/last changed by Owner Person on/)).toBeTruthy());
+    expect(screen.getByRole("group", { name: "App credentials" })).toBeTruthy();
     expect(screen.getByText("Not set")).toBeTruthy();
-    expect((screen.getByRole("button", { name: /Connect to Xero/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Not connected")).toBeTruthy();
+    expect(screen.getByText(/Encryption key: set \(id abc123def456\)/)).toBeTruthy();
     expect(screen.getByText(/Email from Xero is coming later/)).toBeTruthy();
+    expect(screen.queryByText(REDIRECT)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Connect Xero/ }));
+    expect(await screen.findByText(REDIRECT)).toBeTruthy();
+    expect(screen.getByRole("region", { name: "1. Create your Xero app" })).toBeTruthy();
   });
 
   it("credentials are write-only: entered in a form, sent once, and never shown back", async () => {
@@ -101,29 +103,30 @@ describe("XeroPanel", () => {
     await waitFor(() => expect(screen.getByText(/so Field uses those\. Credentials saved here are kept but not used/)).toBeTruthy());
   });
 
-  it("without FIELD_SECRETS_KEY nothing can be entered or connected, and the screen says why", async () => {
+  it("without FIELD_SECRETS_KEY nothing can be entered, and the screen points the owner to Connect Xero", async () => {
     vi.spyOn(api, "xeroIntegration").mockResolvedValue(integration({ secretsKey: { configured: false, problem: "SECRETS_KEY_MISSING", keyId: null, previousKeys: 0 } }));
     show();
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/FIELD_SECRETS_KEY is not set/));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/FIELD_SECRETS_KEY, the encryption key, is not set.*Press Connect Xero/));
     expect((screen.getByRole("button", { name: /Replace/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: /Connect to Xero/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Encryption key: not set/)).toBeTruthy();
   });
 
-  it("without publicUrl: says to set it, shows no address, and Connect stays off", async () => {
-    vi.spyOn(api, "xeroIntegration").mockResolvedValue(integration({ publicUrlConfigured: false, redirectUri: null }));
+  it("without publicUrl: the wizard says to set it, shows no address, and stays at step 1", async () => {
+    vi.spyOn(api, "xeroIntegration").mockResolvedValue(integration({ publicUrlConfigured: false, redirectUri: null, appUrl: null, credentials: { ...integration().credentials, source: null, problem: "XERO_CREDENTIALS_MISSING" } }));
     show();
-    await waitFor(() => expect(screen.getByRole("note").textContent).toMatch(/Connect stays off until it is set/));
+    fireEvent.click(await screen.findByRole("button", { name: /Connect Xero/ }));
+    await waitFor(() => expect(screen.getByRole("note").textContent).toMatch(/does not know its own address yet/));
     expect(screen.queryByText(REDIRECT)).toBeNull();
-    expect(screen.queryByRole("button", { name: /Copy/ })).toBeNull();
-    expect((screen.getByRole("button", { name: /Connect to Xero/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("Connect sends the owner to Xero's sign-in address", async () => {
+  it("Connect sends the owner to Xero's sign-in address (wizard step 4, with the key and credentials set)", async () => {
     vi.spyOn(api, "xeroIntegration").mockResolvedValue(integration());
     const connect = vi.spyOn(api, "connectXero").mockResolvedValue({ ok: true, url: "https://login.example.invalid/authorize" });
     const assign = vi.fn();
     vi.stubGlobal("location", { ...window.location, assign });
     show();
+    fireEvent.click(await screen.findByRole("button", { name: /Connect Xero/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Connect to Xero/ }));
     await waitFor(() => expect(assign).toHaveBeenCalledWith("https://login.example.invalid/authorize"));
     expect(connect).toHaveBeenCalled();

@@ -1,26 +1,29 @@
-name: Release publish
-run-name: Release ${{ inputs.tag }}
+name: Field Release Publish
+run-name: field ${{ inputs.tag }}
 
-# Publishes one release tag (docs/RELEASING.md). release-prepare.yml starts
-# it after it creates the tag; it can also be started by hand for an existing
-# tag, which re-runs the checks and skips what is already published.
+# Publishes one release tag (docs/RELEASING.md). Field Release Prepare
+# starts it after it creates the tag; it can also be started by hand for an
+# existing tag, which re-runs the checks and skips what is already published.
 #
-#   checks          release-checks.yml: tag, every CI lane, npm tarball
-#   npm             npm-publish environment (Samuel approves): trusted
-#                   publishing with provenance, no stored token
-#   image           release environment (Samuel approves): GHCR by digest,
-#                   build attestation and SBOM, smoke of the pushed digest
-#   github-release  GitHub Release with notes, manifest and .sha256 files
-#   evidence        verifies what was published and attaches the result
+#   checks          field-release-checks.yml: tag, every CI lane, npm tarball
+#   image           environment release (Samuel approves): GHCR by digest,
+#                   build attestation and SBOM, smoke of the pushed digest,
+#                   then the channel's tags
+#   github-release  GitHub Release "field <version>" with notes, manifest and
+#                   .sha256 files
+#   npm             starts Field NPM Release (field-npm-release.yml) for the
+#                   tarball this run proved; it publishes after its own
+#                   approval
 #
-# A beta goes straight to the beta channel. A stable release publishes to npm
-# `next` and GHCR's version tag only; release-promote.yml makes it `latest`.
+# Channels follow openclaw/openclaw: a beta (vYYYY.M.D-beta.N) goes to npm and
+# GHCR `beta` and a GitHub pre-release; a stable release (vYYYY.M.D) goes to
+# npm `latest`, GHCR `stable` and `latest`, and GitHub's latest release.
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v2026.10.14-beta.1
+        description: Release tag, for example v2026.10.15-beta.1
         required: true
         type: string
 
@@ -28,13 +31,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-publish-${{ inputs.tag }}
+  group: field-release-publish-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
   NODE_VERSION: "24"
-  # The first npm CLI that can also move dist-tags through trusted publishing.
-  NPM_VERSION: "11.21.0"
   PACKAGE: "@arcforgelabs/field"
   IMAGE: ghcr.io/arcforgelabs/field
 
@@ -47,99 +48,15 @@ jobs:
       - name: Require the workflow from main
         if: github.ref != 'refs/heads/main'
         run: |
-          echo "::error::Run Release publish from main, not ${GITHUB_REF}." >&2
+          echo "::error::Run Field Release Publish from main, not ${GITHUB_REF}." >&2
           exit 1
 
   checks:
     name: checks
     needs: guard
-    uses: ./.github/workflows/release-checks.yml
+    uses: ./.github/workflows/field-release-checks.yml
     with:
       tag: ${{ inputs.tag }}
-
-  npm:
-    name: npm
-    needs: checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment:
-      name: npm-publish
-      url: https://www.npmjs.com/package/@arcforgelabs/field/v/${{ needs.checks.outputs.version }}
-    permissions:
-      contents: read
-      # Trusted publishing: npm exchanges GitHub's OIDC token for a
-      # short-lived publish token and signs SLSA provenance for this run.
-      # Do not set NODE_AUTH_TOKEN or a registry-url: npm would use that
-      # instead of OIDC.
-      id-token: write
-    outputs:
-      integrity: ${{ steps.verify.outputs.integrity }}
-      shasum: ${{ steps.verify.outputs.shasum }}
-    steps:
-      - name: Fetch the tarball release-checks proved
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: npm-package
-          path: package
-
-      - name: Require the same bytes
-        working-directory: package
-        env:
-          TARBALL: ${{ needs.checks.outputs.tarball }}
-          EXPECTED: ${{ needs.checks.outputs.tarball_sha256 }}
-        run: |
-          set -euo pipefail
-          echo "${EXPECTED}  ${TARBALL}" | sha256sum -c -
-
-      - name: Set up Node and npm
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install npm ${{ env.NPM_VERSION }}
-        run: npm install -g "npm@${NPM_VERSION}" && npm --version
-
-      - name: Publish to npm
-        working-directory: package
-        env:
-          TARBALL: ${{ needs.checks.outputs.tarball }}
-          VERSION: ${{ needs.checks.outputs.version }}
-          DIST_TAG: ${{ needs.checks.outputs.npm_dist_tag }}
-        run: |
-          set -euo pipefail
-          local_integrity="sha512-$(openssl dgst -sha512 -binary "$TARBALL" | base64 -w0)"
-          published="$(npm view "${PACKAGE}@${VERSION}" dist.integrity 2>/dev/null || true)"
-          if [[ -n "$published" ]]; then
-            if [[ "$published" != "$local_integrity" ]]; then
-              echo "::error::${PACKAGE}@${VERSION} is already on npm with different bytes (${published}). A version is never republished; cut a new tag." >&2
-              exit 1
-            fi
-            echo "${PACKAGE}@${VERSION} is already on npm with these bytes; not publishing again."
-            exit 0
-          fi
-          npm publish "./${TARBALL}" --access public --tag "$DIST_TAG" --provenance
-
-      - name: Read back what npm serves
-        id: verify
-        working-directory: package
-        env:
-          TARBALL: ${{ needs.checks.outputs.tarball }}
-          VERSION: ${{ needs.checks.outputs.version }}
-        run: |
-          set -euo pipefail
-          local_integrity="sha512-$(openssl dgst -sha512 -binary "$TARBALL" | base64 -w0)"
-          for _ in $(seq 1 30); do
-            integrity="$(npm view "${PACKAGE}@${VERSION}" dist.integrity 2>/dev/null || true)"
-            [[ -n "$integrity" ]] && break
-            sleep 5
-          done
-          if [[ "$integrity" != "$local_integrity" ]]; then
-            echo "::error::npm serves ${integrity:-nothing} for ${PACKAGE}@${VERSION}; expected ${local_integrity}." >&2
-            exit 1
-          fi
-          echo "integrity=${integrity}" >> "$GITHUB_OUTPUT"
-          echo "shasum=$(npm view "${PACKAGE}@${VERSION}" dist.shasum)" >> "$GITHUB_OUTPUT"
-          echo "npm serves ${PACKAGE}@${VERSION} with ${integrity}" >> "$GITHUB_STEP_SUMMARY"
 
   image:
     name: image
@@ -245,7 +162,7 @@ jobs:
           npx --prefix e2e playwright install --with-deps chromium
           e2e/run-image-smoke.sh "${IMAGE}@${DIGEST}" "$COMMIT"
 
-      - name: Tag the verified digest
+      - name: Tag the verified digest for its channel
         id: channel
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
@@ -253,12 +170,16 @@ jobs:
           CHANNEL: ${{ needs.checks.outputs.channel }}
         run: |
           set -euo pipefail
-          args=(--tag "${IMAGE}:${VERSION}")
-          tags="[\"${VERSION}\"]"
+          # A beta moves `beta`; a stable release moves `stable` and `latest`,
+          # as npm's dist-tags do.
           if [[ "$CHANNEL" == "beta" ]]; then
-            args+=(--tag "${IMAGE}:beta")
-            tags="[\"${VERSION}\",\"beta\"]"
+            channel_tags=(beta)
+          else
+            channel_tags=(stable latest)
           fi
+          args=(--tag "${IMAGE}:${VERSION}")
+          for tag in "${channel_tags[@]}"; do args+=(--tag "${IMAGE}:${tag}"); done
+          tags="$(printf '%s\n' "$VERSION" "${channel_tags[@]}" | jq -R . | jq -sc .)"
           docker buildx imagetools create "${args[@]}" "${IMAGE}@${DIGEST}"
           echo "tags=${tags}" >> "$GITHUB_OUTPUT"
           echo "${IMAGE}@${DIGEST} tags: ${tags}" >> "$GITHUB_STEP_SUMMARY"
@@ -270,9 +191,10 @@ jobs:
           path: ${{ runner.temp }}/image
           retention-days: 30
 
+
   github-release:
     name: github-release
-    needs: [checks, npm, image]
+    needs: [checks, image]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -296,6 +218,9 @@ jobs:
           pattern: "{npm-package,image-sbom,sbom}"
           path: ${{ runner.temp }}/artifacts
 
+      # npm's integrity and shasum are the tarball's SHA-512 and SHA-1, so the
+      # manifest records them before npm publishes; Field NPM Release
+      # requires npm to serve exactly these.
       - name: Write release-manifest.json
         env:
           GH_TOKEN: ${{ github.token }}
@@ -303,13 +228,15 @@ jobs:
           COMMIT: ${{ needs.checks.outputs.commit }}
           TARBALL: ${{ needs.checks.outputs.tarball }}
           TARBALL_SHA256: ${{ needs.checks.outputs.tarball_sha256 }}
-          INTEGRITY: ${{ needs.npm.outputs.integrity }}
-          SHASUM: ${{ needs.npm.outputs.shasum }}
           DIGEST: ${{ needs.image.outputs.digest }}
           IMAGE_TAGS: ${{ needs.image.outputs.tags }}
         run: |
           set -euo pipefail
-          # Each lane of release-checks, by name, with its conclusion.
+          package_dir="$RUNNER_TEMP/artifacts/npm-package"
+          echo "${TARBALL_SHA256}  ${package_dir}/${TARBALL}" | sha256sum -c -
+          integrity="sha512-$(openssl dgst -sha512 -binary "${package_dir}/${TARBALL}" | base64 -w0)"
+          shasum="$(sha1sum "${package_dir}/${TARBALL}" | cut -d' ' -f1)"
+          # Each lane of field-release-checks, by name, with its conclusion.
           gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs" \
             --jq '.jobs[] | select(.name | startswith("checks / ")) | {(.name | sub("^checks / (ci / )?"; "")): .conclusion}' \
             | jq -s 'add' > "$RUNNER_TEMP/checks.json"
@@ -318,7 +245,7 @@ jobs:
             --arg run "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
             --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg node "$NODE_VERSION" \
             --slurpfile checks "$RUNNER_TEMP/checks.json" \
-            --arg package "$PACKAGE" --arg integrity "$INTEGRITY" --arg shasum "$SHASUM" \
+            --arg package "$PACKAGE" --arg integrity "$integrity" --arg shasum "$shasum" \
             --arg tarball "$TARBALL" --arg tarballSha256 "$TARBALL_SHA256" \
             --arg image "$IMAGE" --arg digest "$DIGEST" --argjson imageTags "$IMAGE_TAGS" \
             '{tag: $tag, commit: $commit, repository: $repository, workflowRun: $run, createdAt: $created, node: $node,
@@ -327,7 +254,7 @@ jobs:
               image: {ref: $image, digest: $digest, tags: $imageTags}}' > "$RUNNER_TEMP/facts.json"
           mkdir -p "$RUNNER_TEMP/assets"
           node scripts/release/release.mjs manifest --input "$RUNNER_TEMP/facts.json" \
-            --migrations "$RUNNER_TEMP/artifacts/npm-package/migrations.json" \
+            --migrations "${package_dir}/migrations.json" \
             --output "$RUNNER_TEMP/assets/release-manifest.json"
           jq . "$RUNNER_TEMP/assets/release-manifest.json"
 
@@ -346,8 +273,12 @@ jobs:
           cp "$RUNNER_TEMP/artifacts/sbom/field-server.cdx.json" "field-server-${VERSION}.cdx.json"
           cp "$RUNNER_TEMP/artifacts/sbom/field-client.cdx.json" "field-client-${VERSION}.cdx.json"
           for file in *; do sha256sum "$file" > "$file.sha256"; done
-          flags=(--verify-tag --title "Field ${VERSION}" --generate-notes --latest=false)
-          [[ "$CHANNEL" == "beta" ]] && flags+=(--prerelease)
+          flags=(--verify-tag --title "field ${VERSION}" --generate-notes)
+          if [[ "$CHANNEL" == "beta" ]]; then
+            flags+=(--prerelease --latest=false)
+          else
+            flags+=(--latest)
+          fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber ./*
           else
@@ -355,54 +286,28 @@ jobs:
           fi
           echo "Released ${TAG}: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
 
-  evidence:
-    name: evidence
-    needs: [checks, npm, image, github-release]
+  # npm trusted publishing names one workflow file, and checks the top-level
+  # workflow of a run, so the npm publish is its own workflow
+  # (field-npm-release.yml) rather than a job here. This starts it for the
+  # tarball this run proved.
+  npm:
+    name: npm
+    needs: [checks, github-release]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     permissions:
-      contents: write
+      actions: write
     steps:
-      - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install npm ${{ env.NPM_VERSION }}
-        run: npm install -g "npm@${NPM_VERSION}"
-
-      # What anyone can check from outside: the npm registry signature and
-      # provenance of the published version, and GitHub's attestation of the
-      # image digest.
-      - name: Verify the published release
+      - name: Start Field NPM Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
-          VERSION: ${{ needs.checks.outputs.version }}
-          DIGEST: ${{ needs.image.outputs.digest }}
         run: |
           set -euo pipefail
-          work="$(mktemp -d)"
-          (cd "$work" && npm init -y >/dev/null && npm install --omit=dev --ignore-scripts --no-audit --no-fund "${PACKAGE}@${VERSION}" >/dev/null)
-          (cd "$work" && npm audit signatures --json) > "$RUNNER_TEMP/npm-signatures.json" || {
-            cat "$RUNNER_TEMP/npm-signatures.json" >&2; exit 1; }
-          npm view "${PACKAGE}@${VERSION}" dist --json > "$RUNNER_TEMP/npm-dist.json"
-          jq -e '.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1"' "$RUNNER_TEMP/npm-dist.json" >/dev/null
-          gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo "$GITHUB_REPOSITORY" --format json > "$RUNNER_TEMP/image-attestation.json"
-          mkdir -p "$RUNNER_TEMP/evidence"
-          jq -n \
-            --arg tag "$TAG" --arg checkedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --slurpfile signatures "$RUNNER_TEMP/npm-signatures.json" \
-            --slurpfile dist "$RUNNER_TEMP/npm-dist.json" \
-            --slurpfile attestation "$RUNNER_TEMP/image-attestation.json" \
-            --arg image "${IMAGE}@${DIGEST}" \
-            '{tag: $tag, checkedAt: $checkedAt,
-              npm: {integrity: $dist[0].integrity, shasum: $dist[0].shasum, provenance: $dist[0].attestations.provenance.predicateType,
-                    auditSignatures: $signatures[0]},
-              image: {ref: $image, verifiedAttestations: ($attestation[0] | length),
-                      predicateTypes: ([$attestation[0][].verificationResult.statement.predicateType] | unique)}}' \
-            > "$RUNNER_TEMP/evidence/postpublish-evidence.json"
-          cd "$RUNNER_TEMP/evidence"
-          sha256sum postpublish-evidence.json > postpublish-evidence.json.sha256
-          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber postpublish-evidence.json postpublish-evidence.json.sha256
-          jq . postpublish-evidence.json >> "$GITHUB_STEP_SUMMARY"
+          gh workflow run field-npm-release.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f tag="$TAG" -f release_publish_run_id="$GITHUB_RUN_ID"
+          {
+            echo "Started Field NPM Release for ${TAG}."
+            echo "Approve its npm-release environment to publish:"
+            echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/field-npm-release.yml"
+          } >> "$GITHUB_STEP_SUMMARY"

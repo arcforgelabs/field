@@ -630,7 +630,7 @@ differences:**
 - `receipts` are one per payment. Today a receipt is issued for a milestone
   once it is paid in full. Its row is for the payment that cleared it, with
   the amount it acknowledges, and is voided if that payment is.
-**Built (step 4c, #29, migration `0021_milestone_rules`): milestone
+**Built (step 4c, #29, migration `0022_milestone_rules`): milestone
 rules.** The owner's decisions (2026-10-13): rules are settings, never
 code, so Field gives no legal or business advice; a rule set for a region is
 the organisation's and only an owner changes it, in Settings; a job's own
@@ -1012,7 +1012,7 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
 | 4a | Invoices, payments and receipts as rows (#27): `payment_milestones`, `invoices`, `invoice_lines`, `payments`, `receipts`, and the shape of `credit_notes` (migration 0013); dual-write after every committed milestone change; a backfill verified against what was issued | Built |
 | 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (revisions made in place before them stay as issued); issue separate from email; claim-line invoice documents | Built (issue service, migration 0014; credit notes, migrations 0015 and 0016; claim-line documents) |
-| 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Built (migration 0021) |
+| 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Built (migration 0022) |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
 How step 2 fills the tables:

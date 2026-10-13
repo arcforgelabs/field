@@ -6,47 +6,66 @@ its owner creates. There is no shared Field Xero app, so no one else ever
 holds your Xero sign-in.
 
 This guide uses `https://<your-field-host>` for your installation's address.
-Settings, Integrations, Xero shows your real values: the redirect address to
-paste into Xero, and whether each credential is set. Copy them from that
-screen, not from this page. What every integration shares (the
+The Connect Xero wizard shows your real values: the addresses to paste into
+Xero, and whether each credential is set. Copy them from that screen, not
+from this page. What every integration shares (the
 `FIELD_SECRETS_KEY` key, who may change what, audit events, rotation) is in
 `docs/INTEGRATIONS.md`.
 
-## Set up your Xero app
+## Connect Xero
 
 You need a Xero login that can manage the organisation, and owner access to
-Field. The installation needs `FIELD_SECRETS_KEY` set (`docs/INTEGRATIONS.md`).
+Field. In Field, open Settings, Integrations, Xero and press **Connect
+Xero**. A wizard of four steps opens. Everyone else sees only the status.
 
-1. Sign in at [developer.xero.com/app/manage](https://developer.xero.com/app/manage)
-   with your Xero login, and create a new app.
-2. Choose **Web app**: the authorization code flow, with a client secret. Do
-   not choose a PKCE (mobile or desktop) app or a custom connection.
-3. Give it a name, for example "Field", and your company's website.
-4. For the redirect address, paste the one that Settings, Integrations, Xero
-   shows. It has this form:
+1. **Create your Xero app.** The wizard lists every value to type at
+   [developer.xero.com/app/manage](https://developer.xero.com/app/manage),
+   each with **Copy**: the app name, the integration type (**Web app**), the
+   company or application URL (this installation's address), and the
+   redirect URI, which has this form:
 
    ```text
    https://<your-field-host>/api/integrations/xero/callback
    ```
 
-   Field builds it from the `publicUrl` in its configuration (on Replit, in
-   `FIELD_CONFIG_JSON`). Field never builds it from the address a request
-   came to, because a client controls that. Until `publicUrl` is set, the
-   screen asks for it and Connect stays off.
-5. In the app's configuration, copy the client id and generate a client
-   secret. Xero shows the secret once.
-6. In Field, open Settings, Integrations, Xero. Under **App credentials**,
-   press **Enter credentials**, paste the client id and the client secret,
-   and save. Field stores them encrypted and never shows them again; the
-   screen shows "Set · last changed by <you> on <date>".
+   Both addresses come from the `publicUrl` in Field's configuration (on
+   Replit, in `FIELD_CONFIG_JSON`). Field never builds them from the address
+   a request came to, because a client controls that (#94). Until
+   `publicUrl` is set, the wizard asks for it and stays at step 1. "More
+   detail" lists the scopes Field asks for, and why a Web app (the
+   authorization code flow with a client secret; not a mobile or desktop
+   app, and not a custom connection).
+2. **Paste what Xero gave you.** In the app's Configuration, copy the client
+   id and generate a client secret (Xero shows it once), and paste both.
+   The wizard checks that each is one unbroken value of 8 to 200
+   characters, and says so, without blocking, when it is not the usual
+   shape (a client id is usually 32 letters and numbers, a client secret
+   48 characters).
+3. **Your encryption key**, only while `FIELD_SECRETS_KEY` is not usable.
+   The browser makes the key, shows it once, and encrypts the client id and
+   secret with it before they are sent: the client secret never sits on
+   the server unencrypted, and the key never reaches the server. Add the
+   key where Field runs (on Replit: Publishing, Adjust settings, Production
+   app secrets, Add deployment secret, `FIELD_SECRETS_KEY`, Republish) and
+   save it in your password manager. When Field is back, the wizard goes on
+   at step 4 by itself. Details: `docs/INTEGRATIONS.md`, "The key". With
+   the key already set, this step is skipped and the server encrypts the
+   credentials, as **Replace** does.
+4. **Connect.** Press **Connect to Xero**, sign in to Xero and allow access.
+   If your sign-in reaches more than one organisation, choose the one Field
+   writes to. Choose Draft invoice or Approved invoice, and press **Done**:
+   the screen shows "Connected to <organisation>".
 
-   A self-hoster can instead set `XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` as
-   deployment secrets and restart Field. When both are set they override the
-   credentials entered in Settings, and the screen says so.
-7. Press **Connect to Xero**, sign in to Xero, and allow access for your
-   organisation.
-8. If your Xero sign-in reaches more than one organisation, choose the one
-   Field writes to.
+The wizard's place is kept on the server (`integration_setup`), so it
+survives a republish; the key never is. Every step writes an audit event,
+without a value. Close the wizard at any time; Connect Xero opens it again
+where you were.
+
+A self-hoster can instead set `XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` as
+deployment secrets and restart Field. When both are set they override the
+credentials entered in Settings, the screen says so, and the wizard skips
+steps 2 and 3 (step 3 still makes the key when `FIELD_SECRETS_KEY` is not
+set, because Xero's sign-in is stored encrypted with it).
 
 Never paste the client secret into chat, an issue, a pull request or a file in
 the repository. Name the secret, never its value (`SECURITY.md`).
@@ -67,7 +86,7 @@ API and MCP tokens get nothing here unless their permissions include
   write-only, with **Replace** and **Remove**, and the recent changes (who
   and when). Removing them disconnects Xero first.
 
-- **Connection.** Connect, the organisation, Connect again, and Disconnect.
+- **Connection.** Connect Xero (the wizard above), the organisation, Connect again, and Disconnect.
   Disconnect revokes Field's sign-in at Xero and forgets it. Invoices already
   in Xero stay there. The settings are kept.
 - **Create in Xero:**
@@ -277,7 +296,7 @@ The screen shows **Connect again**, with the reason:
 | `XERO_REFRESH_REJECTED` | Xero refused the refresh token: it was revoked at Xero, or was not used for 60 days | Connect again |
 | `XERO_CLIENT_REJECTED` | Xero did not accept the app's client id and client secret | Check them (in Settings, or the environment override), then connect again |
 | `XERO_APP_CHANGED` | The credentials were replaced with another app's, so the earlier sign-in no longer applies | Connect again |
-| `SECRETS_KEY_MISSING`, `SECRETS_KEY_INVALID`, `SECRETS_KEY_PREVIOUS_INVALID`, `SECRETS_KEY_UNKNOWN`, `SECRET_UNREADABLE` | `FIELD_SECRETS_KEY` or `FIELD_SECRETS_KEY_PREVIOUS` is missing, not 32 bytes, or not the key that wrote the stored sign-in | Fix the key (`docs/INTEGRATIONS.md`). Field does not store this state: once the key is right, Xero is connected again by itself |
+| `SECRETS_KEY_MISSING`, `SECRETS_KEY_INVALID`, `SECRETS_KEY_PREVIOUS_INVALID`, `SECRETS_KEY_UNKNOWN`, `SECRET_UNREADABLE` | `FIELD_SECRETS_KEY` or `FIELD_SECRETS_KEY_PREVIOUS` is missing, too short, or not the key that wrote the stored sign-in | Fix the key (`docs/INTEGRATIONS.md`). Field does not store this state: once the key is right, Xero is connected again by itself |
 | `LEGACY_TOKENS_UNREADABLE` | The sign-in from the first Xero release could not be moved under `FIELD_SECRETS_KEY` | Connect again |
 | `XERO_FORBIDDEN`, `XERO_SCOPE_MISSING` | Xero refused the organisation, or the sign-in lacks a scope | Connect again, and allow access |
 

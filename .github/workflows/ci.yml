@@ -12,7 +12,7 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  # release-checks.yml runs every lane on the exact commit it releases.
+  # field-release-checks.yml runs every lane on the exact commit it releases.
   workflow_call:
     inputs:
       ref:
