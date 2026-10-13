@@ -92,29 +92,36 @@ export function createCredentialStore({ db, orgUid = undefined, keyring, now = (
 
     /**
      * Rotation: re-encrypt every value an earlier key wrote with the current
-     * key (FIELD_SECRETS_KEY_PREVIOUS still holds the earlier one). Returns
-     * how many were rewritten. A value no key can read is left, and counted.
+     * key (FIELD_SECRETS_KEY_PREVIOUS still holds the earlier one). Each value
+     * is written back only if it is still the one read, so an owner's Replace
+     * during a boot rotation is never overwritten. Returns how many were
+     * rewritten; a value no key can read is left, and counted.
+     * `beforeWrite` is for tests.
      */
-    async rewrap() {
-      if (!keyring.available) return { rewrapped: 0, unreadable: 0 };
+    async rewrap({ beforeWrite = null } = {}) {
+      if (!keyring.available) return { rewrapped: 0, unreadable: 0, changed: 0 };
       let rewrapped = 0;
       let unreadable = 0;
-      await scope.transaction(async (tx) => {
-        for (const row of await tx.select().from(integrationCredentials)) {
-          if (row.keyId === keyring.currentId) continue;
-          const sealed = box(row.integration);
-          try {
-            const valueEnc = sealed.seal(sealed.open(row.valueEnc, row.field), row.field);
-            await tx.update(integrationCredentials).set({ valueEnc, keyId: keyring.currentId })
-              .where(and(eq(integrationCredentials.integration, row.integration), eq(integrationCredentials.field, row.field)));
-            rewrapped += 1;
-          } catch {
-            unreadable += 1;
-          }
+      let changed = 0;
+      const stale = (await scope.transaction((tx) => tx.select().from(integrationCredentials))).filter((row) => row.keyId !== keyring.currentId);
+      for (const row of stale) {
+        const sealed = box(row.integration);
+        let valueEnc;
+        try {
+          valueEnc = sealed.seal(sealed.open(row.valueEnc, row.field), row.field);
+        } catch {
+          unreadable += 1;
+          continue;
         }
-      });
+        if (beforeWrite) await beforeWrite(row);
+        const written = await scope.transaction((tx) => tx.update(integrationCredentials).set({ valueEnc, keyId: keyring.currentId })
+          .where(and(eq(integrationCredentials.integration, row.integration), eq(integrationCredentials.field, row.field), eq(integrationCredentials.valueEnc, row.valueEnc)))
+          .returning({ field: integrationCredentials.field }));
+        if (written.length) rewrapped += 1;
+        else changed += 1;
+      }
       if (rewrapped || unreadable) logger.log?.(`[secrets] re-encrypted ${rewrapped} credential(s) with the current key${unreadable ? `; ${unreadable} could not be read with any key` : ""}`);
-      return { rewrapped, unreadable };
+      return { rewrapped, unreadable, changed };
     },
   };
 }

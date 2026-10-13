@@ -571,6 +571,7 @@ test("the sales account and GST tax type come from the organisation, and a saved
   const unchecked = await connection.updateSettings({ salesAccountCode: "4000" });
   assert.equal(unchecked.salesAccountCode, "4000");
   assert.match(unchecked.warning, /could not check these codes with Xero/);
+  assert.equal((await connection.state()).codesProblem, "XERO_CODES_UNCHECKED", "sends keep waiting until a real check passes");
   const fallback = await (async () => { xero.failNext({ method: "GET", match: /\/TaxRates$/, status: 503, times: 5 }); return connection.codes(); })();
   assert.deepEqual([fallback.available, fallback.code], [false, "XERO_UNAVAILABLE"]);
 });

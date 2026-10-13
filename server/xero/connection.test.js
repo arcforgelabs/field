@@ -369,3 +369,60 @@ test("without the secrets, Connect explains what to set", async () => {
   assert.equal(status.credentials.source, null);
   await assert.rejects(service.startConnect({ redirectUri: REDIRECT }), (error) => error.code === "XERO_CREDENTIALS_MISSING" && error.statusCode === 409);
 });
+
+test("a key problem is never stored: a mistyped FIELD_SECRETS_KEY_PREVIOUS fails closed, and fixing it recovers the connection", async () => {
+  const { service, make, rawRow } = await fresh();
+  await connect(service);
+  const typo = make(undefined, loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY, FIELD_SECRETS_KEY_PREVIOUS: `${TEST_SECRETS_KEY.slice(0, -4)}xx==` }));
+  const shown = await typo.status();
+  assert.equal(shown.connection.status, "needs_reconnect");
+  assert.equal(shown.connection.reconnectReason, "SECRETS_KEY_PREVIOUS_INVALID");
+  assert.equal((await typo.state()).status, "needs_reconnect", "the sync sends nothing");
+  await assert.rejects(typo.accessToken(), (error) => error.reconnect === true && error.code === "SECRETS_KEY_PREVIOUS_INVALID");
+  assert.equal((await rawRow()).status, "connected", "nothing stored");
+  // The key fixed: connected again, and the tokens move to the new key.
+  const fixed = make(undefined, loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY, FIELD_SECRETS_KEY_PREVIOUS: TEST_SECRETS_KEY }));
+  assert.equal((await fixed.status()).connection.status, "connected");
+  assert.deepEqual(await fixed.upgradeStoredTokens(), { outcome: "rewrapped" });
+  assert.equal((await fixed.accessToken()).tenantId, "aaaaaaaa-0000-0000-0000-000000000001");
+});
+
+test("a key problem is never stored: a new key set before the old one was kept fails closed, and adding the old one recovers it", async () => {
+  const { service, make, rawRow } = await fresh();
+  await connect(service);
+  const newOnly = make(undefined, loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY }));
+  assert.deepEqual(await newOnly.upgradeStoredTokens(), { outcome: "key_problem", code: "SECRETS_KEY_UNKNOWN" });
+  await assert.rejects(newOnly.accessToken(), (error) => error.code === "SECRETS_KEY_UNKNOWN");
+  await assert.rejects(newOnly.accessToken({ force: true }), (error) => error.code === "SECRETS_KEY_UNKNOWN");
+  assert.equal((await newOnly.status()).connection.reconnectReason, "SECRETS_KEY_UNKNOWN");
+  const row = await rawRow();
+  assert.equal(row.status, "connected", "nothing stored");
+  assert.ok(row.refresh_token_enc, "the tokens are kept");
+  const both = make(undefined, loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY, FIELD_SECRETS_KEY_PREVIOUS: TEST_SECRETS_KEY }));
+  assert.deepEqual(await both.upgradeStoredTokens(), { outcome: "rewrapped" });
+  assert.equal((await both.status()).connection.status, "connected");
+  assert.equal((await both.accessToken({ force: true })).tenantId, "aaaaaaaa-0000-0000-0000-000000000001", "a refresh works again");
+});
+
+test("a connection an earlier build marked for a key problem recovers once its tokens open again", async () => {
+  const { service, rawRow } = await fresh();
+  await connect(service);
+  await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update xero_connections set status = 'needs_reconnect', reconnect_reason = 'SECRETS_KEY_UNKNOWN'`));
+  assert.deepEqual(await service.upgradeStoredTokens(), { outcome: "recovered" });
+  const row = await rawRow();
+  assert.equal(row.status, "connected");
+  assert.equal(row.reconnect_reason, null);
+});
+
+test("the token upgrade locks the row and writes in the same transaction: two at once rewrap once", async () => {
+  const { service, make, rawRow } = await fresh();
+  await connect(service);
+  const rotated = () => make(undefined, loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY, FIELD_SECRETS_KEY_PREVIOUS: TEST_SECRETS_KEY }));
+  const outcomes = (await Promise.all([rotated().upgradeStoredTokens(), rotated().upgradeStoredTokens()])).map((result) => result.outcome).sort();
+  assert.deepEqual(outcomes, ["current", "rewrapped"]);
+  const events = await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => queryRows(sql`select count(*)::int as n from integration_audit_events where action = 'tokens_rewrapped'`, tx));
+  assert.equal(events[0].n, 1);
+  const after = rotated();
+  assert.equal((await after.accessToken()).tenantId, "aaaaaaaa-0000-0000-0000-000000000001");
+  assert.equal((await rawRow()).refresh_token_enc.split(".")[1], loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY }).currentId);
+});

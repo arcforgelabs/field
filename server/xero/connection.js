@@ -236,11 +236,35 @@ export function createXeroConnectionService({
     logger.warn?.(`[xero] the connection needs the owner to connect again (${code})`);
   }
 
-  // A connection the key cannot serve fails closed: it needs reconnecting.
-  async function failClosedIfNoKey(row) {
-    if (keyring.available || !row || !["connected", "choose_organisation"].includes(row.status)) return false;
-    await markNeedsReconnect(keyring.problem || "SECRETS_KEY_MISSING");
-    return true;
+  // Problems with FIELD_SECRETS_KEY are never stored: they are worked out on
+  // each call, so fixing the key (a mistyped FIELD_SECRETS_KEY_PREVIOUS, a new
+  // key set before the old one was kept) recovers the connection by itself.
+  // Until then it fails closed: shown as needing reconnect, nothing is sent.
+  const KEY_CODES = new Set(["SECRETS_KEY_MISSING", "SECRETS_KEY_INVALID", "SECRETS_KEY_PREVIOUS_INVALID", "SECRETS_KEY_UNKNOWN", "SECRET_UNREADABLE"]);
+
+  function keyProblemFor(row) {
+    if (!row || !["connected", "choose_organisation"].includes(row.status)) return null;
+    if (!keyring.available) return keyring.problem || "SECRETS_KEY_MISSING";
+    for (const [value, field] of [[row.refreshTokenEnc, "refresh_token"], [row.accessTokenEnc, "access_token"]]) {
+      if (!value || !isSealed(value)) continue;
+      try {
+        box.open(value, field);
+      } catch (error) {
+        return reconnectCode(error);
+      }
+    }
+    return null;
+  }
+
+  // The row as the screen and the sync see it: a key problem shows as
+  // needing reconnect, with its reason, without being stored.
+  function presented(row) {
+    const problem = keyProblemFor(row);
+    return problem ? { ...row, status: "needs_reconnect", reconnectReason: problem } : row;
+  }
+
+  function keyError(code) {
+    return new XeroError(code, RECONNECT_MESSAGES[code] || RECONNECT_MESSAGES.TOKEN_DECRYPT_FAILED, { reconnect: true });
   }
 
   function notify(event) {
@@ -258,8 +282,7 @@ export function createXeroConnectionService({
   return {
     /** The connection, credentials and settings for the Settings screen. Never a token or a credential. */
     async status() {
-      let row = await scope.transaction(read);
-      if (await failClosedIfNoKey(row)) row = await scope.transaction(read);
+      const row = presented(await scope.transaction(read));
       const creds = override.configured ? { source: "environment" } : await credentials();
       return {
         secretsKey: keyring.status(),
@@ -287,7 +310,7 @@ export function createXeroConnectionService({
 
     /** The raw connection state the invoice sync reads (no tokens). */
     async state() {
-      const row = await scope.transaction(read);
+      const row = presented(await scope.transaction(read));
       return {
         status: row?.status || "disconnected",
         tenantId: row?.tenantId || null,
@@ -343,45 +366,56 @@ export function createXeroConnectionService({
      * current one (rotation). Run at boot. Never throws.
      */
     async upgradeStoredTokens() {
+      const audits = [];
       try {
-        const row = await scope.transaction(read);
-        if (!row || (!row.refreshTokenEnc && !row.accessTokenEnc) || !keyring.available) return { outcome: "nothing" };
-        const legacy = (value) => typeof value === "string" && value.startsWith("v1.");
-        if (legacy(row.refreshTokenEnc) || legacy(row.accessTokenEnc)) {
-          try {
-            if (!override.clientSecret) throw new Error("no legacy key");
-            const old = createTokenCipher({ clientSecret: override.clientSecret, orgUid: scope.orgUid });
-            const values = {
-              refreshTokenEnc: row.refreshTokenEnc ? box.seal(old.decrypt(row.refreshTokenEnc, "refresh_token"), "refresh_token") : null,
-              accessTokenEnc: row.accessTokenEnc ? box.seal(old.decrypt(row.accessTokenEnc, "access_token"), "access_token") : null,
-              keyFingerprint: null,
-            };
-            await scope.transaction((tx) => upsert(tx, values));
-            await audit("tokens_rewrapped", null, { from: "xero-client-secret" });
-            logger.log?.("[xero] the stored sign-in was re-encrypted under FIELD_SECRETS_KEY");
-            return { outcome: "rewrapped" };
-          } catch {
-            await scope.transaction((tx) => upsert(tx, { status: row.status === "disconnected" ? "disconnected" : "needs_reconnect", reconnectReason: "LEGACY_TOKENS_UNREADABLE", accessTokenEnc: null, refreshTokenEnc: null, accessExpiresAt: null, keyFingerprint: null }));
-            await audit("tokens_unreadable", null, { code: "LEGACY_TOKENS_UNREADABLE" });
-            logger.warn?.("[xero] the sign-in stored by an earlier release could not be re-encrypted (LEGACY_TOKENS_UNREADABLE); the owner connects again");
-            return { outcome: "needs_reconnect" };
+        // One transaction, the row locked (FOR UPDATE), as refreshNow does: a
+        // refresh on another server waits, and never loses its new token to
+        // this rewrite of an older one.
+        const result = await scope.transaction(async (tx) => {
+          const [row] = await tx.select().from(xeroConnections).for("update");
+          if (!row || (!row.refreshTokenEnc && !row.accessTokenEnc) || !keyring.available) return { outcome: "nothing" };
+          const legacy = (value) => typeof value === "string" && value.startsWith("v1.");
+          if (legacy(row.refreshTokenEnc) || legacy(row.accessTokenEnc)) {
+            try {
+              if (!override.clientSecret) throw new Error("no legacy key");
+              const old = createTokenCipher({ clientSecret: override.clientSecret, orgUid: scope.orgUid });
+              await upsert(tx, {
+                refreshTokenEnc: row.refreshTokenEnc ? box.seal(old.decrypt(row.refreshTokenEnc, "refresh_token"), "refresh_token") : null,
+                accessTokenEnc: row.accessTokenEnc ? box.seal(old.decrypt(row.accessTokenEnc, "access_token"), "access_token") : null,
+                keyFingerprint: null,
+              });
+              audits.push(["tokens_rewrapped", { from: "xero-client-secret" }]);
+              return { outcome: "rewrapped" };
+            } catch {
+              await upsert(tx, { status: row.status === "disconnected" ? "disconnected" : "needs_reconnect", reconnectReason: "LEGACY_TOKENS_UNREADABLE", accessTokenEnc: null, refreshTokenEnc: null, accessExpiresAt: null, keyFingerprint: null });
+              audits.push(["tokens_unreadable", { code: "LEGACY_TOKENS_UNREADABLE" }]);
+              return { outcome: "needs_reconnect" };
+            }
           }
-        }
-        if (box.isStale(row.refreshTokenEnc) || box.isStale(row.accessTokenEnc)) {
+          let values;
           try {
-            const values = {
-              refreshTokenEnc: row.refreshTokenEnc ? box.seal(box.open(row.refreshTokenEnc, "refresh_token"), "refresh_token") : null,
-              accessTokenEnc: row.accessTokenEnc ? box.seal(box.open(row.accessTokenEnc, "access_token"), "access_token") : null,
+            values = {
+              refreshTokenEnc: row.refreshTokenEnc && box.isStale(row.refreshTokenEnc) ? box.seal(box.open(row.refreshTokenEnc, "refresh_token"), "refresh_token") : row.refreshTokenEnc,
+              accessTokenEnc: row.accessTokenEnc && box.isStale(row.accessTokenEnc) ? box.seal(box.open(row.accessTokenEnc, "access_token"), "access_token") : row.accessTokenEnc,
             };
-            await scope.transaction((tx) => upsert(tx, values));
-            await audit("tokens_rewrapped", null, { from: "previous-key" });
-            return { outcome: "rewrapped" };
           } catch (error) {
-            await markNeedsReconnect(reconnectCode(error));
-            return { outcome: "needs_reconnect" };
+            // A key problem: nothing is stored; the connection shows it until the key is fixed.
+            return { outcome: "key_problem", code: reconnectCode(error) };
           }
-        }
-        return { outcome: "current" };
+          const rewrapped = values.refreshTokenEnc !== row.refreshTokenEnc || values.accessTokenEnc !== row.accessTokenEnc;
+          // A connection an earlier release marked for a key problem recovers
+          // once its tokens open again.
+          const recovered = row.status === "needs_reconnect" && KEY_CODES.has(row.reconnectReason) && row.tenantId && row.refreshTokenEnc;
+          if (!rewrapped && !recovered) return { outcome: "current" };
+          await upsert(tx, { ...values, ...(recovered ? { status: "connected", reconnectReason: null } : {}) });
+          if (rewrapped) audits.push(["tokens_rewrapped", { from: "previous-key" }]);
+          return { outcome: rewrapped ? "rewrapped" : "recovered" };
+        });
+        for (const [action, details] of audits) await audit(action, null, details);
+        if (result.outcome === "rewrapped") logger.log?.("[xero] the stored sign-in was re-encrypted with the current FIELD_SECRETS_KEY");
+        if (result.outcome === "needs_reconnect") logger.warn?.("[xero] the sign-in stored by an earlier release could not be re-encrypted (LEGACY_TOKENS_UNREADABLE); the owner connects again");
+        if (result.outcome === "key_problem") logger.warn?.(`[xero] the stored sign-in cannot be read with the configured keys (${result.code}); Xero waits until the key is fixed`);
+        return result.outcome === "key_problem" ? { outcome: "key_problem", code: result.code } : { outcome: result.outcome };
       } catch (error) {
         logger.warn?.(`[xero] the stored sign-in could not be checked (${reconnectCode(error)})`);
         return { outcome: "error" };
@@ -562,8 +596,8 @@ export function createXeroConnectionService({
             }
             checked = { codesProblem: codesProblemFor({ ...current, ...changes }, codes), codesCheckedAt: now() };
           } else {
-            warning = `Saved, but Field could not check these codes with Xero (${codes.code}). Check them in Xero.`;
-            checked = { codesProblem: null, codesCheckedAt: null };
+            warning = `Saved, but Field could not check these codes with Xero (${codes.code}). Invoices wait until Field can check them; it tries again by itself.`;
+            checked = { codesProblem: "XERO_CODES_UNCHECKED", codesCheckedAt: null };
           }
         }
       }
@@ -655,16 +689,15 @@ export function createXeroConnectionService({
 
     async accessToken({ force = false } = {}) {
       const row = await scope.transaction(read);
-      if (await failClosedIfNoKey(row)) {
-        const code = keyring.problem || "SECRETS_KEY_MISSING";
-        throw new XeroError(code, RECONNECT_MESSAGES[code], { reconnect: true });
-      }
+      if (row?.status === "connected" && !keyring.available) throw keyError(keyring.problem || "SECRETS_KEY_MISSING");
       if (row?.status !== "connected") {
         throw new XeroError("XERO_NOT_CONNECTED", row?.status === "needs_reconnect" ? (RECONNECT_MESSAGES[row.reconnectReason] || RECONNECT_MESSAGES.XERO_REFRESH_REJECTED) : "Xero is not connected.", { reconnect: true });
       }
       if (!isSealed(row.refreshTokenEnc)) {
         // Stored by an earlier release: move it under FIELD_SECRETS_KEY first.
         await this.upgradeStoredTokens();
+        const again = await scope.transaction(read);
+        if (again?.status === "connected" && !isSealed(again.refreshTokenEnc)) throw keyError("TOKEN_DECRYPT_FAILED");
         return this.accessToken({ force });
       }
       const fresh = row.accessTokenEnc && row.accessExpiresAt && new Date(row.accessExpiresAt).getTime() - REFRESH_MARGIN_MS > now().getTime();
@@ -672,9 +705,8 @@ export function createXeroConnectionService({
         try {
           return { accessToken: box.open(row.accessTokenEnc, "access_token"), tenantId: row.tenantId };
         } catch (error) {
-          const code = reconnectCode(error);
-          await markNeedsReconnect(code);
-          throw new XeroError(code, RECONNECT_MESSAGES[code] || RECONNECT_MESSAGES.TOKEN_DECRYPT_FAILED, { reconnect: true });
+          // A key problem: fail closed now, store nothing.
+          throw keyError(reconnectCode(error));
         }
       }
       // One refresh at a time in this process; the row lock covers other processes.
@@ -708,7 +740,8 @@ export function createXeroConnectionService({
       } catch (error) {
         if (error?.reconnect || error instanceof SecretsKeyError) {
           const code = reconnectCode(error);
-          if (code !== "XERO_NOT_CONNECTED") await markNeedsReconnect(code);
+          // Xero's refusals are stored; key problems never are (they recover).
+          if (code !== "XERO_NOT_CONNECTED" && !KEY_CODES.has(code)) await markNeedsReconnect(code);
           if (error instanceof XeroError) throw error;
           throw new XeroError(code, RECONNECT_MESSAGES[code] || RECONNECT_MESSAGES.TOKEN_DECRYPT_FAILED, { reconnect: true });
         }
@@ -717,7 +750,7 @@ export function createXeroConnectionService({
     },
 
     /** An API call Xero refused for the organisation (403, a missing scope): the owner connects again. */
-    markNeedsReconnect: (code) => markNeedsReconnect(code),
+    markNeedsReconnect: (code) => (KEY_CODES.has(code) ? undefined : markNeedsReconnect(code)),
 
     /** Called with { type: "connected" | "disconnected" | "settings" } (the invoice sync resumes). */
     onChange(listener) {

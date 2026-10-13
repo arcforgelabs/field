@@ -93,6 +93,32 @@ test("Xero settings: owners change it, others read it, credentials are write-onl
   assert.equal(connected.body.connection.tenantName, "Synthetic Earthworks Pty Ltd");
   const seenByStaff = await staff("/api/integrations/xero");
   assert.equal(seenByStaff.body.connection.status, "connected", "staff see the status");
+  assert.deepEqual(seenByStaff.body.history, [], "the audit history is for owners only");
+  assert.deepEqual(seenByStaff.body.credentials.settings.clientSecret, { set: true }, "not who set it, or when");
+  assert.equal(seenByStaff.body.connection.connectedBy, null);
+  assert.equal(seenByStaff.body.secretsKey.keyId, undefined);
+  assert.ok(connected.body.history.length > 0 && connected.body.credentials.settings.clientSecret.setBy, "owners see it");
+
+  // API and MCP tokens: no integration settings at all, unless a permission grants the status.
+  const machine = async (permissions) => {
+    const created = await api("/api/users", { method: "POST", body: { email: `robot-${permissions.length}@example.invalid`, name: "Robot", kind: "service", role: "user", permissions } });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const minted = await api(`/api/users/${created.body.user.id}/tokens`, { method: "POST", body: { label: "test" } });
+    return async (path, { method = "GET", body } = {}) => {
+      const response = await fetch(`${base}${path}`, { method, headers: { authorization: `Bearer ${minted.body.token}`, ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+      return { status: response.status, body: await response.json().catch(() => null) };
+    };
+  };
+  const robot = await machine([]);
+  assert.equal((await robot("/api/integrations/xero")).status, 403);
+  assert.equal((await robot("/api/integrations/xero")).body.code, "INTEGRATIONS_FORBIDDEN");
+  for (const [method, path, body] of writeRoutes) assert.equal((await robot(path, { method, body })).status, 403, `${method} ${path} with a machine token`);
+  const reader = await machine(["integrations:read"]);
+  const readByToken = await reader("/api/integrations/xero");
+  assert.equal(readByToken.status, 200);
+  assert.equal(readByToken.body.canManage, false);
+  assert.deepEqual(readByToken.body.history, []);
+  assert.equal((await reader("/api/integrations/xero/settings", { method: "PUT", body: { createMode: "off" } })).status, 403, "the permission reads, never writes");
   for (const body of [connected.body, seenByStaff.body]) {
     for (const secret of xero.issuedSecrets()) assert.ok(!JSON.stringify(body).includes(secret), "no token or secret in the screen's data");
     assert.ok(!JSON.stringify(body).includes(xero.clientId));

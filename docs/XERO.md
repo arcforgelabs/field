@@ -59,7 +59,9 @@ connection, and a few calls for each invoice.
 
 Everyone who can open Settings sees Settings, Integrations, Xero. Only owners
 can change anything; the server checks the owner on every route that does.
-Everyone else sees it read-only.
+Everyone else sees it read-only, without who changed what or the history.
+API and MCP tokens get nothing here unless their permissions include
+`integrations:read` (`docs/INTEGRATIONS.md`).
 
 - **App credentials.** The Xero app's client id and client secret:
   write-only, with **Replace** and **Remove**, and the recent changes (who
@@ -82,7 +84,7 @@ Everyone else sees it read-only.
   (`accounting.settings.read`). A saved code is checked against them, so an
   account Xero would refuse is caught here, not on an invoice. When Field
   cannot read them, the screen says so and the codes are typed; they are then
-  saved with a warning. When the owner connects, or connects another
+  saved with a warning, and invoices wait until a check passes. When the owner connects, or connects another
   organisation, Field checks the saved codes against it, and invoices wait
   until the check has run. If one is not the organisation's, the screen says
   which, and invoices wait (they show "Waiting for Xero") until the owner
@@ -275,7 +277,7 @@ The screen shows **Connect again**, with the reason:
 | `XERO_REFRESH_REJECTED` | Xero refused the refresh token: it was revoked at Xero, or was not used for 60 days | Connect again |
 | `XERO_CLIENT_REJECTED` | Xero did not accept the app's client id and client secret | Check them (in Settings, or the environment override), then connect again |
 | `XERO_APP_CHANGED` | The credentials were replaced with another app's, so the earlier sign-in no longer applies | Connect again |
-| `SECRETS_KEY_MISSING`, `SECRETS_KEY_INVALID`, `SECRETS_KEY_UNKNOWN`, `SECRET_UNREADABLE` | `FIELD_SECRETS_KEY` is missing, not 32 bytes, or not the key that wrote the stored sign-in | Fix the key (`docs/INTEGRATIONS.md`), then connect again |
+| `SECRETS_KEY_MISSING`, `SECRETS_KEY_INVALID`, `SECRETS_KEY_PREVIOUS_INVALID`, `SECRETS_KEY_UNKNOWN`, `SECRET_UNREADABLE` | `FIELD_SECRETS_KEY` or `FIELD_SECRETS_KEY_PREVIOUS` is missing, not 32 bytes, or not the key that wrote the stored sign-in | Fix the key (`docs/INTEGRATIONS.md`). Field does not store this state: once the key is right, Xero is connected again by itself |
 | `LEGACY_TOKENS_UNREADABLE` | The sign-in from the first Xero release could not be moved under `FIELD_SECRETS_KEY` | Connect again |
 | `XERO_FORBIDDEN`, `XERO_SCOPE_MISSING` | Xero refused the organisation, or the sign-in lacks a scope | Connect again, and allow access |
 

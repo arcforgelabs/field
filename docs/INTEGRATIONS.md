@@ -11,11 +11,16 @@ Settings, Integrations shows your real values.
 ## Who sees what
 
 - Everyone who can open Settings sees **Settings, Integrations**: whether
-  each integration is set up and connected, and its recent changes.
+  each integration is set up and connected. Who changed it, when, and the
+  recent changes are shown to owners only.
 - Only the people allowed to manage the organisation's integrations (owners
   today) can enter credentials, connect, replace or disconnect. The server
   enforces this on every route that changes anything. Everyone else sees the
   same screen read-only.
+- API and MCP tokens (service accounts, and personal tokens with Clerk
+  sign-in) get no integration settings at all, and can never change them. A
+  token whose permissions include `integrations:read` may read the status,
+  as a non-owner sees it.
 
 ## Credentials are entered in Settings
 
@@ -60,9 +65,12 @@ deployment secret `FIELD_SECRETS_KEY`.
   value to its organisation, integration and field. Each value records the
   id of the key that wrote it (a hash of the key, never the key).
   `server/secrets/` is the module every integration uses.
-- **It fails closed.** If `FIELD_SECRETS_KEY` is missing, is not 32 bytes, or
-  cannot read a stored value, nothing is stored or sent. The screen says
-  which, and a connected integration shows "Connect again".
+- **It fails closed.** If `FIELD_SECRETS_KEY` (or a value in
+  `FIELD_SECRETS_KEY_PREVIOUS`) is missing, is not 32 bytes, or cannot read a
+  stored value, nothing is stored or sent. The screen says which, and a
+  connected integration shows "Connect again". Field does not store that
+  state: once the key is fixed, the integration is connected again by
+  itself.
 
 ## Rotating the key
 
@@ -72,13 +80,17 @@ deployment secret `FIELD_SECRETS_KEY`.
    separated by commas.
 3. Restart or republish Field. At boot it reads every stored value with the
    key that wrote it and writes it again with the new key. Xero tokens are
-   re-encrypted the same way.
+   re-encrypted the same way, under a lock, so a refresh on another server
+   is never lost. A credential an owner replaces during this is kept.
 4. Check Settings, Integrations: each integration is still set up and
    connected.
 5. Remove `FIELD_SECRETS_KEY_PREVIOUS` and restart again.
 
-If the old key is lost, the stored values cannot be read. Enter the
-credentials again and connect again.
+If you set the new key without keeping the old one in
+`FIELD_SECRETS_KEY_PREVIOUS`, nothing is lost yet: integrations show
+"Connect again" until you add the old key, then recover. If the old key is
+lost for good, the stored values cannot be read: enter the credentials again
+and connect again.
 
 ## Upgrading from the first Xero release
 

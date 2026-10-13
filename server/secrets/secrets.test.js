@@ -104,9 +104,16 @@ test("the credential store: per organisation, write-only status, audit events wi
     // Rotation: written with the old key, rewrapped at boot with the new one.
     await store.set("xero", { client_secret: VALUE }, { actor: "Owner Person" });
     const rotated = createCredentialStore({ db: t.db, orgUid: ORG, keyring: loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY, FIELD_SECRETS_KEY_PREVIOUS: TEST_SECRETS_KEY }), logger: { log() {} } });
-    assert.deepEqual(await rotated.rewrap(), { rewrapped: 1, unreadable: 0 });
+    assert.deepEqual(await rotated.rewrap(), { rewrapped: 1, unreadable: 0, changed: 0 });
     const onlyNew = createCredentialStore({ db: t.db, orgUid: ORG, keyring: loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY }) });
     assert.deepEqual(await onlyNew.read("xero"), { client_secret: VALUE }, "readable once the previous key is gone");
+    // A Replace during a boot rotation is never overwritten by the rotation.
+    await store.set("xero", { client_secret: "fake-client-secret-before-0003" }, { actor: "Owner Person" });
+    const during = createCredentialStore({ db: t.db, orgUid: ORG, keyring: loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY, FIELD_SECRETS_KEY_PREVIOUS: TEST_SECRETS_KEY }), logger: { log() {} } });
+    const replacing = createCredentialStore({ db: t.db, orgUid: ORG, keyring: loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY }) });
+    const outcome = await during.rewrap({ beforeWrite: () => replacing.set("xero", { client_secret: "fake-client-secret-replaced-0004" }, { actor: "Owner Person" }) });
+    assert.deepEqual(outcome, { rewrapped: 0, unreadable: 0, changed: 1 });
+    assert.deepEqual(await onlyNew.read("xero"), { client_secret: "fake-client-secret-replaced-0004" }, "the owner's Replace stands");
     // The wrong key fails closed.
     await assert.rejects(store.read("xero"), (error) => error.code === "SECRETS_KEY_UNKNOWN");
   } finally {
