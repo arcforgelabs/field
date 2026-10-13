@@ -37,6 +37,7 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `docs/REMOTE_MCP.md` | The OAuth MCP surface AI agents and other systems connect through |
 | `docs/concepts/surveyor.md` | Surveyor, Field's before/after proof lane |
 | `docs/lessons-learned.md` | Persistent production bugs and the fixes that resolved them |
+| `docs/SELF_HOSTING.md` | Running a pinned, verified release with Docker, Node or Replit, and the `deploy/replit/` template |
 | `docs/RELEASING.md` | How a release is cut, what it publishes (npm, GHCR, GitHub Release) and how to verify and run one |
 | `docs/CI.md` | CI's test lanes, which checks are required, and how to run each lane locally |
 | `.github/automation/README.md` | Where the review and triage bots (Barnacle, labeler, command reactions, ClawSweeper) come from |
@@ -197,7 +198,8 @@ Client development lives in `client/`.
   volume at `/app/data`.
 - **A release:** each release publishes `ghcr.io/arcforgelabs/field` by
   digest and `@arcforgelabs/field` on npm, both verifiable.
-  `docs/RELEASING.md` describes how to run one and how releases are cut.
+  `docs/SELF_HOSTING.md` describes how to pin, verify and run one, and
+  `docs/RELEASING.md` how releases are cut.
 
 ## Sign-in
 

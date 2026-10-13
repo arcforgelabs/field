@@ -1,0 +1,20 @@
+# Replit template for running a pinned Field release (docs/SELF_HOSTING.md).
+# Copy this folder into your own private deploy repository; do not deploy the
+# public Field repository itself.
+modules = ["nodejs-24", "bash"]
+run = ["bash", "start.sh"]
+
+[env]
+FIELD_RUNTIME = "replit"
+
+[[ports]]
+localPort = 19200
+externalPort = 80
+
+# Reserved VM: Field sends scheduled quote and invoice emails in-process, so it
+# must stay up (an autoscale deployment would sleep and miss them).
+[deployment]
+deploymentTarget = "vm"
+build = ["bash", "install-and-verify.sh"]
+run = ["bash", "start.sh"]
+ignorePorts = false

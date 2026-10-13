@@ -2,7 +2,7 @@
 // Starts a Field server from an installed @arcforgelabs/field package, the
 // way `npm start` does in a checkout: Sentry's instrumentation loads first,
 // then server/index.js. Configure it with environment variables
-// (docs/RELEASING.md, "Run a release"): FIELD_CONFIG_JSON or FIELD_CONFIG,
+// (docs/SELF_HOSTING.md): FIELD_CONFIG_JSON or FIELD_CONFIG,
 // FIELD_DATA, DATABASE_URL and FIELD_STORAGE=postgres.
 import { spawn } from "node:child_process";
 import { join } from "node:path";
