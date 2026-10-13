@@ -164,6 +164,10 @@ export interface XeroIntegration {
     connectedBy: string | null;
     reconnectReason: string | null;
     reconnectMessage: string | null;
+    /** The saved codes are not the connected organisation's: why, in words. Invoices wait meanwhile. */
+    codesProblem?: string | null;
+    codesMessage?: string | null;
+    codesCheckedAt?: string | null;
     organisations: Array<{ tenantId: string; tenantName: string }>;
   };
   settings: XeroSettings;

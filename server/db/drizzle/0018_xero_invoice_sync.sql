@@ -10,10 +10,13 @@ SET LOCAL lock_timeout = '10s';
 --     matching Xero invoice on the Field invoice row, and its organisation;
 --   - `xero_invoice_links`, append-only: every Xero invoice a Field invoice
 --     has had, by organisation;
+--   - `xero_connections.codes_checked_at` and `codes_problem`: the saved
+--     account and tax codes checked against the connected organisation;
 --   - the issued-invoice trigger (0013) lets those three columns change on an
---     issued invoice. The id is set once per organisation: it moves only to
---     another organisation's invoice, and only once the earlier id is in
---     xero_invoice_links. Everything else stays as issued.
+--     issued invoice. Once set, the id is replaced only when the earlier one
+--     is recorded in xero_invoice_links and either belongs to another
+--     organisation or was voided or deleted in Xero (its recorded status).
+--     Everything else stays as issued.
 -- Then FORCE ROW LEVEL SECURITY and field_app's grants, which drizzle-kit
 -- does not emit.
 CREATE TABLE "xero_invoice_links" (
@@ -65,6 +68,8 @@ ALTER TABLE "xero_invoice_syncs" ENABLE ROW LEVEL SECURITY;--> statement-breakpo
 ALTER TABLE "invoices" ADD COLUMN "xero_invoice_id" text;--> statement-breakpoint
 ALTER TABLE "invoices" ADD COLUMN "xero_tenant_id" text;--> statement-breakpoint
 ALTER TABLE "invoices" ADD COLUMN "xero_status" text;--> statement-breakpoint
+ALTER TABLE "xero_connections" ADD COLUMN "codes_checked_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "xero_connections" ADD COLUMN "codes_problem" text;--> statement-breakpoint
 ALTER TABLE "xero_invoice_links" ADD CONSTRAINT "xero_invoice_links_org_uid_organizations_uid_fk" FOREIGN KEY ("org_uid") REFERENCES "public"."organizations"("uid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "xero_invoice_links" ADD CONSTRAINT "xero_invoice_links_invoice_fk" FOREIGN KEY ("org_uid","invoice_uid") REFERENCES "public"."invoices"("org_uid","uid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "xero_invoice_syncs" ADD CONSTRAINT "xero_invoice_syncs_org_uid_organizations_uid_fk" FOREIGN KEY ("org_uid") REFERENCES "public"."organizations"("uid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -72,6 +77,7 @@ ALTER TABLE "xero_invoice_syncs" ADD CONSTRAINT "xero_invoice_syncs_invoice_fk" 
 CREATE INDEX "xero_invoice_links_invoice_idx" ON "xero_invoice_links" USING btree ("org_uid","invoice_uid");--> statement-breakpoint
 CREATE INDEX "xero_invoice_syncs_due_idx" ON "xero_invoice_syncs" USING btree ("org_uid","next_attempt_at") WHERE "xero_invoice_syncs"."state" = 'pending';--> statement-breakpoint
 CREATE UNIQUE INDEX "invoices_org_xero_invoice_key" ON "invoices" USING btree ("org_uid","xero_invoice_id");--> statement-breakpoint
+ALTER TABLE "xero_connections" ADD CONSTRAINT "xero_connections_codes_problem_check" CHECK ("xero_connections"."codes_problem" is null or "xero_connections"."codes_problem" ~ '^[A-Z0-9_]{1,64}$');--> statement-breakpoint
 CREATE POLICY "xero_invoice_links_tenant_isolation" ON "xero_invoice_links" AS PERMISSIVE FOR ALL TO public USING (org_uid = (select field_org_uid())) WITH CHECK (org_uid = (select field_org_uid()));--> statement-breakpoint
 CREATE POLICY "xero_invoice_syncs_tenant_isolation" ON "xero_invoice_syncs" AS PERMISSIVE FOR ALL TO public USING (org_uid = (select field_org_uid())) WITH CHECK (org_uid = (select field_org_uid()));
 --> statement-breakpoint
@@ -107,15 +113,17 @@ BEGIN
      OR (OLD.superseded_at IS NOT NULL AND NEW.superseded_at IS DISTINCT FROM OLD.superseded_at) THEN
     RAISE EXCEPTION 'invoice % was issued: change refused', OLD.number USING ERRCODE = 'check_violation';
   END IF;
-  -- The Xero invoice: an id always with its organisation; once set, kept in
-  -- that organisation, and moved to another organisation's id only when the
-  -- earlier one is recorded in xero_invoice_links.
+  -- The Xero invoice: an id always with its organisation. Once set it is
+  -- replaced only by another id, when the earlier one is recorded in
+  -- xero_invoice_links and is either in another organisation or recorded as
+  -- voided or deleted in Xero (the owner removed the draft there).
   IF (NEW.xero_invoice_id IS NULL) <> (NEW.xero_tenant_id IS NULL) THEN
     RAISE EXCEPTION 'invoice %: a Xero invoice id needs its organisation', OLD.number USING ERRCODE = 'check_violation';
   END IF;
   IF OLD.xero_invoice_id IS NOT NULL AND NEW.xero_invoice_id IS DISTINCT FROM OLD.xero_invoice_id THEN
-    IF NEW.xero_invoice_id IS NULL OR NEW.xero_tenant_id IS NOT DISTINCT FROM OLD.xero_tenant_id THEN
-      RAISE EXCEPTION 'invoice % was issued: its Xero invoice in that organisation is set once', OLD.number USING ERRCODE = 'check_violation';
+    IF NEW.xero_invoice_id IS NULL
+       OR (NEW.xero_tenant_id IS NOT DISTINCT FROM OLD.xero_tenant_id AND OLD.xero_status IS DISTINCT FROM 'VOIDED' AND OLD.xero_status IS DISTINCT FROM 'DELETED') THEN
+      RAISE EXCEPTION 'invoice % was issued: its Xero invoice in that organisation is set once, unless it was voided or deleted in Xero', OLD.number USING ERRCODE = 'check_violation';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM xero_invoice_links l WHERE l.org_uid = OLD.org_uid AND l.invoice_uid = OLD.uid AND l.tenant_id = OLD.xero_tenant_id AND l.xero_invoice_id = OLD.xero_invoice_id) THEN
       RAISE EXCEPTION 'invoice %: its earlier Xero invoice is not recorded in xero_invoice_links', OLD.number USING ERRCODE = 'check_violation';

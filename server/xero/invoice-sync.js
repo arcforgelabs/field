@@ -86,6 +86,8 @@ const SENDABLE = ["issued", "paid"];
 const GONE_IN_FIELD = ["credited", "void"];
 const GONE_IN_XERO = ["VOIDED", "DELETED"];
 const OUTAGE = ["XERO_RATE_LIMITED", "XERO_UNREACHABLE", "XERO_TIMEOUT", "XERO_UNAVAILABLE"];
+// Xero's refusal of a second invoice with the same number ("Invoice # must be unique").
+const NUMBER_TAKEN = /invoice\s*(#|number)[^.]*unique|unique[^.]*invoice\s*(#|number)/i;
 
 function iso(value) {
   return value == null ? null : new Date(value).toISOString();
@@ -108,7 +110,7 @@ function short(text, max = 400) {
 /** The label the invoice shows for its Xero state. */
 export function xeroStateLabel(row) {
   if (!row) return "Not sent to Xero";
-  if (row.state === "pending") return row.lastErrorCode === "XERO_NOT_CONNECTED" ? "Waiting for Xero" : "Sending to Xero";
+  if (row.state === "pending") return ["XERO_NOT_CONNECTED", "XERO_CODES_INVALID", "XERO_CREATE_OFF"].includes(row.lastErrorCode) ? "Waiting for Xero" : "Sending to Xero";
   if (row.state === "failed") return "Xero failed";
   if (row.state === "skipped") return "Not sent to Xero";
   if (row.state === "held") return "Held: another Xero organisation";
@@ -170,22 +172,45 @@ export function createXeroInvoiceSync({
     return writeMine(invoiceUid, { ...values, leaseOwner: null, leaseUntil: null });
   }
 
+  // Leases run on the database's clock (now()), not this server's, so two
+  // servers with skewed clocks agree on when one has expired.
+  const leaseEnds = () => sql`now() + make_interval(secs => ${settings.leaseMs / 1000})`;
+  const leaseFree = () => or(isNull(xeroInvoiceSyncs.leaseUntil), lte(xeroInvoiceSyncs.leaseUntil, sql`now()`));
+
   /** Claim a due row for this worker, or null when another holds it or it is not due. */
   async function claim(invoiceUid, tenantId) {
     const at = now();
     return tx(async (inner) => {
       const [row] = await inner.update(xeroInvoiceSyncs)
-        .set({ leaseOwner: workerId, leaseUntil: new Date(at.getTime() + settings.leaseMs), lastAttemptAt: at, updatedAt: at })
+        .set({ leaseOwner: workerId, leaseUntil: leaseEnds(), lastAttemptAt: at, updatedAt: at })
         .where(and(
           eq(xeroInvoiceSyncs.invoiceUid, invoiceUid),
           eq(xeroInvoiceSyncs.state, "pending"),
           eq(xeroInvoiceSyncs.tenantId, tenantId),
-          or(isNull(xeroInvoiceSyncs.leaseUntil), lte(xeroInvoiceSyncs.leaseUntil, at)),
+          leaseFree(),
           or(isNull(xeroInvoiceSyncs.nextAttemptAt), lte(xeroInvoiceSyncs.nextAttemptAt, at)),
         ))
         .returning();
       return row || null;
     });
+  }
+
+  class LeaseLost extends Error {
+    constructor() {
+      super("the claim on this invoice was lost");
+      this.code = "XERO_LEASE_LOST";
+    }
+  }
+
+  // Before each Xero call: the claim is renewed, or the send stops, so a slow
+  // pass never runs on after its lease expired and another server took it.
+  async function renew(invoiceUid) {
+    const held = await tx(async (inner) => (await inner.update(xeroInvoiceSyncs).set({ leaseUntil: leaseEnds() }).where(mine(invoiceUid)).returning({ uid: xeroInvoiceSyncs.invoiceUid })).length > 0);
+    if (!held) throw new LeaseLost();
+  }
+
+  function leasedClient(client, invoiceUid) {
+    return { accounting: async (request) => { await renew(invoiceUid); return client.accounting(request); } };
   }
 
   // Everything the Xero invoice is built from, read in one transaction.
@@ -253,15 +278,30 @@ export function createXeroInvoiceSync({
     return (found?.Invoices || []).find((entry) => entry.InvoiceNumber === number && entry.Type === "ACCREC" && !GONE_IN_XERO.includes(entry.Status)) || null;
   }
 
+  // The Xero invoice as Xero has it now, voided or deleted included; one Xero
+  // no longer finds at all counts as deleted.
   async function getInvoice(client, token, invoiceId) {
     try {
       const found = await client.accounting({ ...token, path: `/Invoices/${encodeURIComponent(invoiceId)}` });
-      const invoice = found?.Invoices?.[0] || null;
-      return invoice && !GONE_IN_XERO.includes(invoice.Status) ? invoice : null;
+      return found?.Invoices?.[0] || { InvoiceID: invoiceId, Status: "DELETED" };
     } catch (error) {
-      if (error?.code === "XERO_NOT_FOUND") return null;
+      if (error?.code === "XERO_NOT_FOUND") return { InvoiceID: invoiceId, Status: "DELETED" };
       throw error;
     }
+  }
+
+  // The owner voided or deleted the Xero invoice: its id goes into the
+  // history first, and its status onto the invoice row, so the database lets
+  // a new draft replace it (migration 0018's trigger). The sync row forgets it.
+  async function recordGone(invoiceUid, tenantId, gone) {
+    const at = now();
+    return tx(async (inner) => {
+      const owned = await writeMine(invoiceUid, { xeroInvoiceId: null, xeroStatus: gone.Status, xeroTotal: null, createdInXeroAt: null, attachedAt: null }, inner);
+      if (!owned) return false;
+      await inner.insert(xeroInvoiceLinks).values({ invoiceUid, tenantId, xeroInvoiceId: gone.InvoiceID, linkedAt: at }).onConflictDoNothing();
+      await inner.update(invoices).set({ xeroStatus: gone.Status }).where(and(eq(invoices.uid, invoiceUid), eq(invoices.xeroInvoiceId, gone.InvoiceID)));
+      return true;
+    });
   }
 
   // The Xero invoice, on the sync row, the invoice row and in the history.
@@ -284,7 +324,9 @@ export function createXeroInvoiceSync({
 
   // Create the draft. A contact found on an earlier try that Xero no longer
   // accepts is forgotten, looked up again, and the draft tried once more.
-  async function createDraft({ client, token, row, loaded, state }) {
+  // `replacing`: a Xero invoice the owner voided or deleted; a new key, so Xero
+  // cannot replay the create that made it.
+  async function createDraft({ client, token, row, loaded, state, replacing = null }) {
     const { invoice, lines, document, quote } = loaded;
     const customer = contactFor({ details: document?.details || null, quoteCustomer: quote?.customer || null });
     const build = (contactId) => ({
@@ -299,7 +341,15 @@ export function createXeroInvoiceSync({
     });
     const send = async (contactId) => {
       const body = build(contactId);
-      const created = await client.accounting({ ...token, method: "PUT", path: "/Invoices", query: { unitdp: 4 }, json: body, idempotencyKey: idempotencyKey(row.invoiceUid, "invoice", row.tenantId, body) });
+      let created;
+      try {
+        created = await client.accounting({ ...token, method: "PUT", path: "/Invoices", query: { unitdp: 4 }, json: body, idempotencyKey: idempotencyKey(row.invoiceUid, "invoice", row.tenantId, replacing ? { body, replacing } : body) });
+      } catch (error) {
+        if (error?.code === "XERO_VALIDATION" && NUMBER_TAKEN.test(error.reason || "")) {
+          throw new XeroPayloadError("XERO_INVOICE_NUMBER_TAKEN", `Xero already has an invoice numbered ${invoice.number}, perhaps one that was voided or deleted there, so Field did not create a second. Rename or remove that one in Xero, then press Retry.`);
+        }
+        throw error;
+      }
       const xeroInvoice = created?.Invoices?.[0] || null;
       if (!xeroInvoice?.InvoiceID) throw new XeroError("XERO_INVOICE_NOT_CREATED", "Xero did not return the new invoice.", { retryable: true });
       return { xeroInvoice, contactId };
@@ -310,7 +360,8 @@ export function createXeroInvoiceSync({
       try {
         return await send(cached);
       } catch (error) {
-        if (error?.code !== "XERO_VALIDATION") throw error;
+        // Only a refusal that names the contact is about the contact.
+        if (error?.code !== "XERO_VALIDATION" || !/contact/i.test(error.reason || "")) throw error;
         refused = cached;
         await writeMine(row.invoiceUid, { xeroContactId: null });
         logger.warn?.(`[xero] invoice ${row.invoiceUid}: Xero refused the contact found before; looking it up again`);
@@ -336,6 +387,11 @@ export function createXeroInvoiceSync({
       await finish(invoiceUid, { lastErrorCode: "XERO_CREATE_OFF", lastErrorReason: "Create in Xero is Off. It goes when Create in Xero is on again, or when an owner sends it." });
       return { invoiceUid, outcome: "off" };
     }
+    // The saved codes are not the organisation's: nothing goes until they are.
+    if (state.codesProblem) {
+      await finish(invoiceUid, { lastErrorCode: "XERO_CODES_INVALID", lastErrorReason: state.codesMessage || "The sales account or the GST tax type is not one the Xero organisation has. Choose them in Settings, Integrations, Xero.", nextAttemptAt: null });
+      return { invoiceUid, outcome: "waiting", code: "XERO_CODES_INVALID" };
+    }
     try {
       const loaded = await loadInvoice(invoiceUid);
       if (!loaded) throw new XeroPayloadError("XERO_INVOICE_MISSING", "The invoice is no longer in Field.");
@@ -347,15 +403,25 @@ export function createXeroInvoiceSync({
         await finish(invoiceUid, { state: "skipped", lastErrorCode: "XERO_NOT_ISSUED", lastErrorReason: GONE_IN_FIELD.includes(invoice.status) ? "It was credited or voided in Field before it reached Xero. Credit notes go to Xero in a later phase." : "It is not issued.", nextAttemptAt: null });
         return { invoiceUid, outcome: "skipped" };
       }
-      const client = http();
+      const client = leasedClient(http(), invoiceUid);
       const outcome = await connection.withAccessToken(async (token) => {
+        let attached = Boolean(row.attachedAt);
+        let replacing = null;
         let xeroInvoice = known ? await getInvoice(client, token, known) : null;
+        if (xeroInvoice && GONE_IN_XERO.includes(xeroInvoice.Status)) {
+          // Voided or deleted in Xero by the owner: a new draft replaces it.
+          if (!await recordGone(invoiceUid, row.tenantId, xeroInvoice)) return { lost: true };
+          logger.warn?.(`[xero] invoice ${invoiceUid}: its Xero invoice was voided or deleted there; a new draft replaces it`);
+          replacing = xeroInvoice.InvoiceID;
+          xeroInvoice = null;
+          attached = false;
+        }
         if (!xeroInvoice) xeroInvoice = await findByNumber(client, token, invoice.number);
         let contact = row.xeroContactId || null;
-        if (!xeroInvoice) ({ xeroInvoice, contactId: contact } = await createDraft({ client, token, row, loaded, state }));
+        if (!xeroInvoice) ({ xeroInvoice, contactId: contact } = await createDraft({ client, token, row, loaded, state, replacing }));
         if (!await recordXeroInvoice(invoiceUid, row.tenantId, xeroInvoice, contact ? { xeroContactId: contact } : {})) return { lost: true };
 
-        if (!row.attachedAt) {
+        if (!attached) {
           const bytes = await pdfBytes(document);
           if (!bytes) throw new XeroPayloadError("XERO_PDF_MISSING", "Field could not read the invoice's issued PDF, so it was not attached in Xero.");
           if (bytes.length > settings.maxAttachmentBytes) throw new XeroPayloadError("XERO_PDF_TOO_LARGE", "The invoice's PDF is larger than Xero's 10 MB attachment limit, so it was not attached.");
@@ -388,6 +454,7 @@ export function createXeroInvoiceSync({
       logger.warn?.(`[xero] invoice ${invoiceUid}: Xero's totals differ from Field's (XERO_TOTALS_DIFFER); left as a draft and shown to the owner`);
       return { invoiceUid, outcome: "mismatch" };
     } catch (error) {
+      if (error instanceof LeaseLost) return { invoiceUid, outcome: "not-claimed", code: error.code };
       return failed(invoiceUid, error);
     }
   }
@@ -467,7 +534,7 @@ export function createXeroInvoiceSync({
         eq(xeroInvoiceSyncs.state, "pending"),
         eq(xeroInvoiceSyncs.tenantId, state.tenantId),
         or(isNull(xeroInvoiceSyncs.nextAttemptAt), lte(xeroInvoiceSyncs.nextAttemptAt, at)),
-        or(isNull(xeroInvoiceSyncs.leaseUntil), lte(xeroInvoiceSyncs.leaseUntil, at)),
+        leaseFree(),
         ...(state.createMode === "off" ? [eq(xeroInvoiceSyncs.queuedBy, "owner")] : []),
       ))
       .orderBy(asc(xeroInvoiceSyncs.queuedAt), asc(xeroInvoiceSyncs.invoiceUid))
@@ -484,6 +551,7 @@ export function createXeroInvoiceSync({
         await queueNewlyIssued(state);
         if (state.status !== "connected" || !state.tenantId) return results;
         await holdOtherOrganisations(state);
+        if (state.codesProblem) return results;
         for (const { uid } of await due(state)) {
           if (stopped) break;
           const result = await syncInvoice(uid);
@@ -635,7 +703,7 @@ export function createXeroInvoiceSync({
         throw Object.assign(new Error("This invoice is already in Xero."), { statusCode: 409, code: "XERO_ALREADY_CREATED" });
       }
       await tx((inner) => inner.update(xeroInvoiceSyncs).set({ ...fresh(state, { requestedBy: actor }), queuedBy: "owner", updatedAt: now() })
-        .where(and(eq(xeroInvoiceSyncs.invoiceUid, invoiceUid), or(isNull(xeroInvoiceSyncs.leaseUntil), lte(xeroInvoiceSyncs.leaseUntil, now())))));
+        .where(and(eq(xeroInvoiceSyncs.invoiceUid, invoiceUid), leaseFree())));
       this.kick();
       return { queued: [invoiceUid] };
     },
@@ -660,6 +728,8 @@ export function createXeroInvoiceSync({
           entry = { state: "void-in-xero", label: "Void this in Xero", reason: `It was ${invoice.status === "void" ? "voided" : "credited"} in Field after it reached Xero, and Xero still has it. Void it, or credit it, in Xero. A later phase of Field does this itself.` };
         } else if (elsewhere || here?.state === "held") {
           entry = { state: "held", label: (elsewhere && ["created", "mismatch"].includes(elsewhere.state)) ? "In another Xero organisation" : "Held: another Xero organisation", reason: here?.lastErrorReason || "It went, or was queued, to the Xero organisation connected before. Send it again to create it in the one connected now." };
+        } else if (here?.state === "pending" && state.codesProblem) {
+          entry = { state: "pending", label: "Waiting for Xero", reason: state.codesMessage };
         } else {
           entry = { state: here?.state || "not-sent", label: xeroStateLabel(here), reason: here && here.state !== "created" ? here.lastErrorReason || null : null };
         }

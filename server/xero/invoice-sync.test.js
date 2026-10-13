@@ -49,6 +49,13 @@ beforeEach(async () => {
   xero.state.calls.length = 0;
   xero.state.ignoreTaxAmount = false;
   xero.state.connections = [{ id: "conn-a", tenantId: TENANT_A, tenantName: "Synthetic Earthworks Pty Ltd", tenantType: "ORGANISATION" }];
+  xero.state.accounts = [
+    { Code: "200", Name: "Sales", Type: "REVENUE", Class: "REVENUE", Status: "ACTIVE" },
+    { Code: "260", Name: "Other Revenue", Type: "OTHERINCOME", Class: "REVENUE", Status: "ACTIVE" },
+    { Code: "4000", Name: "Earthworks income", Type: "SALES", Class: "REVENUE", Status: "ACTIVE" },
+    { Code: "299", Name: "Old sales", Type: "REVENUE", Class: "REVENUE", Status: "ARCHIVED" },
+    { Code: "310", Name: "Cost of Goods Sold", Type: "DIRECTCOSTS", Class: "EXPENSE", Status: "ACTIVE" },
+  ];
   testDb = await createTestDb();
   now = new Date("2026-10-13T00:00:00.000Z");
   logs = [];
@@ -526,7 +533,7 @@ test("two servers never send the same invoice: a claimed invoice is left alone",
   // A worker that lost its claim cannot overwrite the result.
   const late = await issue();
   await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`insert into xero_invoice_syncs (invoice_uid, tenant_id, state, mode, queued_by, queued_at, lease_owner, lease_until, created_at, updated_at)
-    values (${late.invoiceUid}, ${TENANT_A}, 'pending', 'draft', 'auto', now(), 'someone-else', ${new Date(now.getTime() + 60_000).toISOString()}::timestamptz, now(), now())`));
+    values (${late.invoiceUid}, ${TENANT_A}, 'pending', 'draft', 'auto', now(), 'someone-else', now() + interval '1 minute', now(), now())`));
   await sync.tick();
   assert.equal((await row(late.invoiceUid)).lease_owner, "someone-else");
   assert.equal(xero.state.invoices.length, 1, "not sent while another holds it");
@@ -565,4 +572,135 @@ test("the sales account and GST tax type come from the organisation, and a saved
   assert.match(unchecked.warning, /could not check these codes with Xero/);
   const fallback = await (async () => { xero.failNext({ method: "GET", match: /\/TaxRates$/, status: 503, times: 5 }); return connection.codes(); })();
   assert.deepEqual([fallback.available, fallback.code], [false, "XERO_UNAVAILABLE"]);
+});
+
+test("a Xero draft the owner deleted: Retry records it, and a new draft replaces it in the same organisation", async () => {
+  await connect();
+  advance(1000);
+  xero.state.ignoreTaxAmount = true;
+  const result = await issue({ subtotal: "333.33", gst: "33.34", total: "366.67" });
+  await sync.tick();
+  assert.equal((await row(result.invoiceUid)).state, "mismatch");
+  const first = xero.state.invoices[0].InvoiceID;
+  // The owner deletes the wrong draft in Xero and presses Retry.
+  xero.state.invoices[0].Status = "DELETED";
+  xero.state.ignoreTaxAmount = false;
+  await sync.retry({ invoiceUid: result.invoiceUid, actor: "Owner" });
+  await sync.tick();
+  const done = await row(result.invoiceUid);
+  assert.equal(done.state, "created", done.last_error_reason);
+  assert.notEqual(done.invoice_xero_id, first);
+  assert.equal(xero.state.invoices.filter((invoice) => invoice.Status !== "DELETED").length, 1, "one live draft");
+  assert.equal(xero.state.attachments.filter((attachment) => attachment.InvoiceID === done.invoice_xero_id).length, 1, "its PDF attached again");
+  const links = await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => queryRows(sql`select xero_invoice_id from xero_invoice_links where invoice_uid = ${result.invoiceUid} order by linked_at`, tx));
+  assert.deepEqual(links.map((link) => link.xero_invoice_id).sort(), [first, done.invoice_xero_id].sort(), "both ids in the history");
+});
+
+test("a Xero invoice the owner voided keeps its number there: Retry says so plainly, and creates no second", async () => {
+  await connect();
+  advance(1000);
+  const result = await issue();
+  xero.failNext({ method: "PUT", match: /\/Attachments\//, status: 400, body: { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "The file could not be read." }] }] } });
+  await sync.tick();
+  assert.equal((await row(result.invoiceUid)).state, "failed");
+  xero.state.invoices[0].Status = "VOIDED";
+  await sync.retry({ invoiceUid: result.invoiceUid, actor: "Owner" });
+  await sync.tick();
+  const stuck = await row(result.invoiceUid);
+  assert.equal(stuck.state, "failed");
+  assert.equal(stuck.last_error_code, "XERO_INVOICE_NUMBER_TAKEN");
+  assert.match(stuck.last_error_reason, new RegExp(`Xero already has an invoice numbered ${result.number}`));
+  assert.equal(stuck.invoice_xero_status, "VOIDED", "the invoice row knows the voided one");
+  assert.equal(xero.state.invoices.length, 1, "no second invoice");
+  assert.equal(stuck.xero_contact_id !== null, true, "a taken number is not a contact problem: the contact is kept");
+});
+
+test("the trigger lets a same-organisation id be replaced only when the recorded one was voided or deleted", async () => {
+  await connect();
+  advance(1000);
+  const result = await issue();
+  await sync.tick();
+  const replace = () => withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update invoices set xero_invoice_id = 'replacement-id' where uid = ${result.invoiceUid}`));
+  await assert.rejects(replace(), (error) => /voided or deleted/.test(`${error.message} ${error.cause?.message}`));
+  await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update invoices set xero_status = 'VOIDED' where uid = ${result.invoiceUid}`));
+  await replace();
+});
+
+test("a refusal that does not name the contact keeps the contact found", async () => {
+  await connect();
+  advance(1000);
+  const result = await issue();
+  xero.failNext({ method: "PUT", match: /\/Invoices$/, status: 503 });
+  await sync.tick();
+  const cached = (await row(result.invoiceUid)).xero_contact_id;
+  xero.failNext({ method: "PUT", match: /\/Invoices$/, status: 400, body: { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "Account code '999' is not a valid code for this document." }] }] } });
+  const lookups = xero.state.calls.filter((call) => call.path.endsWith("/Contacts") && call.method === "GET").length;
+  advance(syncBackoffMs(1));
+  await sync.tick();
+  const refused = await row(result.invoiceUid);
+  assert.equal(refused.state, "failed");
+  assert.equal(refused.xero_contact_id, cached, "not cleared");
+  assert.equal(xero.state.calls.filter((call) => call.path.endsWith("/Contacts") && call.method === "GET").length, lookups, "not looked up again");
+});
+
+test("a lease lost mid-send stops the send before its next Xero call", async () => {
+  await connect();
+  advance(1000);
+  const result = await issue();
+  let stolen = false;
+  const thief = createXeroInvoiceSync({
+    db: testDb.db,
+    orgUid: DEFAULT_ORG_UID,
+    connection,
+    http: () => {
+      const real = createXeroHttp({ clientId: xero.clientId, clientSecret: xero.clientSecret, endpoints: xeroEndpoints(xero.base), sleep: async () => {} });
+      return {
+        async accounting(request) {
+          // Another server takes the invoice while this one is in its first call.
+          if (!stolen) {
+            stolen = true;
+            await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update xero_invoice_syncs set lease_owner = 'another-server', lease_until = now() + interval '5 minutes' where invoice_uid = ${result.invoiceUid}`));
+          }
+          return real.accounting(request);
+        },
+      };
+    },
+    blobs: createPostgresBlobStore(),
+    now: () => now,
+    logger: { log() {}, warn() {}, error() {} },
+  });
+  const outcomes = await thief.tick();
+  await thief.stop();
+  assert.deepEqual(outcomes.map((entry) => entry.outcome), ["not-claimed"]);
+  assert.equal(xero.state.calls.filter((call) => call.method === "PUT").length, 0, "nothing created after the lease was lost");
+  assert.equal((await row(result.invoiceUid)).lease_owner, "another-server", "the other server's claim is left as it is");
+});
+
+test("connecting another organisation checks the saved codes; invoices wait until the owner chooses codes it has", async () => {
+  await connect();
+  assert.equal((await connection.status()).connection.codesProblem, null);
+  await connection.disconnect();
+  // The next organisation has no account 200.
+  xero.state.accounts = xero.state.accounts.filter((account) => account.Code !== "200");
+  xero.state.connections = [{ id: "conn-b", tenantId: TENANT_B, tenantName: "Synthetic Holdings Pty Ltd", tenantType: "ORGANISATION" }];
+  await connect();
+  const status = await connection.status();
+  assert.equal(status.connection.codesProblem, "XERO_ACCOUNT_CODE_UNKNOWN");
+  assert.match(status.connection.codesMessage, /Sales account 200 is not an active revenue account in Synthetic Holdings Pty Ltd/);
+  advance(1000);
+  const result = await issue();
+  await sync.tick();
+  assert.equal(xero.state.invoices.length, 0, "nothing goes with a code the organisation does not have");
+  const waiting = await row(result.invoiceUid);
+  assert.equal(waiting.state, "pending");
+  assert.equal(waiting.last_error_code === null || waiting.last_error_code === "XERO_CODES_INVALID", true);
+  const shown = (await sync.jobStatus("job-xero")).invoices[result.number];
+  assert.equal(shown.label, "Waiting for Xero");
+  assert.match(shown.reason, /Sales account 200 is not an active revenue account/);
+  const saved = await connection.updateSettings({ salesAccountCode: "260" });
+  assert.equal(saved.salesAccountCode, "260");
+  assert.equal((await connection.status()).connection.codesProblem, null);
+  await sync.tick();
+  assert.equal((await row(result.invoiceUid)).state, "created");
+  assert.equal(xero.state.invoices[0].LineItems[0].AccountCode, "260");
 });

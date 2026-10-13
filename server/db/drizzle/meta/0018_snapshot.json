@@ -1,5 +1,5 @@
 {
-  "id": "2df18e34-e303-4a45-a029-b6558691f89b",
+  "id": "48e08504-f161-47c5-be64-64d44c01c912",
   "prevId": "d4b56951-4a36-4313-8b56-bf73365fbf97",
   "version": "7",
   "dialect": "postgresql",
@@ -7627,6 +7627,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "codes_checked_at": {
+          "name": "codes_checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "codes_problem": {
+          "name": "codes_problem",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -7704,6 +7716,10 @@
         "xero_connections_reconnect_reason_check": {
           "name": "xero_connections_reconnect_reason_check",
           "value": "\"xero_connections\".\"reconnect_reason\" is null or \"xero_connections\".\"reconnect_reason\" ~ '^[A-Z0-9_]{1,64}$'"
+        },
+        "xero_connections_codes_problem_check": {
+          "name": "xero_connections_codes_problem_check",
+          "value": "\"xero_connections\".\"codes_problem\" is null or \"xero_connections\".\"codes_problem\" ~ '^[A-Z0-9_]{1,64}$'"
         }
       },
       "isRLSEnabled": false

@@ -131,6 +131,11 @@ export function XeroPanel() {
           <span>Set <code>publicUrl</code>, this installation's public address, in Field's configuration (on Replit, in <code>FIELD_CONFIG_JSON</code>), then restart Field. Field builds the redirect address from it, and Connect stays off until it is set.</span>
         </div>
       )}
+      {connection.codesMessage && (
+        <div className="fx-notice fx-notice--warn" role="alert" style={{ margin: 0 }}>
+          <span>{connection.codesMessage}</span>
+        </div>
+      )}
       {notice && <div className={`fx-notice ${notice.tone === "bad" ? "fx-notice--bad" : ""}`} role="status" style={{ margin: 0 }}><span>{notice.text}</span></div>}
 
       <div className="xero__card" aria-label="Connection">

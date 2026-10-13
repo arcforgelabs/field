@@ -1858,6 +1858,14 @@ export const xeroConnections = pgTable(
     taxType: text("tax_type").notNull().default("OUTPUT"),
     /** Invoices issued from this moment go to Xero by themselves; earlier ones only when an owner sends them. */
     autoFrom: timestamp("auto_from", { withTimezone: true, mode: "date" }),
+    /**
+     * The saved account and tax codes, checked against the connected
+     * organisation's when it was connected or the codes were saved (#93,
+     * migration 0018): when, and what is wrong (XERO_ACCOUNT_CODE_UNKNOWN,
+     * XERO_TAX_TYPE_UNKNOWN), or null. Invoices wait while it says one is wrong.
+     */
+    codesCheckedAt: timestamp("codes_checked_at", { withTimezone: true, mode: "date" }),
+    codesProblem: text("codes_problem"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     updatedBy: text("updated_by"),
@@ -1870,6 +1878,7 @@ export const xeroConnections = pgTable(
     check("xero_connections_account_code_check", sql`${t.salesAccountCode} ~ '^[A-Za-z0-9._-]{1,10}$'`),
     check("xero_connections_tax_type_check", sql`${t.taxType} ~ '^[A-Z0-9_]{1,40}$'`),
     check("xero_connections_reconnect_reason_check", sql`${t.reconnectReason} is null or ${t.reconnectReason} ~ '^[A-Z0-9_]{1,64}$'`),
+    check("xero_connections_codes_problem_check", sql`${t.codesProblem} is null or ${t.codesProblem} ~ '^[A-Z0-9_]{1,64}$'`),
     tenantIsolation("xero_connections"),
   ],
 );

@@ -48,9 +48,12 @@ $$;
 DROP TABLE "xero_invoice_syncs";
 DROP TABLE "xero_invoice_links";
 DROP FUNCTION field_refuse_xero_invoice_link_change();
+ALTER TABLE "xero_connections" DROP CONSTRAINT "xero_connections_codes_problem_check";
+ALTER TABLE "xero_connections" DROP COLUMN "codes_problem";
+ALTER TABLE "xero_connections" DROP COLUMN "codes_checked_at";
 DROP INDEX "invoices_org_xero_invoice_key";
 ALTER TABLE "invoices" DROP COLUMN "xero_status";
 ALTER TABLE "invoices" DROP COLUMN "xero_tenant_id";
 ALTER TABLE "invoices" DROP COLUMN "xero_invoice_id";
 
-DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1791865685987;
+DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1791868356919;

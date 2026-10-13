@@ -125,6 +125,18 @@ describe("XeroPanel", () => {
     await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/could not check these codes with Xero/));
   });
 
+  it("says when the saved codes are not the connected organisation's, and that invoices wait", async () => {
+    vi.spyOn(api, "xeroIntegration").mockResolvedValue(integration({
+      connection: { status: "connected", tenantName: "Synthetic Holdings Pty Ltd", connectedAt: "2026-10-13T00:00:00.000Z", connectedBy: "Owner", reconnectReason: null, reconnectMessage: null, codesProblem: "XERO_ACCOUNT_CODE_UNKNOWN", codesMessage: "Sales account 200 is not an active revenue account in Synthetic Holdings Pty Ltd. Choose one below; invoices wait until then.", organisations: [] },
+    }));
+    vi.spyOn(api, "xeroCodes").mockResolvedValue({ ok: true, available: true, accounts: [{ code: "260", name: "Other Revenue" }], taxRates: [{ taxType: "OUTPUT", name: "GST on Income", rate: 10 }] });
+    show();
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Sales account 200 is not an active revenue account in Synthetic Holdings Pty Ltd/));
+    const accounts = await screen.findByRole("combobox", { name: /Sales account/ });
+    expect((accounts as HTMLSelectElement).value).toBe("200");
+    expect([...(accounts as HTMLSelectElement).options][0].textContent).toMatch(/not an active revenue account in Xero/);
+  });
+
   it("several organisations: the owner chooses one", async () => {
     vi.spyOn(api, "xeroIntegration").mockResolvedValue(integration({
       connection: { status: "choose_organisation", tenantName: null, connectedAt: null, connectedBy: null, reconnectReason: null, reconnectMessage: null, organisations: [{ tenantId: "t-1", tenantName: "Synthetic Holdings" }, { tenantId: "t-2", tenantName: "Synthetic Earthworks" }] },

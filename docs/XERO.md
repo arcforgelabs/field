@@ -76,7 +76,10 @@ the owner on the server.
   (`accounting.settings.read`). A saved code is checked against them, so an
   account Xero would refuse is caught here, not on an invoice. When Field
   cannot read them, the screen says so and the codes are typed; they are then
-  saved with a warning. Lines without GST use `EXEMPTOUTPUT` ("GST Free
+  saved with a warning. When the owner connects, or connects another
+  organisation, Field checks the saved codes against it. If one is not the
+  organisation's, the screen says which, and invoices wait (they show
+  "Waiting for Xero") until the owner chooses codes it has. Lines without GST use `EXEMPTOUTPUT` ("GST Free
   Income").
 
 Only invoices issued after Create in Xero is turned on go to Xero by
@@ -127,13 +130,29 @@ the owner disconnects and connects a different organisation:
 - an owner can send either kind to the new organisation with **Send to Xero**
   (after the preview). The old Xero id then counts as unknown, and the new
   one replaces it on the invoice row. The old one stays in
-  `xero_invoice_links`; the database refuses to replace an id whose history
-  is not recorded, or to change an id within one organisation.
+  `xero_invoice_links`.
+
+The database enforces this: an id on the invoice row is replaced only when
+the earlier one is in `xero_invoice_links` and either belongs to another
+organisation or was recorded as voided or deleted in Xero (below).
+
+### A Xero invoice the owner voids or deletes
+
+If the owner voids or deletes Field's invoice in Xero (say a draft whose
+totals differ) and presses Retry, Field records the old id and its status
+first, then creates a new draft, and the new id replaces the old one on the
+invoice row. A deleted draft frees its number in Xero. If Xero still holds the
+number (a voided invoice may), Xero refuses a second invoice with it; Field
+shows "Xero already has an invoice numbered …" and creates nothing. Rename
+or remove that invoice in Xero, then press Retry. Whether Xero lets a voided
+invoice's number be used again is not confirmed in its documentation.
 
 ### Two servers at once
 
-A server claims an invoice with a five-minute lease before it sends it, and
-every write it makes names that lease. During an overlapping republish, two
+A server claims an invoice with a five-minute lease before it sends it,
+renews the lease before each call to Xero, and stops if another server has
+taken it. Every write names the lease. Leases run on the database's clock,
+so servers with different clocks agree. During an overlapping republish, two
 servers never send the same invoice, and a late one never overwrites the
 other's result.
 
@@ -180,8 +199,9 @@ Xero** for an invoice that was not sent.
 - **Connect again:** while the owner must connect again, invoices wait. They
   go as soon as Xero is connected again.
 - **A contact Xero refuses** (removed, archived or merged since Field found
-  it) is forgotten and looked up again once in the same send. Retry and Send
-  to Xero always look the contact up again.
+  it; Xero's message names the contact) is forgotten and looked up again once
+  in the same send. Other refusals keep the contact. Retry and Send to Xero
+  always look the contact up again.
 - **Create in Xero Off:** invoices Field queued by itself wait, even ones
   waiting to retry. Invoices an owner sends or retries still go, as drafts.
 

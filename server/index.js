@@ -560,7 +560,7 @@ const xeroInvoiceSync = xeroConnection ? createXeroInvoiceSync({
   ...(Number.isFinite(xeroSyncIntervalMs) && xeroSyncIntervalMs >= 1000 ? { intervalMs: xeroSyncIntervalMs, firstDelayMs: xeroSyncIntervalMs } : {}),
 }) : null;
 if (xeroInvoiceSync) {
-  xeroConnection.onChange((event) => { if (event.type === "connected") xeroInvoiceSync.kick(); });
+  xeroConnection.onChange((event) => { if (event.type !== "disconnected") xeroInvoiceSync.kick(); });
   xeroInvoiceSync.start();
 }
 

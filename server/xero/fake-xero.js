@@ -59,6 +59,8 @@ export async function startFakeXero({
     revoked: [],
     everyCode: [],
     nextInvoiceNumber: 1,
+    // The organisation's chart of accounts; a test may change it.
+    accounts: [...accounts],
     // Tests can make Xero total an invoice its own way (ignore TaxAmount).
     ignoreTaxAmount: false,
   };
@@ -202,7 +204,7 @@ export async function startFakeXero({
     const mine = (entry) => !entry.tenantId || entry.tenantId === tenant;
     const invoicesHere = state.invoices.filter(mine);
     const contactsHere = state.contacts.filter(mine);
-    if (api === "/Accounts" && req.method === "GET") return send(res, 200, { Accounts: accounts });
+    if (api === "/Accounts" && req.method === "GET") return send(res, 200, { Accounts: state.accounts });
     if (api === "/TaxRates" && req.method === "GET") return send(res, 200, { TaxRates: TAX_RATES });
     if (api === "/Contacts" && req.method === "GET") {
       // searchTerm: case-insensitive, in the name or the email (as Xero's).
@@ -243,7 +245,9 @@ export async function startFakeXero({
       for (const input of call.body?.Invoices || []) {
         const invoice = structuredClone(input);
         if (!invoice.InvoiceNumber) invoice.InvoiceNumber = `INV-${String(state.nextInvoiceNumber++).padStart(4, "0")}`;
-        if (invoicesHere.some((existing) => existing.InvoiceNumber === invoice.InvoiceNumber)) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "Invoice # must be unique." }] }] });
+        // A deleted draft frees its number; a voided invoice keeps it (Xero's
+        // behaviour for a voided number is not confirmed: docs/XERO.md).
+        if (invoicesHere.some((existing) => existing.InvoiceNumber === invoice.InvoiceNumber && existing.Status !== "DELETED")) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "Invoice # must be unique." }] }] });
         if (!contactsHere.some((contact) => contact.ContactID === invoice.Contact?.ContactID && contact.ContactStatus !== "ARCHIVED")) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "The contact could not be found." }] }] });
         if (invoice.Status === "AUTHORISED" && !invoice.DueDate) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "Due Date is required." }] }] });
         invoice.InvoiceID = randomUUID();
