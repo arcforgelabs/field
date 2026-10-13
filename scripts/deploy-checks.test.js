@@ -18,8 +18,8 @@ test("the required checks are CI's test, client-build and docker-build, and Secr
 });
 
 test("only an https://github.com repository URL has a slug", () => {
-  assert.equal(githubRepoSlug("https://github.com/embarkearthworks/field.git"), "embarkearthworks/field");
-  assert.equal(githubRepoSlug("https://github.com/embarkearthworks/field"), "embarkearthworks/field");
+  assert.equal(githubRepoSlug("https://github.com/arcforgelabs/field.git"), "arcforgelabs/field");
+  assert.equal(githubRepoSlug("https://github.com/arcforgelabs/field"), "arcforgelabs/field");
   assert.equal(githubRepoSlug("https://github.com/a-b/c.d/"), "a-b/c.d");
   for (const url of ["file:///tmp/field.git", "git@github.com:a/b.git", "https://github.com.evil.example/a/b", "https://github.com/a/b/c", "", undefined]) {
     assert.equal(githubRepoSlug(url), null, String(url));

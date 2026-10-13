@@ -31,7 +31,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/.field-deploy"
-DEFAULT_REPO="https://github.com/embarkearthworks/field.git"
+DEFAULT_REPO="https://github.com/arcforgelabs/field.git"
 
 log() { echo "[deploy] $*"; }
 die() { echo "[deploy] FAILED: $*" >&2; exit 1; }

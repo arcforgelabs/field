@@ -78,7 +78,7 @@ GitHub's security-advisory merge ("Merge commit from fork") merges a
 temporary private fork. GitHub runs no checks there and says it does not
 enforce the branch's protection rules for that merge. If the ruleset refuses
 it, disable the ruleset (repository Settings > Rules > Rulesets, or
-`gh api -X PUT repos/embarkearthworks/field/rulesets/<id> -f enforcement=disabled`),
+`gh api -X PUT repos/arcforgelabs/field/rulesets/<id> -f enforcement=disabled`),
 merge the advisory, and enable it again at once (`-f enforcement=active`).
 The merged commit then runs CI on `main` like any other.
 
@@ -86,5 +86,5 @@ To change the ruleset, edit `.github/rulesets/main.json` in a pull request,
 then apply it:
 
 ```bash
-gh api -X PUT repos/embarkearthworks/field/rulesets/$(gh api repos/embarkearthworks/field/rulesets --jq '.[] | select(.name == "main: pull request and passing CI") | .id') --input .github/rulesets/main.json
+gh api -X PUT repos/arcforgelabs/field/rulesets/$(gh api repos/arcforgelabs/field/rulesets --jq '.[] | select(.name == "main: pull request and passing CI") | .id') --input .github/rulesets/main.json
 ```

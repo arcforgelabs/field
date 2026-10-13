@@ -8,8 +8,8 @@ as it was sent. It also exposes a typed API, CLI and OAuth MCP surface so
 external systems, AI agents included, can build and revise quotes. See
 `VISION.md`.
 
-Field was built for Embark Landscaping & Earthworks, which maintains it at
-[embarkearthworks/field](https://github.com/embarkearthworks/field).
+Field was built for Embark Landscaping & Earthworks. Its source is at
+[arcforgelabs/field](https://github.com/arcforgelabs/field).
 
 Licence: MIT (`LICENSE`).
 

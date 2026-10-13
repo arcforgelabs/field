@@ -859,7 +859,7 @@ jobs at ...`).
 ## GitHub
 
 The workspace tracks `main` on the GitHub repository
-([embarkearthworks/field](https://github.com/embarkearthworks/field) for the
+([arcforgelabs/field](https://github.com/arcforgelabs/field) for the
 upstream project; your fork otherwise).
 
 - Nothing commits to `main` directly, here or on GitHub; the ruleset on
