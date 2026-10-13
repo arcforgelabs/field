@@ -12,6 +12,10 @@ import { createXeroHttp } from "./client.js";
 import { readXeroSecrets, xeroEndpoints, xeroRedirectUri } from "./config.js";
 import { createXeroConnectionService } from "./connection.js";
 import { startFakeXero } from "./fake-xero.js";
+import { createCredentialStore } from "../secrets/credentials.js";
+import { loadSecretsKeyring } from "../secrets/keyring.js";
+import { OTHER_SECRETS_KEY, TEST_SECRETS_KEY, testKeyring } from "../secrets/test-keyring.js";
+import { createTokenCipher } from "./token-crypto.js";
 
 const REDIRECT = "https://field.example.invalid/api/integrations/xero/callback";
 let xero;
@@ -41,10 +45,12 @@ async function fresh({ secret = xero.clientSecret, clock = null } = {}) {
   const logs = recorder();
   let now = clock || new Date("2026-10-13T00:00:00.000Z");
   const secrets = readXeroSecrets({ XERO_CLIENT_ID: xero.clientId, XERO_CLIENT_SECRET: secret });
-  const make = (withSecrets = secrets) => createXeroConnectionService({
+  const make = (withSecrets = secrets, keyring = testKeyring()) => createXeroConnectionService({
     db: testDb.db,
     orgUid: DEFAULT_ORG_UID,
     secrets: withSecrets,
+    keyring,
+    credentialStore: createCredentialStore({ db: testDb.db, orgUid: DEFAULT_ORG_UID, keyring, now: () => now, logger: logs.logger }),
     http: (s) => createXeroHttp({ clientId: s.clientId, clientSecret: s.clientSecret, endpoints: xeroEndpoints(xero.base) }),
     now: () => now,
     logger: logs.logger,
@@ -68,7 +74,8 @@ test("connect: the code becomes encrypted tokens and the one organisation is cho
   const { service, rawRow, logs } = await fresh();
   const before = await service.status();
   assert.equal(before.connection.status, "disconnected");
-  assert.deepEqual(before.secrets, { clientIdSet: true, clientSecretSet: true });
+  assert.deepEqual(before.credentials.environment, { clientIdSet: true, clientSecretSet: true });
+  assert.equal(before.credentials.source, "environment");
   assert.equal(before.settings.createMode, "draft");
 
   assert.deepEqual(await connect(service), { status: "connected" });
@@ -81,8 +88,8 @@ test("connect: the code becomes encrypted tokens and the one organisation is cho
   const row = await rawRow();
   const stored = JSON.stringify(row);
   for (const secret of xero.issuedSecrets()) assert.ok(!stored.includes(secret), "no token or secret in the clear in the database");
-  assert.match(row.access_token_enc, /^v1\./);
-  assert.match(row.refresh_token_enc, /^v1\./);
+  assert.match(row.access_token_enc, /^fs1\./);
+  assert.match(row.refresh_token_enc, /^fs1\./);
   assert.equal(row.pending_state_hash, null, "the state is spent");
   assert.ok(!JSON.stringify(status).includes("fake-"), "the screen never gets a token");
 
@@ -140,6 +147,7 @@ test("several organisations: the owner chooses one", async () => {
       db: testDb.db,
       orgUid: DEFAULT_ORG_UID,
       secrets: readXeroSecrets({ XERO_CLIENT_ID: many.clientId, XERO_CLIENT_SECRET: many.clientSecret }),
+      keyring: testKeyring(),
       http: (s) => createXeroHttp({ clientId: s.clientId, clientSecret: s.clientSecret, endpoints: xeroEndpoints(many.base) }),
       logger: recorder().logger,
     });
@@ -216,13 +224,102 @@ test("a refresh Xero rejects marks the connection as needing the owner to connec
   assert.equal((await service.status()).settings.autoFrom, "2026-10-13T00:00:00.000Z");
 });
 
-test("a changed XERO_CLIENT_SECRET is recognised: the owner connects again", async () => {
+test("a key that cannot read the stored sign-in fails closed: the owner connects again, and nothing is sent", async () => {
   const { service, make } = await fresh();
   await connect(service);
-  const changed = make(readXeroSecrets({ XERO_CLIENT_ID: xero.clientId, XERO_CLIENT_SECRET: "another-fake-secret" }));
-  const status = await changed.status();
+  // FIELD_SECRETS_KEY replaced without keeping the old one as FIELD_SECRETS_KEY_PREVIOUS.
+  const other = make(undefined, loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY }));
+  await assert.rejects(other.accessToken(), (error) => error.reconnect === true && error.code === "SECRETS_KEY_UNKNOWN");
+  const status = await other.status();
   assert.equal(status.connection.status, "needs_reconnect");
-  assert.equal(status.connection.reconnectReason, "CLIENT_SECRET_CHANGED");
+  assert.equal(status.connection.reconnectReason, "SECRETS_KEY_UNKNOWN");
+
+  // No key at all: the status says so, and a connected row is shown as needing reconnect.
+  const { service: second, make: makeSecond } = await fresh();
+  await connect(second);
+  const missing = makeSecond(undefined, loadSecretsKeyring({}));
+  const shown = await missing.status();
+  assert.deepEqual([shown.secretsKey.configured, shown.secretsKey.problem], [false, "SECRETS_KEY_MISSING"]);
+  assert.equal(shown.connection.status, "needs_reconnect");
+  await assert.rejects(missing.startConnect({ redirectUri: REDIRECT }), (error) => error.code === "SECRETS_KEY_MISSING" && error.statusCode === 409);
+  await assert.rejects(missing.setCredentials({ clientId: "FAKECLIENTID000000000000", clientSecret: "fake-client-secret-0002" }), (error) => error.code === "SECRETS_KEY_MISSING");
+});
+
+test("rotation: tokens written with the previous key are read with it and rewritten with the current one", async () => {
+  const { service, make, rawRow } = await fresh();
+  await connect(service);
+  const before = (await rawRow()).refresh_token_enc;
+  const rotated = make(undefined, loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY, FIELD_SECRETS_KEY_PREVIOUS: TEST_SECRETS_KEY }));
+  assert.deepEqual(await rotated.upgradeStoredTokens(), { outcome: "rewrapped" });
+  const after = (await rawRow()).refresh_token_enc;
+  assert.notEqual(after, before);
+  assert.equal(after.split(".")[1], loadSecretsKeyring({ FIELD_SECRETS_KEY: OTHER_SECRETS_KEY }).currentId);
+  assert.equal((await rotated.accessToken()).tenantId, "aaaaaaaa-0000-0000-0000-000000000001", "still connected");
+});
+
+test("tokens stored by #94 under the key derived from XERO_CLIENT_SECRET are re-encrypted, or the owner connects again", async () => {
+  const { service, make, rawRow } = await fresh();
+  await connect(service);
+  // Put the tokens back as #94 stored them.
+  const legacy = createTokenCipher({ clientSecret: xero.clientSecret, orgUid: DEFAULT_ORG_UID });
+  const token = await service.accessToken();
+  const refresh = xero.issuedSecrets().find((value) => value.startsWith("fake-refresh-") && xero.state.refresh.get(value));
+  await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update xero_connections set access_token_enc = ${legacy.encrypt(token.accessToken, "access_token")}, refresh_token_enc = ${legacy.encrypt(refresh, "refresh_token")}`));
+  assert.deepEqual(await service.upgradeStoredTokens(), { outcome: "rewrapped" });
+  assert.match((await rawRow()).refresh_token_enc, /^fs1\./);
+  assert.equal((await service.accessToken()).accessToken, token.accessToken);
+
+  // Without the old XERO_CLIENT_SECRET it cannot be read: needs reconnect, tokens forgotten.
+  await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update xero_connections set refresh_token_enc = ${legacy.encrypt(refresh, "refresh_token")}`));
+  const withoutSecret = make(readXeroSecrets({}));
+  assert.deepEqual(await withoutSecret.upgradeStoredTokens(), { outcome: "needs_reconnect" });
+  const row = await rawRow();
+  assert.equal(row.status, "needs_reconnect");
+  assert.equal(row.reconnect_reason, "LEGACY_TOKENS_UNREADABLE");
+  assert.equal(row.refresh_token_enc, null);
+  const history = (await withoutSecret.status()).history.map((event) => event.action);
+  assert.ok(history.includes("tokens_unreadable") && history.includes("tokens_rewrapped"));
+});
+
+test("credentials entered in Settings are used when the environment sets none; the environment wins when it does", async () => {
+  const { make, rawRow, logs } = await fresh();
+  const settingsOnly = make(readXeroSecrets({}));
+  let status = await settingsOnly.status();
+  assert.equal(status.credentials.source, null);
+  await assert.rejects(settingsOnly.startConnect({ redirectUri: REDIRECT }), (error) => error.code === "XERO_CREDENTIALS_MISSING");
+  await settingsOnly.setCredentials({ clientId: xero.clientId, clientSecret: xero.clientSecret }, { actor: "Owner Person" });
+  status = await settingsOnly.status();
+  assert.equal(status.credentials.source, "settings");
+  assert.equal(status.credentials.settings.clientSecret.set, true);
+  assert.equal(status.credentials.settings.clientSecret.setBy, "Owner Person");
+  assert.ok(!JSON.stringify(status).includes(xero.clientSecret) && !JSON.stringify(status).includes(xero.clientId), "never a value");
+  assert.deepEqual(await connect(settingsOnly), { status: "connected" });
+  assert.equal((await rawRow()).status, "connected");
+
+  // The environment overrides: its (wrong) secret is the one used, and the screen says so.
+  const overridden = make(readXeroSecrets({ XERO_CLIENT_ID: "env-client-id-0001", XERO_CLIENT_SECRET: "env-client-secret-0001" }));
+  status = await overridden.status();
+  assert.equal(status.credentials.source, "environment");
+  assert.equal(status.credentials.environmentOverride, true);
+  await assert.rejects(overridden.accessToken({ force: true }), (error) => error.code === "XERO_CLIENT_REJECTED", "the environment's credentials were used to refresh");
+  for (const line of logs.lines) assert.ok(!line.includes(xero.clientSecret) && !line.includes("env-client-secret-0001"));
+});
+
+test("credentials changes and connections write audit events, never a value", async () => {
+  const { make } = await fresh();
+  const service = make(readXeroSecrets({}));
+  await service.setCredentials({ clientId: xero.clientId, clientSecret: xero.clientSecret }, { actor: "Owner Person" });
+  await service.setCredentials({ clientId: xero.clientId, clientSecret: xero.clientSecret }, { actor: "Owner Person" });
+  await connect(service);
+  await service.disconnect({ actor: "Owner Person" });
+  await service.removeCredentials({ actor: "Owner Person" });
+  const rows = await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => queryRows(sql`select action, actor, details from integration_audit_events where integration = 'xero' order by at, uid`, tx));
+  const actions = rows.map((row) => row.action);
+  for (const action of ["credentials_set", "credentials_replaced", "connected", "disconnected", "credentials_removed"]) assert.ok(actions.includes(action), `${action}: ${actions}`);
+  assert.ok(rows.filter((row) => row.action.startsWith("credentials")).every((row) => row.actor === "Owner Person"));
+  assert.ok(!JSON.stringify(rows).includes(xero.clientSecret) && !JSON.stringify(rows).includes(xero.clientId), "never a value");
+  const stored = await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => queryRows(sql`select count(*)::int as n from integration_credentials`, tx));
+  assert.equal(stored[0].n, 0, "removed");
 });
 
 test("disconnect revokes the refresh token at Xero and forgets the tokens; the settings stay", async () => {
@@ -264,9 +361,11 @@ test("without the secrets, Connect explains what to set", async () => {
     db: testDb.db,
     orgUid: DEFAULT_ORG_UID,
     secrets: readXeroSecrets({}),
+    keyring: testKeyring(),
     http: () => { throw new Error("no HTTP without secrets"); },
   });
   const status = await service.status();
-  assert.deepEqual(status.secrets, { clientIdSet: false, clientSecretSet: false });
-  await assert.rejects(service.startConnect({ redirectUri: REDIRECT }), (error) => error.code === "XERO_SECRETS_MISSING" && error.statusCode === 409);
+  assert.deepEqual(status.credentials.environment, { clientIdSet: false, clientSecretSet: false });
+  assert.equal(status.credentials.source, null);
+  await assert.rejects(service.startConnect({ redirectUri: REDIRECT }), (error) => error.code === "XERO_CREDENTIALS_MISSING" && error.statusCode === 409);
 });

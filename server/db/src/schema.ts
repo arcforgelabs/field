@@ -1990,3 +1990,62 @@ export const xeroInvoiceLinks = pgTable(
     tenantIsolation("xero_invoice_links"),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Integration credentials (#112): what an owner enters in Settings,
+// Integrations (an app's client id and client secret), per organisation and
+// integration, encrypted by server/secrets (AES-256-GCM under
+// FIELD_SECRETS_KEY, with the key's id). Never shown back: the screen shows
+// only that a field is set, when and by whom. Every change writes an
+// integration_audit_events row, which never holds a value.
+
+export const integrationCredentials = pgTable(
+  "integration_credentials",
+  {
+    orgUid: orgUid(),
+    /** xero, and later integrations. */
+    integration: text("integration").notNull(),
+    /** client_id, client_secret, ... */
+    field: text("field").notNull(),
+    /** `fs1.<key id>.<nonce>.<ciphertext>.<tag>` (server/secrets/box.js). */
+    valueEnc: text("value_enc").notNull(),
+    /** The id of the key that wrote it (never the key). */
+    keyId: text("key_id").notNull(),
+    setAt: timestamp("set_at", { withTimezone: true, mode: "date" }).notNull(),
+    setBy: text("set_by"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgUid, t.integration, t.field] }),
+    check("integration_credentials_integration_check", sql`${t.integration} ~ '^[a-z0-9_]{1,40}$'`),
+    check("integration_credentials_field_check", sql`${t.field} ~ '^[a-z0-9_]{1,40}$'`),
+    check("integration_credentials_value_check", sql`${t.valueEnc} like 'fs1.%'`),
+    tenantIsolation("integration_credentials"),
+  ],
+);
+
+export type IntegrationCredential = typeof integrationCredentials.$inferSelect;
+
+/**
+ * Who changed an integration and when (#112): credentials set, replaced or
+ * removed, connected, disconnected. Append-only, and never a value.
+ */
+export const integrationAuditEvents = pgTable(
+  "integration_audit_events",
+  {
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    integration: text("integration").notNull(),
+    action: text("action").notNull(),
+    actor: text("actor"),
+    at: timestamp("at", { withTimezone: true, mode: "date" }).notNull(),
+    /** Which fields, the source, a code: never a value. */
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+  },
+  (t) => [
+    index("integration_audit_events_org_integration_idx").on(t.orgUid, t.integration, t.at),
+    check("integration_audit_events_action_check", sql`${t.action} in ('credentials_set','credentials_replaced','credentials_removed','connected','disconnected','tokens_rewrapped','tokens_unreadable')`),
+    tenantIsolation("integration_audit_events"),
+  ],
+);
+
+export type IntegrationAuditEvent = typeof integrationAuditEvents.$inferSelect;

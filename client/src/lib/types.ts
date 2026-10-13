@@ -155,7 +155,19 @@ export interface XeroIntegration {
   ok: boolean;
   redirectUri: string | null;
   publicUrlConfigured: boolean;
-  secrets: { clientIdSet: boolean; clientSecretSet: boolean };
+  /** Whether this person may change anything here (owners); others see it read-only. */
+  canManage: boolean;
+  /** FIELD_SECRETS_KEY: without it nothing can be stored or read (fail closed). */
+  secretsKey: { configured: boolean; problem: string | null; keyId: string | null; previousKeys: number };
+  /** The Xero app's credentials: never a value, only whether each is set, when and by whom. */
+  credentials: {
+    source: "environment" | "settings" | null;
+    problem: string | null;
+    environment: { clientIdSet: boolean; clientSecretSet: boolean };
+    environmentOverride: boolean;
+    settings: { clientId: XeroCredentialState; clientSecret: XeroCredentialState };
+  };
+  history: Array<{ action: string; actor: string | null; at: string; details: Record<string, unknown> }>;
   scopes: string[];
   connection: {
     status: XeroConnectionStatus;
@@ -225,6 +237,12 @@ export interface XeroCodes {
   code?: string;
   accounts: Array<{ code: string; name: string }>;
   taxRates: Array<{ taxType: string; name: string; rate: number }>;
+}
+
+export interface XeroCredentialState {
+  set: boolean;
+  setAt: string | null;
+  setBy: string | null;
 }
 
 export interface XeroSettings {

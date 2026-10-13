@@ -36,6 +36,8 @@ import { CREDIT_NOTE_ON_REISSUE_CHOICES, createBusinessSettingsService } from ".
 import { createXeroHttp } from "./xero/client.js";
 import { fakeXeroBaseUrl, readXeroSecrets, xeroEndpoints } from "./xero/config.js";
 import { createXeroConnectionService } from "./xero/connection.js";
+import { loadSecretsKeyring } from "./secrets/keyring.js";
+import { createCredentialStore } from "./secrets/credentials.js";
 import { createXeroInvoiceSync } from "./xero/invoice-sync.js";
 import { registerXeroRoutes } from "./xero/routes.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
@@ -542,14 +544,28 @@ try {
 }
 installIssuedDocumentRecorder(issuedDocumentRecorder);
 
-// Xero (#93, docs/XERO.md): the owner's own Xero app, its client id and
-// secret from deployment secrets (XERO_CLIENT_ID, XERO_CLIENT_SECRET); the
-// connection and its encrypted tokens in PostgreSQL. Issued invoices go to
-// Xero after their issue commits (server/xero/invoice-sync.js): the issued
-// invoice rows are the outbox, so issuing and emailing never wait on Xero.
+// Integration secrets (#112, docs/INTEGRATIONS.md): credentials entered in
+// Settings, Integrations, and OAuth tokens, per organisation, encrypted under
+// FIELD_SECRETS_KEY (FIELD_SECRETS_KEY_PREVIOUS while rotating). Without a
+// usable key, integrations fail closed. Boot re-encrypts values an earlier
+// key wrote.
+const secretsKeyring = loadSecretsKeyring(process.env);
+if (secretsKeyring.problem) console.warn(`[secrets] ${secretsKeyring.problem}: integration credentials and tokens cannot be stored or read (docs/INTEGRATIONS.md)`);
+const integrationCredentials = deploymentOrg ? createCredentialStore({ db: getDb(), orgUid: deploymentOrg.uid, keyring: secretsKeyring }) : null;
+if (integrationCredentials) await integrationCredentials.rewrap().catch((error) => console.warn(`[secrets] re-encrypting with the current key failed (${error?.code || "error"})`));
+
+// Xero (#93, docs/XERO.md): the owner's own Xero app. Its client id and
+// secret are entered in Settings (stored as above); XERO_CLIENT_ID and
+// XERO_CLIENT_SECRET in the environment override them. The connection and
+// its encrypted tokens are in PostgreSQL. Issued invoices go to Xero after
+// their issue commits (server/xero/invoice-sync.js): the issued invoice rows
+// are the outbox, so issuing and emailing never wait on Xero.
 const xeroSecrets = readXeroSecrets(process.env);
 const xeroHttpFor = (secrets) => createXeroHttp({ clientId: secrets.clientId, clientSecret: secrets.clientSecret, endpoints: xeroEndpoints(fakeXeroBaseUrl()) });
-const xeroConnection = deploymentOrg ? createXeroConnectionService({ db: getDb(), orgUid: deploymentOrg.uid, secrets: xeroSecrets, http: xeroHttpFor }) : null;
+const xeroConnection = deploymentOrg
+  ? createXeroConnectionService({ db: getDb(), orgUid: deploymentOrg.uid, keyring: secretsKeyring, credentialStore: integrationCredentials, environment: xeroSecrets, http: xeroHttpFor })
+  : null;
+if (xeroConnection) await xeroConnection.upgradeStoredTokens();
 const xeroSyncIntervalMs = Number(process.env.FIELD_XERO_SYNC_INTERVAL_MS);
 const xeroInvoiceSync = xeroConnection ? createXeroInvoiceSync({
   db: getDb(),
@@ -1366,11 +1382,21 @@ app.put("/api/settings/invoicing", requireAuth, requireAdmin, async (req, res) =
   }
 });
 
-// Settings, Integrations, Xero and the invoices' Xero state (#93). Owners only,
-// except the read-only state on a job's Invoices tab.
+// Settings, Integrations, Xero and the invoices' Xero state (#93, #112).
+// Changes are for owners only; the screen and a job's Xero state are
+// read-only for everyone signed in.
 registerXeroRoutes(app, {
   requireAuth,
   requireOwner: requireAdmin,
+  isOwner: (req) => new Promise((resolve) => {
+    // The owner gate, asked without answering the request.
+    const probe = { status: () => probe, json: () => resolve(false), send: () => resolve(false), setHeader: () => {}, end: () => resolve(false) };
+    try {
+      requireAdmin(req, probe, () => resolve(true));
+    } catch {
+      resolve(false);
+    }
+  }),
   connection: () => xeroConnection,
   sync: () => xeroInvoiceSync,
   publicUrl: () => config.publicUrl || null,
