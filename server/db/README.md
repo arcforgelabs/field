@@ -365,6 +365,22 @@ app's client id and secret stay deployment secrets. `field_app` may read,
 insert and update. Run `rollback/0017_xero_connection.down.sql` before
 0016's. Operating it: `docs/XERO.md`.
 
+`0018_xero_invoice_sync` (#93) adds `xero_invoice_syncs`, one row per issued
+invoice on its way to one Xero organisation (its state, attempts, next try,
+the worker's lease, last error code and reason, and the Xero invoice it
+became); `invoices.xero_invoice_id`, `xero_tenant_id` and `xero_status`; and
+`xero_invoice_links`, append-only, every Xero invoice an invoice has had by
+organisation (`field_app` may read and insert). It replaces 0013's
+issued-invoice trigger function so that those three columns may change on an
+issued invoice: an id is replaced only when the earlier one is in
+`xero_invoice_links` and either belongs to another organisation or is
+recorded as voided or deleted in Xero. It also adds
+`xero_connections.codes_checked_at` and `codes_problem`, the saved codes
+checked against the connected organisation.
+Nothing else about an issued invoice may change. Run
+`rollback/0018_xero_invoice_sync.down.sql` before 0017's: it restores 0013's
+function before it drops the columns.
+
 ### Adding tables
 
 A tenant table gets `orgUid: orgUid()` and `tenantIsolation("<table>")` in

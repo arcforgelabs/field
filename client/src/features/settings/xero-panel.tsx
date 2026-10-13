@@ -6,9 +6,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Check, ChevronDown, Copy, ExternalLink, Link2, Unlink } from "lucide-react";
 import { api } from "@/lib/api";
-import type { XeroCreateMode, XeroIntegration } from "@/lib/types";
+import type { XeroCodes, XeroCreateMode, XeroIntegration } from "@/lib/types";
 import { useShell } from "@/components/shell/shell-context";
 import { shortDate } from "@/lib/job-status";
+import { XeroPushDialog } from "@/features/job/xero-invoice-status";
 
 /** What the owner reads for a code from the callback (docs/XERO.md "When connecting fails"). */
 const CALLBACK_MESSAGES: Record<string, string> = {
@@ -40,6 +41,9 @@ export function XeroPanel() {
   const [taxType, setTaxType] = useState("");
   const [tenant, setTenant] = useState("");
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [earlierDays, setEarlierDays] = useState(30);
+  const [codes, setCodes] = useState<XeroCodes | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   async function load() {
     try {
@@ -50,6 +54,9 @@ export function XeroPanel() {
       setTaxType(res.settings.taxType);
       setTenant(res.connection.organisations[0]?.tenantId || "");
       setError(null);
+      // The organisation's own accounts and tax rates, for the lists.
+      if (res.connection.status === "connected") api.xeroCodes().then(setCodes).catch(() => setCodes(null));
+      else setCodes(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "The Xero settings could not be loaded.");
     }
@@ -124,6 +131,11 @@ export function XeroPanel() {
           <span>Set <code>publicUrl</code>, this installation's public address, in Field's configuration (on Replit, in <code>FIELD_CONFIG_JSON</code>), then restart Field. Field builds the redirect address from it, and Connect stays off until it is set.</span>
         </div>
       )}
+      {connection.codesMessage && (
+        <div className="fx-notice fx-notice--warn" role="alert" style={{ margin: 0 }}>
+          <span>{connection.codesMessage}</span>
+        </div>
+      )}
       {notice && <div className={`fx-notice ${notice.tone === "bad" ? "fx-notice--bad" : ""}`} role="status" style={{ margin: 0 }}><span>{notice.text}</span></div>}
 
       <div className="xero__card" aria-label="Connection">
@@ -181,14 +193,29 @@ export function XeroPanel() {
 
       <fieldset className="xero__group" aria-label="Codes">
         <legend className="xero__h">Account and tax</legend>
+        {connected && codes && !codes.available && <p className="fx-dim xero__p">Field could not read your accounts and tax rates from Xero ({codes.code}), so type the codes. They are checked against Xero when Field can read it.</p>}
         <div className="fx-grid2">
-          <label className="fx-label">Sales account code
-            <input className="fx-input" value={account} maxLength={10} aria-invalid={!/^[A-Za-z0-9._-]{1,10}$/.test(account.trim())} onChange={(event) => setAccount(event.target.value)} />
-            <span className="fx-mute xero__hint">The code of your sales account in Xero. 200 is “Sales” in Xero's standard chart.</span>
+          <label className="fx-label">Sales account
+            {codes?.available ? (
+              <select className="fx-select" value={account} onChange={(event) => setAccount(event.target.value)}>
+                {!codes.accounts.some((option) => option.code === account) && <option value={account}>{account} (not an active revenue account in Xero)</option>}
+                {codes.accounts.map((option) => <option key={option.code} value={option.code}>{option.code} · {option.name}</option>)}
+              </select>
+            ) : (
+              <input className="fx-input" value={account} maxLength={10} aria-invalid={!/^[A-Za-z0-9._-]{1,10}$/.test(account.trim())} onChange={(event) => setAccount(event.target.value)} />
+            )}
+            <span className="fx-mute xero__hint">{codes?.available ? "Your active revenue accounts in Xero." : "The code of your sales account in Xero. 200 is “Sales” in Xero's standard chart."}</span>
           </label>
           <label className="fx-label">GST tax type
-            <input className="fx-input" value={taxType} maxLength={40} aria-invalid={!/^[A-Za-z0-9_]{1,40}$/.test(taxType.trim())} onChange={(event) => setTaxType(event.target.value)} />
-            <span className="fx-mute xero__hint">Xero's code for GST on Income in Australia is OUTPUT. Lines without GST use EXEMPTOUTPUT.</span>
+            {codes?.available ? (
+              <select className="fx-select" value={taxType} onChange={(event) => setTaxType(event.target.value)}>
+                {!codes.taxRates.some((option) => option.taxType === taxType) && <option value={taxType}>{taxType} (not an active sales tax rate in Xero)</option>}
+                {codes.taxRates.map((option) => <option key={option.taxType} value={option.taxType}>{option.name} · {option.rate}%</option>)}
+              </select>
+            ) : (
+              <input className="fx-input" value={taxType} maxLength={40} aria-invalid={!/^[A-Za-z0-9_]{1,40}$/.test(taxType.trim())} onChange={(event) => setTaxType(event.target.value)} />
+            )}
+            <span className="fx-mute xero__hint">{codes?.available ? "Your active tax rates for sales in Xero. Lines without GST use EXEMPTOUTPUT." : "Xero's code for GST on Income in Australia is OUTPUT. Lines without GST use EXEMPTOUTPUT."}</span>
           </label>
         </div>
         <div style={{ display: "flex" }}>
@@ -197,12 +224,40 @@ export function XeroPanel() {
             type="button"
             className="fx-btn fx-btn--primary"
             disabled={!dirty || busy !== null}
-            onClick={() => act("save", () => api.updateXeroSettings({ createMode: mode, salesAccountCode: account.trim(), taxType: taxType.trim().toUpperCase() }), "Saved.")}
+            onClick={() => act("save", async () => {
+              const saved = await api.updateXeroSettings({ createMode: mode, salesAccountCode: account.trim(), taxType: taxType.trim().toUpperCase() });
+              if (saved.settings.warning) setNotice({ tone: "bad", text: saved.settings.warning });
+            }, "Saved.")}
           >
             {busy === "save" ? "Saving…" : "Save"}
           </button>
         </div>
       </fieldset>
+
+      {connected && (
+        <fieldset className="xero__group" aria-label="Invoices issued before">
+          <legend className="xero__h">Invoices issued before</legend>
+          <p className="fx-dim xero__p">Invoices issued before Xero was connected, or while Create in Xero was off, are not sent by themselves. Preview them, then choose which to send{settings.createMode === "authorised" ? " as approved invoices" : " as drafts"}.</p>
+          <div className="xero__row">
+            <label className="fx-label" style={{ flex: "0 1 220px" }}>Issued in the last
+              <select className="fx-select" value={earlierDays} onChange={(event) => setEarlierDays(Number(event.target.value))}>
+                <option value={30}>30 days</option>
+                <option value={90}>90 days</option>
+                <option value={365}>12 months</option>
+              </select>
+            </label>
+            <button type="button" className="fx-btn" style={{ alignSelf: "flex-end" }} onClick={() => setPreviewing(true)}>Preview</button>
+          </div>
+        </fieldset>
+      )}
+
+      {previewing && (
+        <XeroPushDialog
+          sinceDays={earlierDays}
+          onCancel={() => setPreviewing(false)}
+          onSent={(count) => { setPreviewing(false); shell.toast(count ? `Sending ${count} to Xero` : "Nothing was sent"); }}
+        />
+      )}
 
       <SetupSteps data={data} open={!secretsReady || connection.status === "disconnected"} onCopy={copy} />
 

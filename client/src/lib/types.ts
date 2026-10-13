@@ -164,10 +164,67 @@ export interface XeroIntegration {
     connectedBy: string | null;
     reconnectReason: string | null;
     reconnectMessage: string | null;
+    /** The saved codes are not the connected organisation's: why, in words. Invoices wait meanwhile. */
+    codesProblem?: string | null;
+    codesMessage?: string | null;
+    codesCheckedAt?: string | null;
     organisations: Array<{ tenantId: string; tenantName: string }>;
   };
   settings: XeroSettings;
   choices: { createMode: Array<{ value: XeroCreateMode; label: string; description: string }> };
+}
+
+/** One invoice's way to Xero, on the job's Invoices tab. */
+export interface XeroInvoiceState {
+  invoiceUid: string;
+  /** held: queued for, or in, another Xero organisation. void-in-xero: credited or voided in Field after it reached Xero. */
+  state: "not-sent" | "pending" | "created" | "mismatch" | "failed" | "skipped" | "held" | "void-in-xero";
+  label: string;
+  xeroStatus: string | null;
+  /** Why it failed, waits or differs, in plain words. */
+  reason: string | null;
+  nextAttemptAt: string | null;
+  canRetry: boolean;
+  canSend: boolean;
+}
+
+export interface JobXeroStatus {
+  ok: boolean;
+  connected: boolean;
+  connection: XeroConnectionStatus;
+  createMode: XeroCreateMode;
+  /** By invoice number. */
+  invoices: Record<string, XeroInvoiceState>;
+}
+
+/** What sending invoices issued before the connection would create. */
+export interface XeroPushPreview {
+  ok: boolean;
+  wroteNothing: true;
+  connected: boolean;
+  mode: "draft" | "authorised";
+  invoices: Array<{
+    invoiceUid: string;
+    jobId: string;
+    number: string;
+    reference: string | null;
+    customer: string | null;
+    issuedAt: string | null;
+    total: string;
+    status: string;
+    creates: string;
+    previously: string | null;
+    problem: string | null;
+  }>;
+}
+
+/** The organisation's active revenue accounts and sales tax rates, for the lists. */
+export interface XeroCodes {
+  ok: boolean;
+  available: boolean;
+  code?: string;
+  accounts: Array<{ code: string; name: string }>;
+  taxRates: Array<{ taxType: string; name: string; rate: number }>;
 }
 
 export interface XeroSettings {
@@ -176,6 +233,8 @@ export interface XeroSettings {
   taxType: string;
   invoiceNumbering: "field";
   autoFrom: string | null;
+  /** Saved without checking the codes against Xero, and why. */
+  warning?: string;
 }
 
 /** Whether an invoice returned to draft and reissued with different content is credited first (#28). */

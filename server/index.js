@@ -36,12 +36,13 @@ import { CREDIT_NOTE_ON_REISSUE_CHOICES, createBusinessSettingsService } from ".
 import { createXeroHttp } from "./xero/client.js";
 import { fakeXeroBaseUrl, readXeroSecrets, xeroEndpoints } from "./xero/config.js";
 import { createXeroConnectionService } from "./xero/connection.js";
+import { createXeroInvoiceSync } from "./xero/invoice-sync.js";
 import { registerXeroRoutes } from "./xero/routes.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
 // A job detail's quote read from its rows (#10), kept beside the detail object.
 const jobDetailQuoteRows = new WeakMap();
-import { createReplicaFallbackBlobStore } from "./documents/blob-store.js";
+import { createPostgresBlobStore, createReplicaFallbackBlobStore } from "./documents/blob-store.js";
 import { resolveDocumentReplicaConfig } from "./documents/r2-config.js";
 import { createR2ObjectStore } from "./documents/r2-client.js";
 import { createDisabledReplicator, createDocumentReplicator } from "./documents/replicator.js";
@@ -541,17 +542,43 @@ try {
 }
 installIssuedDocumentRecorder(issuedDocumentRecorder);
 
+// Xero (#93, docs/XERO.md): the owner's own Xero app, its client id and
+// secret from deployment secrets (XERO_CLIENT_ID, XERO_CLIENT_SECRET); the
+// connection and its encrypted tokens in PostgreSQL. Issued invoices go to
+// Xero after their issue commits (server/xero/invoice-sync.js): the issued
+// invoice rows are the outbox, so issuing and emailing never wait on Xero.
+const xeroSecrets = readXeroSecrets(process.env);
+const xeroHttpFor = (secrets) => createXeroHttp({ clientId: secrets.clientId, clientSecret: secrets.clientSecret, endpoints: xeroEndpoints(fakeXeroBaseUrl()) });
+const xeroConnection = deploymentOrg ? createXeroConnectionService({ db: getDb(), orgUid: deploymentOrg.uid, secrets: xeroSecrets, http: xeroHttpFor }) : null;
+const xeroSyncIntervalMs = Number(process.env.FIELD_XERO_SYNC_INTERVAL_MS);
+const xeroInvoiceSync = xeroConnection ? createXeroInvoiceSync({
+  db: getDb(),
+  orgUid: deploymentOrg.uid,
+  connection: xeroConnection,
+  http: () => xeroHttpFor(xeroSecrets),
+  blobs: issuedDocumentBlobs || createPostgresBlobStore(),
+  ...(Number.isFinite(xeroSyncIntervalMs) && xeroSyncIntervalMs >= 1000 ? { intervalMs: xeroSyncIntervalMs, firstDelayMs: xeroSyncIntervalMs } : {}),
+}) : null;
+if (xeroInvoiceSync) {
+  xeroConnection.onChange((event) => { if (event.type !== "disconnected") xeroInvoiceSync.kick(); });
+  xeroInvoiceSync.start();
+}
+
 // The invoice issue service (#28, step 4b): an invoice is issued when it is
 // finalised (authorised, sent, revised), in one PostgreSQL transaction that
 // allocates its INV-YYYY-M-N number, renders and stores its PDF and writes
 // its row. Without a database, issuing an invoice is refused: it is never
-// issued outside the sequence.
+// issued outside the sequence. After it commits, the Xero sync is told; it
+// never runs inside the issue.
 try {
   installInvoiceIssuer(createInvoiceIssueService({
     db: getDb(),
     orgUid: deploymentOrg?.uid,
     ...(issuedDocumentBlobs ? { blobs: issuedDocumentBlobs } : {}),
-    onBlobsStored: (sha256s) => documentReplica.notifyStored(sha256s),
+    onBlobsStored: (sha256s) => {
+      xeroInvoiceSync?.kick();
+      return documentReplica.notifyStored(sha256s);
+    },
   }));
 } catch (err) {
   const reason = err.code === "FIELD_NO_DATABASE" ? "this server has no database" : err.message;
@@ -1050,7 +1077,7 @@ app.get(["/demo", "/demo-account-create"], async (_req, res) => {
 
 // ── User management ──────────────────────────────────────────────
 // Each bearer token maps to exactly one user. Admin endpoints require role === "admin".
-app.get("/api/storage/status", requireAuth, requireAdmin, (_req, res) => {
+app.get("/api/storage/status", requireAuth, requireAdmin, async (_req, res) => {
   res.json({
     ...(durableStorage ? durableStorage.status() : { enabled: false }),
     issuedDocuments: issuedDocumentRecorder.status(),
@@ -1058,6 +1085,7 @@ app.get("/api/storage/status", requireAuth, requireAdmin, (_req, res) => {
     invoiceRows: invoiceRowRecorder.status(),
     quoteReads: quoteReadsStatus(),
     documentReplica: documentReplica.status(),
+    xero: xeroInvoiceSync ? await xeroInvoiceSync.status().catch(() => ({ enabled: true, error: "XERO_STATUS_FAILED" })) : { enabled: false },
   });
 });
 
@@ -1338,16 +1366,13 @@ app.put("/api/settings/invoicing", requireAuth, requireAdmin, async (req, res) =
   }
 });
 
-// Xero (#93, docs/XERO.md): the owner's own Xero app, its client id and
-// secret from deployment secrets (XERO_CLIENT_ID, XERO_CLIENT_SECRET); the
-// connection and its encrypted tokens in PostgreSQL. Owners only.
-const xeroSecrets = readXeroSecrets(process.env);
-const xeroHttpFor = (secrets) => createXeroHttp({ clientId: secrets.clientId, clientSecret: secrets.clientSecret, endpoints: xeroEndpoints(fakeXeroBaseUrl()) });
-const xeroConnection = deploymentOrg ? createXeroConnectionService({ db: getDb(), orgUid: deploymentOrg.uid, secrets: xeroSecrets, http: xeroHttpFor }) : null;
+// Settings, Integrations, Xero and the invoices' Xero state (#93). Owners only,
+// except the read-only state on a job's Invoices tab.
 registerXeroRoutes(app, {
   requireAuth,
   requireOwner: requireAdmin,
   connection: () => xeroConnection,
+  sync: () => xeroInvoiceSync,
   publicUrl: () => config.publicUrl || null,
   actorOf: (req) => req.caller?.name || req.caller?.email || req.caller?.id || null,
 });

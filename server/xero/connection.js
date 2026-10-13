@@ -135,9 +135,29 @@ export function createXeroConnectionService({
     };
   }
 
+  // What is wrong with the saved codes in the connected organisation, in words.
+  function codesMessage(row) {
+    if (row?.status !== "connected" || !row?.codesProblem) return null;
+    const where = row.tenantName || "your Xero organisation";
+    if (row.codesProblem === "XERO_ACCOUNT_CODE_UNKNOWN") return `Sales account ${row.salesAccountCode} is not an active revenue account in ${where}. Choose one below; invoices wait until then.`;
+    if (row.codesProblem === "XERO_TAX_TYPE_UNKNOWN") return `GST tax type ${row.taxType} is not an active tax rate for sales in ${where}. Choose one below; invoices wait until then.`;
+    if (row.codesProblem === "XERO_CODES_UNCHECKED") return `Field has not been able to check the sales account and the GST tax type against ${where} yet. Invoices wait; Field checks again by itself, or save the codes below.`;
+    return `The saved codes are not ones ${where} has. Choose them below; invoices wait until then.`;
+  }
+
+  // The saved codes against the organisation's lists: the problem code, or null.
+  function codesProblemFor(row, codes) {
+    if (!codes.accounts.some((account) => account.code === (row?.salesAccountCode || XERO_DEFAULTS.salesAccountCode))) return "XERO_ACCOUNT_CODE_UNKNOWN";
+    if (!codes.taxRates.some((rate) => rate.taxType === (row?.taxType || XERO_DEFAULTS.taxType))) return "XERO_TAX_TYPE_UNKNOWN";
+    return null;
+  }
+
   function connectionOf(row) {
     const status = row?.status || "disconnected";
     return {
+      codesProblem: status === "connected" ? row?.codesProblem || null : null,
+      codesMessage: codesMessage(row),
+      codesCheckedAt: status === "connected" ? iso(row?.codesCheckedAt) : null,
       status,
       tenantName: status === "disconnected" ? null : row?.tenantName || null,
       connectedAt: status === "disconnected" ? null : iso(row?.connectedAt),
@@ -195,7 +215,14 @@ export function createXeroConnectionService({
     /** The raw connection state the invoice sync reads (no tokens). */
     async state() {
       const row = await scope.transaction(read);
-      return { status: row?.status || "disconnected", tenantId: row?.tenantId || null, ...settingsOf(row) };
+      return {
+        status: row?.status || "disconnected",
+        tenantId: row?.tenantId || null,
+        tenantName: row?.tenantName || null,
+        codesProblem: row?.status === "connected" ? row?.codesProblem || null : null,
+        codesMessage: codesMessage(row),
+        ...settingsOf(row),
+      };
     },
 
     /** Start connecting: record the sign-in in progress and return Xero's sign-in address. */
@@ -261,13 +288,19 @@ export function createXeroConnectionService({
           availableTenants: [],
           connectedAt: at,
           connectedBy: pending.pendingBy,
+          // Sends wait until the codes are checked against this organisation.
+          codesProblem: "XERO_CODES_UNCHECKED",
+          codesCheckedAt: null,
           // The same organisation again (after a reconnect) keeps its start;
           // a new one starts now: earlier invoices are never pushed by themselves.
           autoFrom: kept && previous?.autoFrom ? previous.autoFrom : ((previous?.createMode || XERO_DEFAULTS.createMode) === "off" ? null : at),
         });
         return "connected";
       });
-      if (result === "connected") notify({ type: "connected" });
+      if (result === "connected") {
+        await this.checkCodes();
+        notify({ type: "connected" });
+      }
       return { status: result };
     },
 
@@ -287,11 +320,14 @@ export function createXeroConnectionService({
           availableTenants: [],
           connectedAt: at,
           connectedBy: row.connectedBy || actor,
+          codesProblem: "XERO_CODES_UNCHECKED",
+          codesCheckedAt: null,
           autoFrom: row.createMode === "off" ? null : at,
           updatedBy: actor,
         });
         return "connected";
       });
+      await this.checkCodes();
       notify({ type: "connected" });
       return { status: result };
     },
@@ -344,6 +380,28 @@ export function createXeroConnectionService({
         if (!/^[A-Z0-9_]{1,40}$/.test(taxType)) throw new XeroConnectionError("The tax type is Xero's code for it, for example OUTPUT (GST on Income).", { code: "XERO_TAX_TYPE_INVALID" });
         changes.taxType = taxType;
       }
+      // Checked against the organisation's own accounts and tax rates when
+      // Field can read them; saved with a warning when it cannot.
+      let warning = null;
+      let checked = null;
+      if (changes.salesAccountCode !== undefined || changes.taxType !== undefined) {
+        const current = await scope.transaction(read);
+        if (current?.status === "connected") {
+          const codes = await this.codes();
+          if (codes.available) {
+            if (changes.salesAccountCode !== undefined && !codes.accounts.some((account) => account.code === changes.salesAccountCode)) {
+              throw new XeroConnectionError(`${changes.salesAccountCode} is not an active revenue account in ${current.tenantName || "your Xero organisation"}. Choose one from the list.`, { code: "XERO_ACCOUNT_CODE_UNKNOWN" });
+            }
+            if (changes.taxType !== undefined && !codes.taxRates.some((rate) => rate.taxType === changes.taxType)) {
+              throw new XeroConnectionError(`${changes.taxType} is not an active tax rate for sales in ${current.tenantName || "your Xero organisation"}. Choose one from the list.`, { code: "XERO_TAX_TYPE_UNKNOWN" });
+            }
+            checked = { codesProblem: codesProblemFor({ ...current, ...changes }, codes), codesCheckedAt: now() };
+          } else {
+            warning = `Saved, but Field could not check these codes with Xero (${codes.code}). Check them in Xero.`;
+            checked = { codesProblem: null, codesCheckedAt: null };
+          }
+        }
+      }
       const row = await scope.transaction(async (tx) => {
         const previous = await read(tx);
         if (changes.createMode !== undefined) {
@@ -352,9 +410,63 @@ export function createXeroConnectionService({
           if (changes.createMode === "off") changes.autoFrom = null;
           else if (was === "off" || !previous?.autoFrom) changes.autoFrom = previous?.status === "connected" || previous?.status === "needs_reconnect" ? now() : null;
         }
-        return upsert(tx, { ...changes, updatedBy: actor });
+        return upsert(tx, { ...changes, ...(checked || {}), updatedBy: actor });
       });
-      return settingsOf(row);
+      if (checked) notify({ type: "settings" });
+      return warning ? { ...settingsOf(row), warning } : settingsOf(row);
+    },
+
+    /**
+     * Check the saved account and tax codes against the connected
+     * organisation (after connecting, or switching organisation), and record
+     * the result: the screen shows it, and invoices wait while a code is not
+     * the organisation's. When Xero cannot be read nothing is recorded as
+     * wrong. Never throws.
+     */
+    async checkCodes() {
+      try {
+        const row = await scope.transaction(read);
+        if (row?.status !== "connected") return null;
+        const codes = await this.codes();
+        // Xero could not be read: sends keep waiting, with that reason.
+        const result = codes.available ? { codesProblem: codesProblemFor(row, codes), codesCheckedAt: now() } : { codesProblem: "XERO_CODES_UNCHECKED", codesCheckedAt: null };
+        await scope.transaction((tx) => upsert(tx, result));
+        if (result.codesProblem) logger.warn?.(`[xero] the saved codes are not confirmed for the connected organisation (${result.codesProblem}); invoices wait`);
+        return result;
+      } catch (error) {
+        logger.warn?.(`[xero] the saved codes could not be checked (${/^[A-Z0-9_]{1,64}$/.test(String(error?.code || "")) ? error.code : "XERO_ERROR"})`);
+        return null;
+      }
+    },
+
+    /**
+     * The organisation's active revenue accounts and the active tax rates
+     * that apply to sales, from Xero (accounting.settings.read), for the
+     * owner's lists. Never throws: { available: false, code } when Xero cannot
+     * be read, and the screen falls back to typing the codes.
+     */
+    async codes() {
+      try {
+        const client = http(secrets);
+        const [accounts, rates] = await this.withAccessToken(async (token) => Promise.all([
+          client.accounting({ ...token, path: "/Accounts" }),
+          client.accounting({ ...token, path: "/TaxRates" }),
+        ]));
+        return {
+          available: true,
+          accounts: (accounts?.Accounts || [])
+            .filter((account) => account?.Code && account.Status === "ACTIVE" && (account.Class === "REVENUE" || ["REVENUE", "SALES", "OTHERINCOME"].includes(account.Type)))
+            .map((account) => ({ code: String(account.Code), name: String(account.Name || account.Code) }))
+            .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
+          taxRates: (rates?.TaxRates || [])
+            .filter((rate) => rate?.TaxType && rate.Status === "ACTIVE" && rate.CanApplyToRevenue !== false)
+            .map((rate) => ({ taxType: String(rate.TaxType), name: String(rate.Name || rate.TaxType), rate: Number(rate.EffectiveRate ?? rate.DisplayTaxRate ?? 0) })),
+        };
+      } catch (error) {
+        const code = /^[A-Z0-9_]{1,64}$/.test(String(error?.code || "")) ? error.code : "XERO_ERROR";
+        logger.warn?.(`[xero] the accounts and tax rates could not be read (${code})`);
+        return { available: false, code, accounts: [], taxRates: [] };
+      }
     },
 
     /**
@@ -433,6 +545,9 @@ export function createXeroConnectionService({
         throw error;
       }
     },
+
+    /** An API call Xero refused for the organisation (403, a missing scope): the owner connects again. */
+    markNeedsReconnect: (code) => markNeedsReconnect(code),
 
     /** Called with { type: "connected" | "disconnected" } (the invoice sync resumes on connect). */
     onChange(listener) {

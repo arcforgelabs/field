@@ -1107,6 +1107,26 @@ export const api = {
   updateXeroSettings(settings: Partial<Pick<import("./types.ts").XeroSettings, "createMode" | "salesAccountCode" | "taxType">>) {
     return request<{ ok: boolean; settings: import("./types.ts").XeroSettings }>("/api/integrations/xero/settings", { method: "PUT", body: JSON.stringify(settings) });
   },
+  /** Owner only: the organisation's revenue accounts and sales tax rates ({ available: false } when Xero cannot be read). */
+  xeroCodes() {
+    return request<import("./types.ts").XeroCodes>("/api/integrations/xero/codes");
+  },
+  /** Each invoice's Xero state on a job (anyone signed in). */
+  jobXeroStatus(jobId: string) {
+    return request<import("./types.ts").JobXeroStatus>(`/api/jobs/${encodeURIComponent(jobId)}/xero`);
+  },
+  /** Owner only: what sending these invoices to Xero would create. Writes nothing. */
+  previewXeroPush(input: { invoiceUids?: string[]; sinceDays?: number }) {
+    return request<import("./types.ts").XeroPushPreview>("/api/integrations/xero/push/preview", { method: "POST", body: JSON.stringify(input) });
+  },
+  /** Owner only: send these invoices to Xero. */
+  pushToXero(invoiceUids: string[]) {
+    return request<{ ok: boolean; queued: string[]; mode: string }>("/api/integrations/xero/push", { method: "POST", body: JSON.stringify({ invoiceUids }) });
+  },
+  /** Owner only: try an invoice's Xero step again. */
+  retryXero(invoiceUid: string) {
+    return request<{ ok: boolean; queued: string[] }>(`/api/integrations/xero/invoices/${encodeURIComponent(invoiceUid)}/retry`, { method: "POST" });
+  },
   /** Owner only. Read-only; it can take 15 s or more (409 while another runs, 504 out of time). */
   invoiceAmountDisagreements() {
     return request<import("./types.ts").InvoiceAmountReport>("/api/admin/invoices/amount-disagreements");

@@ -19,7 +19,20 @@
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 
-const RATES = { OUTPUT: 10, EXEMPTOUTPUT: 0, BASEXCLUDED: 0, OUTPUT2: 15 };
+const RATES = { OUTPUT: 10, EXEMPTOUTPUT: 0, BASEXCLUDED: 0, INPUT: 10 };
+const TAX_RATES = [
+  { TaxType: "OUTPUT", Name: "GST on Income", Status: "ACTIVE", CanApplyToRevenue: true, EffectiveRate: 10 },
+  { TaxType: "EXEMPTOUTPUT", Name: "GST Free Income", Status: "ACTIVE", CanApplyToRevenue: true, EffectiveRate: 0 },
+  { TaxType: "BASEXCLUDED", Name: "BAS Excluded", Status: "ACTIVE", CanApplyToRevenue: true, EffectiveRate: 0 },
+  { TaxType: "INPUT", Name: "GST on Expenses", Status: "ACTIVE", CanApplyToRevenue: false, EffectiveRate: 10 },
+];
+const ACCOUNTS = [
+  { Code: "200", Name: "Sales", Type: "REVENUE", Class: "REVENUE", Status: "ACTIVE" },
+  { Code: "260", Name: "Other Revenue", Type: "OTHERINCOME", Class: "REVENUE", Status: "ACTIVE" },
+  { Code: "4000", Name: "Earthworks income", Type: "SALES", Class: "REVENUE", Status: "ACTIVE" },
+  { Code: "299", Name: "Old sales", Type: "REVENUE", Class: "REVENUE", Status: "ARCHIVED" },
+  { Code: "310", Name: "Cost of Goods Sold", Type: "DIRECTCOSTS", Class: "EXPENSE", Status: "ACTIVE" },
+];
 
 function money(value) {
   return Math.round(Number(value) * 100) / 100;
@@ -30,7 +43,7 @@ export async function startFakeXero({
   clientSecret = "fake-client-secret-0001",
   tenants = [{ tenantId: "11111111-2222-3333-4444-555555555555", tenantName: "Synthetic Earthworks Pty Ltd" }],
   accessTtlSeconds = 1800,
-  accounts = [{ Code: "200", Name: "Sales", Type: "REVENUE", Status: "ACTIVE" }],
+  accounts = ACCOUNTS,
 } = {}) {
   const state = {
     codes: new Map(),
@@ -46,6 +59,8 @@ export async function startFakeXero({
     revoked: [],
     everyCode: [],
     nextInvoiceNumber: 1,
+    // The organisation's chart of accounts; a test may change it.
+    accounts: [...accounts],
     // Tests can make Xero total an invoice its own way (ignore TaxAmount).
     ignoreTaxAmount: false,
   };
@@ -116,7 +131,12 @@ export async function startFakeXero({
     const failure = state.failures.find((entry) => entry.times > 0 && entry.method === req.method && entry.match.test(url.pathname));
     if (failure) {
       failure.times -= 1;
-      return send(res, failure.status, failure.body, failure.headers);
+      if (!failure.afterProcessing) return send(res, failure.status, failure.body, failure.headers);
+      // Xero did the work, but the answer is lost on the way back.
+      const writeHead = res.writeHead.bind(res);
+      const end = res.end.bind(res);
+      res.writeHead = () => writeHead(failure.status, { "content-type": "application/json", ...failure.headers });
+      res.end = () => end(JSON.stringify(failure.body ?? {}));
     }
 
     // Identity: authorize (auto-consent), token, revocation.
@@ -178,19 +198,25 @@ export async function startFakeXero({
     };
 
     const api = url.pathname.replace(/^\/api\.xro\/2\.0/, "");
-    if (api === "/Accounts" && req.method === "GET") return send(res, 200, { Accounts: accounts });
-    if (api === "/TaxRates" && req.method === "GET") return send(res, 200, { TaxRates: Object.entries(RATES).map(([TaxType, rate]) => ({ TaxType, Name: TaxType, Status: "ACTIVE", EffectiveRate: rate })) });
+    // Each organisation sees only its own invoices and contacts (entries a
+    // test pushes without one are everyone's).
+    const tenant = req.headers["xero-tenant-id"];
+    const mine = (entry) => !entry.tenantId || entry.tenantId === tenant;
+    const invoicesHere = state.invoices.filter(mine);
+    const contactsHere = state.contacts.filter(mine);
+    if (api === "/Accounts" && req.method === "GET") return send(res, 200, { Accounts: state.accounts });
+    if (api === "/TaxRates" && req.method === "GET") return send(res, 200, { TaxRates: TAX_RATES });
     if (api === "/Contacts" && req.method === "GET") {
-      const where = url.searchParams.get("where") || "";
-      const match = /^(Name|EmailAddress)=="(.*)"$/.exec(where);
-      const found = match ? state.contacts.filter((contact) => String(contact[match[1]] || "").toLowerCase() === match[2].replace(/\\"/g, "\"").toLowerCase()) : state.contacts;
+      // searchTerm: case-insensitive, in the name or the email (as Xero's).
+      const term = String(url.searchParams.get("searchTerm") || "").toLowerCase();
+      const found = term ? contactsHere.filter((contact) => contact.Name.toLowerCase().includes(term) || String(contact.EmailAddress || "").toLowerCase().includes(term)) : contactsHere;
       return send(res, 200, { Contacts: found });
     }
     if (api === "/Contacts" && req.method === "PUT") {
       const created = [];
       for (const input of call.body?.Contacts || []) {
-        if (state.contacts.some((contact) => contact.Name.toLowerCase() === String(input.Name).toLowerCase())) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "The contact name must be unique across all active contacts." }] }] });
-        const contact = { ContactID: randomUUID(), Name: input.Name, EmailAddress: input.EmailAddress || "", ContactStatus: "ACTIVE" };
+        if (contactsHere.some((contact) => contact.ContactStatus !== "ARCHIVED" && contact.Name.toLowerCase() === String(input.Name).toLowerCase())) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "The contact name must be unique across all active contacts." }] }] });
+        const contact = { ContactID: randomUUID(), Name: input.Name, EmailAddress: input.EmailAddress || "", ContactStatus: "ACTIVE", tenantId: tenant };
         state.contacts.push(contact);
         created.push(contact);
       }
@@ -198,17 +224,34 @@ export async function startFakeXero({
     }
     if (api === "/Invoices" && req.method === "GET") {
       const numbers = (url.searchParams.get("InvoiceNumbers") || "").split(",").filter(Boolean);
-      return send(res, 200, { Invoices: state.invoices.filter((invoice) => !numbers.length || numbers.includes(invoice.InvoiceNumber)) });
+      return send(res, 200, { Invoices: invoicesHere.filter((invoice) => !numbers.length || numbers.includes(invoice.InvoiceNumber)) });
+    }
+    const single = /^\/Invoices\/([^/]+)$/.exec(api);
+    if (single && req.method === "GET") {
+      const invoice = invoicesHere.find((entry) => entry.InvoiceID === single[1] || entry.InvoiceNumber === decodeURIComponent(single[1]));
+      return invoice ? send(res, 200, { Invoices: [invoice] }) : send(res, 404, { Title: "Not found" });
+    }
+    // An update that names only the status (approving a draft) keeps the lines.
+    if (single && req.method === "POST") {
+      const invoice = invoicesHere.find((entry) => entry.InvoiceID === single[1]);
+      if (!invoice) return remember(404, { Title: "Not found" });
+      const change = call.body?.Invoices?.[0] || {};
+      if (change.Status === "AUTHORISED" && !invoice.DueDate) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "Due Date is required." }] }] });
+      if (change.Status) invoice.Status = change.Status;
+      return remember(200, { Invoices: [invoice] });
     }
     if (api === "/Invoices" && (req.method === "PUT" || req.method === "POST")) {
       const created = [];
       for (const input of call.body?.Invoices || []) {
         const invoice = structuredClone(input);
         if (!invoice.InvoiceNumber) invoice.InvoiceNumber = `INV-${String(state.nextInvoiceNumber++).padStart(4, "0")}`;
-        if (state.invoices.some((existing) => existing.InvoiceNumber === invoice.InvoiceNumber)) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "Invoice # must be unique." }] }] });
-        if (!state.contacts.some((contact) => contact.ContactID === invoice.Contact?.ContactID)) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "The contact could not be found." }] }] });
+        // A deleted draft frees its number; a voided invoice keeps it (Xero's
+        // behaviour for a voided number is not confirmed: docs/XERO.md).
+        if (invoicesHere.some((existing) => existing.InvoiceNumber === invoice.InvoiceNumber && existing.Status !== "DELETED")) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "Invoice # must be unique." }] }] });
+        if (!contactsHere.some((contact) => contact.ContactID === invoice.Contact?.ContactID && contact.ContactStatus !== "ARCHIVED")) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "The contact could not be found." }] }] });
         if (invoice.Status === "AUTHORISED" && !invoice.DueDate) return remember(400, { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "Due Date is required." }] }] });
         invoice.InvoiceID = randomUUID();
+        invoice.tenantId = tenant;
         invoice.Status = invoice.Status || "DRAFT";
         invoiceTotals(invoice);
         state.invoices.push(invoice);
@@ -218,7 +261,7 @@ export async function startFakeXero({
     }
     const attachment = /^\/Invoices\/([^/]+)\/Attachments\/([^/]+)$/.exec(api);
     if (attachment && (req.method === "PUT" || req.method === "POST")) {
-      const invoice = state.invoices.find((entry) => entry.InvoiceID === attachment[1]);
+      const invoice = invoicesHere.find((entry) => entry.InvoiceID === attachment[1]);
       if (!invoice) return remember(404, { Title: "Not found" });
       const record = { AttachmentID: randomUUID(), InvoiceID: invoice.InvoiceID, FileName: decodeURIComponent(attachment[2]), MimeType: req.headers["content-type"], ContentLength: raw.length, IncludeOnline: url.searchParams.get("IncludeOnline") === "true", bytes: raw };
       state.attachments = state.attachments.filter((entry) => !(entry.InvoiceID === record.InvoiceID && entry.FileName === record.FileName));
@@ -235,9 +278,13 @@ export async function startFakeXero({
     clientId,
     clientSecret,
     state,
-    /** The next `times` calls of `method` to a path matching `match` answer with `status`. */
-    failNext({ method = "PUT", match, status, body: failureBody = {}, headers = {}, times = 1 }) {
-      state.failures.push({ method, match, status, body: failureBody, headers, times });
+    /**
+     * The next `times` calls of `method` to a path matching `match` answer with
+     * `status`. With `afterProcessing`, the fake does the work first and the
+     * answer is lost (a timeout after Xero created the invoice).
+     */
+    failNext({ method = "PUT", match, status, body: failureBody = {}, headers = {}, times = 1, afterProcessing = false }) {
+      state.failures.push({ method, match, status, body: failureBody, headers, times, afterProcessing });
     },
     /** Every access token Xero issued expires now. */
     expireAccessTokens() {

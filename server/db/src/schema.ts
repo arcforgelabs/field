@@ -1352,6 +1352,15 @@ export const invoices = pgTable(
     revisedBy: text("revised_by"),
     /** Why the status is what it is, where the files say more than the status. */
     note: text("note"),
+    /**
+     * The matching invoice in the owner's Xero (#93), the organisation it is
+     * in, and its Xero status when Field last saw it. The id is set once per
+     * organisation; it moves only to another organisation's invoice, after the
+     * earlier one is in xero_invoice_links.
+     */
+    xeroInvoiceId: text("xero_invoice_id"),
+    xeroTenantId: text("xero_tenant_id"),
+    xeroStatus: text("xero_status"),
     createdAt: createdAt(),
     createdBy: text("created_by"),
     updatedAt: updatedAt(),
@@ -1360,6 +1369,7 @@ export const invoices = pgTable(
   },
   (t) => [
     uniqueIndex("invoices_org_uid_key").on(t.orgUid, t.uid),
+    uniqueIndex("invoices_org_xero_invoice_key").on(t.orgUid, t.xeroInvoiceId),
     uniqueIndex("invoices_org_job_number_key").on(t.orgUid, t.jobId, t.number),
     uniqueIndex("invoices_org_issue_key").on(t.orgUid, t.issueKey),
     /** A sequence number is unique in the organisation, not only in its job. */
@@ -1848,6 +1858,14 @@ export const xeroConnections = pgTable(
     taxType: text("tax_type").notNull().default("OUTPUT"),
     /** Invoices issued from this moment go to Xero by themselves; earlier ones only when an owner sends them. */
     autoFrom: timestamp("auto_from", { withTimezone: true, mode: "date" }),
+    /**
+     * The saved account and tax codes, checked against the connected
+     * organisation's when it was connected or the codes were saved (#93,
+     * migration 0018): when, and what is wrong (XERO_ACCOUNT_CODE_UNKNOWN,
+     * XERO_TAX_TYPE_UNKNOWN), or null. Invoices wait while it says one is wrong.
+     */
+    codesCheckedAt: timestamp("codes_checked_at", { withTimezone: true, mode: "date" }),
+    codesProblem: text("codes_problem"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     updatedBy: text("updated_by"),
@@ -1860,8 +1878,115 @@ export const xeroConnections = pgTable(
     check("xero_connections_account_code_check", sql`${t.salesAccountCode} ~ '^[A-Za-z0-9._-]{1,10}$'`),
     check("xero_connections_tax_type_check", sql`${t.taxType} ~ '^[A-Z0-9_]{1,40}$'`),
     check("xero_connections_reconnect_reason_check", sql`${t.reconnectReason} is null or ${t.reconnectReason} ~ '^[A-Z0-9_]{1,64}$'`),
+    check("xero_connections_codes_problem_check", sql`${t.codesProblem} is null or ${t.codesProblem} ~ '^[A-Z0-9_]{1,64}$'`),
     tenantIsolation("xero_connections"),
   ],
 );
 
 export type XeroConnection = typeof xeroConnections.$inferSelect;
+
+/**
+ * Each issued invoice on its way to Xero (#93, phase 1): one row per invoice
+ * from when it is queued, for one Xero organisation (`tenant_id`). The issued
+ * invoices are the outbox (server/xero/invoice-sync.js queues every invoice
+ * issued since Create in Xero was turned on), so issuing never waits on Xero
+ * or writes here.
+ *
+ *   pending   queued, or waiting to retry (`next_attempt_at`), or waiting
+ *             for the owner to connect again
+ *   created   in Xero, with its id and status, its PDF attached and its
+ *             totals equal to Field's
+ *   mismatch  in Xero as a draft, but Xero's totals differ from Field's
+ *   failed    Xero refused it, or retries ran out; `last_error_reason` says why
+ *   skipped   not sent (credited or voided in Field before it reached Xero)
+ *   held      queued for another Xero organisation than the one connected
+ *             now: never sent there; an owner sends it again deliberately
+ *
+ * A worker claims a row with a lease (`lease_owner`, `lease_until`), so two
+ * servers (an overlapping republish) never work the same invoice.
+ */
+export const XERO_SYNC_STATES = ["pending", "created", "mismatch", "failed", "skipped", "held"] as const;
+export type XeroSyncState = (typeof XERO_SYNC_STATES)[number];
+
+export const xeroInvoiceSyncs = pgTable(
+  "xero_invoice_syncs",
+  {
+    orgUid: orgUid(),
+    invoiceUid: text("invoice_uid").notNull(),
+    /** The Xero organisation it was queued for, and is created in. */
+    tenantId: text("tenant_id").notNull(),
+    state: text("state").$type<XeroSyncState>().notNull().default("pending"),
+    /** draft or authorised: what Create in Xero said when it was queued. */
+    mode: text("mode").$type<"draft" | "authorised">().notNull(),
+    /** auto (issued after Create in Xero was turned on) or owner (sent or retried by an owner). */
+    queuedBy: text("queued_by").$type<"auto" | "owner">().notNull(),
+    requestedBy: text("requested_by"),
+    queuedAt: timestamp("queued_at", { withTimezone: true, mode: "date" }).notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true, mode: "date" }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "date" }),
+    /** The worker sending it now, and until when its claim holds. */
+    leaseOwner: text("lease_owner"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true, mode: "date" }),
+    /** A short code (XERO_VALIDATION, XERO_RATE_LIMITED, ...). */
+    lastErrorCode: text("last_error_code"),
+    /** The plain reason the owner reads. Never logged. */
+    lastErrorReason: text("last_error_reason"),
+    xeroInvoiceId: text("xero_invoice_id"),
+    xeroStatus: text("xero_status"),
+    xeroContactId: text("xero_contact_id"),
+    /** Xero's total and Field's, as compared after the invoice was created. */
+    xeroTotal: numeric("xero_total", { precision: 12, scale: 2 }),
+    fieldTotal: numeric("field_total", { precision: 12, scale: 2 }),
+    createdInXeroAt: timestamp("created_in_xero_at", { withTimezone: true, mode: "date" }),
+    attachedAt: timestamp("attached_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgUid, t.invoiceUid] }),
+    foreignKey({
+      name: "xero_invoice_syncs_invoice_fk",
+      columns: [t.orgUid, t.invoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    index("xero_invoice_syncs_due_idx").on(t.orgUid, t.nextAttemptAt).where(sql`${t.state} = 'pending'`),
+    check("xero_invoice_syncs_state_check", sql`${t.state} in ('pending','created','mismatch','failed','skipped','held')`),
+    check("xero_invoice_syncs_mode_check", sql`${t.mode} in ('draft','authorised')`),
+    check("xero_invoice_syncs_queued_by_check", sql`${t.queuedBy} in ('auto','owner')`),
+    check("xero_invoice_syncs_attempts_check", sql`${t.attempts} >= 0`),
+    check("xero_invoice_syncs_last_error_code_check", sql`${t.lastErrorCode} is null or ${t.lastErrorCode} ~ '^[A-Z0-9_]{1,64}$'`),
+    check("xero_invoice_syncs_created_check", sql`${t.state} not in ('created','mismatch') or ${t.xeroInvoiceId} is not null`),
+    check("xero_invoice_syncs_tenant_check", sql`btrim(${t.tenantId}) <> ''`),
+    tenantIsolation("xero_invoice_syncs"),
+  ],
+);
+
+export type XeroInvoiceSync = typeof xeroInvoiceSyncs.$inferSelect;
+
+/**
+ * Every Xero invoice a Field invoice has had, by Xero organisation (#93).
+ * Append-only: invoices.xero_invoice_id holds the current one, and may move
+ * to another organisation's id only once the earlier id is recorded here
+ * (migration 0018's trigger), so the history is never lost.
+ */
+export const xeroInvoiceLinks = pgTable(
+  "xero_invoice_links",
+  {
+    orgUid: orgUid(),
+    invoiceUid: text("invoice_uid").notNull(),
+    tenantId: text("tenant_id").notNull(),
+    xeroInvoiceId: text("xero_invoice_id").notNull(),
+    linkedAt: timestamp("linked_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgUid, t.tenantId, t.xeroInvoiceId] }),
+    foreignKey({
+      name: "xero_invoice_links_invoice_fk",
+      columns: [t.orgUid, t.invoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    index("xero_invoice_links_invoice_idx").on(t.orgUid, t.invoiceUid),
+    tenantIsolation("xero_invoice_links"),
+  ],
+);
