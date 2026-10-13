@@ -5,7 +5,7 @@
 //
 // Prices come from the shared renderer (shared/quote-presentation-renderer.js),
 // the same code the server and PDFs use, so what is shown is what is sent.
-import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowDown, ArrowUp, ChevronRight, Copy, CornerDownRight, EyeOff, Eye, FolderInput, Lock, MoreHorizontal,
@@ -86,11 +86,13 @@ export function QuoteEditor({ detail, editable: canEdit, lockReason, onNewVersio
   // invoices are set up (#29): show that one, marked as the rule's.
   const milestoneRules = useJobMilestoneRules(jobId, detail.meta.paymentSchedule ? "own" : "none");
   const proposedSchedule = !detail.meta.paymentSchedule ? milestoneRules?.proposedSchedule || null : null;
-  useEffect(() => {
+  // Only when the rule's schedule arrives; an edit after that is the operator's.
+  // Set while rendering, so the rows never show without it first.
+  const [scheduleArrived, setScheduleArrived] = useState<typeof proposedSchedule>(null);
+  if (scheduleArrived !== proposedSchedule) {
+    setScheduleArrived(proposedSchedule);
     if (proposedSchedule && !scheduleDirty) setScheduleRows(buildMilestoneDraftRows(proposedSchedule));
-    // Only when the rule's schedule arrives; an edit after that is the operator's.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proposedSchedule]);
+  }
   const scheduleSource = scheduleDirty && (detail.meta.paymentSchedule?.source || proposedSchedule)
     ? { kind: "override" as const, ruleUid: null, ruleName: detail.meta.paymentSchedule?.source?.ruleName || milestoneRules?.rule?.name || null, at: null, by: null }
     : detail.meta.paymentSchedule?.source
@@ -170,32 +172,40 @@ export function QuoteEditor({ detail, editable: canEdit, lockReason, onNewVersio
   }, [editable, undo, redo]);
 
   const scheduleError = useMemo(() => getPaymentScheduleValidationError(scheduleRows), [scheduleRows]);
+  // What a save sends: the latest committed values, read when it runs.
   const latest = useRef({ organizer, scope, validity, scheduleRows, scheduleDirty, scheduleError });
-  latest.current = { organizer, scope, validity, scheduleRows, scheduleDirty, scheduleError };
+  useLayoutEffect(() => {
+    latest.current = { organizer, scope, validity, scheduleRows, scheduleDirty, scheduleError };
+  });
   const saving = useRef(false);
   const queued = useRef(false);
 
   const save = useCallback(async () => {
     if (saving.current) { queued.current = true; return; }
     saving.current = true;
-    onSaveState("saving");
-    const snapshot = latest.current;
     try {
-      const patch: Record<string, unknown> = { organizer: snapshot.organizer, scopeText: snapshot.scope };
-      const days = parseInt(snapshot.validity, 10);
-      if (days > 0) patch.validityDays = days;
-      const schedule: PaymentSchedule | null = snapshot.scheduleDirty && !snapshot.scheduleError
-        ? buildPaymentScheduleFromDraftRows(snapshot.scheduleRows)
-        : null;
-      await api.quoteUpdate(jobId, { presentation: patch, ...(schedule ? { paymentSchedule: schedule } : {}) });
-      if (schedule) setScheduleDirty(false);
-      onSaveState("saved");
-      onSaved();
-    } catch (err) {
-      onSaveState("error", err instanceof Error ? err.message : "Changes could not be saved.");
+      // A save asked for while one runs goes next, with the values then current.
+      do {
+        queued.current = false;
+        onSaveState("saving");
+        const snapshot = latest.current;
+        try {
+          const patch: Record<string, unknown> = { organizer: snapshot.organizer, scopeText: snapshot.scope };
+          const days = parseInt(snapshot.validity, 10);
+          if (days > 0) patch.validityDays = days;
+          const schedule: PaymentSchedule | null = snapshot.scheduleDirty && !snapshot.scheduleError
+            ? buildPaymentScheduleFromDraftRows(snapshot.scheduleRows)
+            : null;
+          await api.quoteUpdate(jobId, { presentation: patch, ...(schedule ? { paymentSchedule: schedule } : {}) });
+          if (schedule) setScheduleDirty(false);
+          onSaveState("saved");
+          onSaved();
+        } catch (err) {
+          onSaveState("error", err instanceof Error ? err.message : "Changes could not be saved.");
+        }
+      } while (queued.current);
     } finally {
       saving.current = false;
-      if (queued.current) { queued.current = false; void save(); }
     }
   }, [jobId, onSaveState, onSaved]);
 
@@ -208,7 +218,9 @@ export function QuoteEditor({ detail, editable: canEdit, lockReason, onNewVersio
 
   // Leaving with unsaved edits: save them on the way out, warn on reload.
   const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
+  useLayoutEffect(() => {
+    dirtyRef.current = dirty;
+  });
   useEffect(() => {
     function onBeforeUnload(event: BeforeUnloadEvent) {
       if (dirtyRef.current || saving.current) { event.preventDefault(); }

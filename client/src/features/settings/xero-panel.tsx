@@ -37,12 +37,25 @@ const CALLBACK_MESSAGES: Record<string, string> = {
   XERO_NO_DATABASE: "Xero needs the database, which this server does not have.",
 };
 
+type Notice = { tone: "ok" | "bad"; text: string };
+
+/** What the Xero sign-in callback (?xero=…&code=…) says, if it came back here. */
+function callbackNotice(params: URLSearchParams): Notice | null {
+  const outcome = params.get("xero");
+  if (!outcome) return null;
+  const code = params.get("code") || "";
+  if (outcome === "connected") return { tone: "ok", text: "Xero is connected." };
+  if (outcome === "choose") return { tone: "ok", text: "Xero is signed in. Choose the organisation Field writes to." };
+  return { tone: "bad", text: CALLBACK_MESSAGES[code] || `Connecting to Xero did not work (${code || "unknown"}). Try again.` };
+}
+
 export function XeroPanel({ onBack }: { onBack?: () => void } = {}) {
   const shell = useShell();
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState<XeroIntegration | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+  // The callback came back here: say how it went, once.
+  const [notice, setNotice] = useState<Notice | null>(() => callbackNotice(params));
   const [busy, setBusy] = useState<string | null>(null);
   const [mode, setMode] = useState<XeroCreateMode>("draft");
   const [account, setAccount] = useState("");
@@ -57,9 +70,8 @@ export function XeroPanel({ onBack }: { onBack?: () => void } = {}) {
   const [previewing, setPreviewing] = useState(false);
   const [configuring, setConfiguring] = useState(false);
 
-  async function load() {
-    try {
-      const res = await api.xeroIntegration();
+  function load() {
+    return api.xeroIntegration().then((res) => {
       setData(res);
       setMode(res.settings.createMode);
       setAccount(res.settings.salesAccountCode);
@@ -68,20 +80,15 @@ export function XeroPanel({ onBack }: { onBack?: () => void } = {}) {
       // The organisation's own accounts and tax rates, for the lists.
       if (res.connection.status === "connected" && res.canManage) api.xeroCodes().then(setCodes).catch(() => setCodes(null));
       else setCodes(null);
-    } catch (err) {
+    }).catch((err) => {
       setError(err instanceof Error ? err.message : "The Xero settings could not be loaded.");
-    }
+    });
   }
 
   useEffect(() => {
     void load();
-    // The callback came back here: say how it went, once.
-    const outcome = params.get("xero");
-    if (outcome) {
-      const code = params.get("code") || "";
-      if (outcome === "connected") setNotice({ tone: "ok", text: "Xero is connected." });
-      else if (outcome === "choose") setNotice({ tone: "ok", text: "Xero is signed in. Choose the organisation Field writes to." });
-      else setNotice({ tone: "bad", text: CALLBACK_MESSAGES[code] || `Connecting to Xero did not work (${code || "unknown"}). Try again.` });
+    // The callback's notice is shown (see `notice`); take it out of the address.
+    if (params.get("xero")) {
       const next = new URLSearchParams(params);
       next.delete("xero");
       next.delete("code");

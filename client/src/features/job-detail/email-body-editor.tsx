@@ -39,7 +39,7 @@ const MergeField = Mark.create({
   },
 });
 
-export function normalizeLinkUrl(value: string) {
+function normalizeLinkUrl(value: string) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   if (/^(https?:|mailto:|tel:)/i.test(raw)) return raw;

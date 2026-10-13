@@ -2,7 +2,8 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { JobDocument } from "@/lib/api";
-import { AttachmentPicker, AttachmentTray, attachmentTotals } from "./email-attachments";
+import { AttachmentPicker, AttachmentTray } from "./email-attachments";
+import { attachmentTotals } from "./attachment-summary";
 
 const KB = 1024;
 const MB = 1024 * KB;

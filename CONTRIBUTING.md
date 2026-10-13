@@ -13,9 +13,10 @@ Work is tracked in GitHub issues and pull requests.
   quote or invoice version is selected, sent or invoiced needs a regression
   test.
 - Run the smallest relevant tests while you work. Before handing off a broad
-  change, run `npm test`, `npm --prefix client test` and `npm run build`. To
-  show a change leaves quote and invoice output untouched, run the
-  quote/invoice proof described in `README.md` ("Development").
+  change, run `npm test`, `npm --prefix client run lint`,
+  `npm --prefix client test` and `npm run build`. To show a change leaves
+  quote and invoice output untouched, run the quote/invoice proof described
+  in `README.md` ("Development").
 - When one customer's work shows a reusable product opportunity, file it as
   its own feature request instead of widening that customer's scope.
 - Never commit customer data, credentials, raw private messages or runtime

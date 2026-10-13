@@ -6,14 +6,7 @@ import { ClerkProvider, useAuth as useClerkAuth, useClerk } from "@clerk/react";
 import { api, setSessionTokenProvider } from "@/lib/api";
 import type { UiConfig, UserProfile } from "@/lib/types";
 import { AuthContext, DEFAULT_UI, createAuthSessionScope, type AccessState, type AuthState } from "./auth-context";
-
-// The MCP OAuth approval page sends signed-out owners to /?return_to=/oauth/authorize?...
-// Only that same-origin path is honoured.
-export function safeReturnTo(search: string): string | null {
-  const value = new URLSearchParams(search).get("return_to");
-  if (!value || !value.startsWith("/oauth/authorize?") || value.startsWith("//")) return null;
-  return value;
-}
+import { safeReturnTo } from "./return-to";
 
 export default function ClerkAuthProvider({
   publishableKey,
@@ -31,7 +24,7 @@ export default function ClerkAuthProvider({
   );
 }
 
-export function clearStoredFieldToken() {
+function clearStoredFieldToken() {
   try {
     localStorage.removeItem("fr_token");
     localStorage.removeItem("fr_user");
@@ -45,12 +38,22 @@ function errorCode(error: unknown): string | undefined {
   return typeof code === "string" ? code : undefined;
 }
 
+type AccessCheck = {
+  userId: string | null | undefined;
+  getToken: unknown;
+  attempt: number;
+  user: UserProfile | null;
+  access: AccessState;
+  message: string | null;
+};
+
 function ClerkSessionBridge({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, userId, getToken, signOut } = useClerkAuth();
   const clerk = useClerk();
-  const [access, setAccess] = useState<AccessState>("loading");
-  const [accessMessage, setAccessMessage] = useState<string | null>(null);
-  const [user, setUser] = useState<UserProfile | null>(null);
+  // The server's answer for one signed-in session. It is the session's answer
+  // only while the user, the token source and the attempt it asked with are
+  // still the current ones; until then access is "loading".
+  const [check, setCheck] = useState<AccessCheck | null>(null);
   const [uiConfig, setUiConfig] = useState<UiConfig>(DEFAULT_UI);
   const [attempt, setAttempt] = useState(0);
   const sessionScope = useMemo(() => createAuthSessionScope(userId || ""), [userId]);
@@ -65,30 +68,38 @@ function ClerkSessionBridge({ children }: { children: ReactNode }) {
     if (!isLoaded) return;
     if (!isSignedIn) {
       setSessionTokenProvider(null);
-      setUser(null);
-      setAccess("signed-out");
-      setAccessMessage(null);
       return;
     }
     setSessionTokenProvider(() => getToken(), userId || "");
     let cancelled = false;
-    setAccess("loading");
+    const asked = { userId, getToken, attempt };
     api.me().then((res) => {
       if (cancelled) return;
-      setUser(res.user);
       const status = res.user.status ?? "active";
-      setAccess(status === "active" ? "active" : status);
-      setAccessMessage(null);
+      setCheck({ ...asked, user: res.user, access: status === "active" ? "active" : status, message: null });
     }).catch((error: unknown) => {
       if (cancelled) return;
-      setUser(null);
-      setAccess(errorCode(error) === "email_unverified" ? "email-unverified" : "error");
-      setAccessMessage(error instanceof Error ? error.message : "Field could not check your access.");
+      setCheck({
+        ...asked,
+        user: null,
+        access: errorCode(error) === "email_unverified" ? "email-unverified" : "error",
+        message: error instanceof Error ? error.message : "Field could not check your access.",
+      });
     });
     return () => {
       cancelled = true;
     };
   }, [isLoaded, isSignedIn, userId, getToken, attempt]);
+
+  // Signed out: forget the answer, so a later sign-in waits for a new one.
+  if (isLoaded && !isSignedIn && check) setCheck(null);
+  const current = isLoaded && isSignedIn && check
+    && check.userId === userId && check.getToken === getToken && check.attempt === attempt
+    ? check
+    : null;
+  const access: AccessState = !isLoaded ? "loading" : !isSignedIn ? "signed-out" : current?.access ?? "loading";
+  const accessMessage = current?.message ?? null;
+  const user = current?.user ?? null;
 
   // Back to the MCP authorization page once the owner is signed in.
   useEffect(() => {

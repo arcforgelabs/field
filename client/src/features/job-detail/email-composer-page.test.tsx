@@ -4,7 +4,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ShellContext } from "@/components/shell/shell-context";
-import { RecipientField, recipientProblem, suggestRecipients, type ContactSuggestion, type Recipient } from "./recipient-field";
+import { RecipientField } from "./recipient-field";
+import { recipientProblem, suggestRecipients, type ContactSuggestion, type Recipient } from "./recipients";
 
 const api = vi.hoisted(() => ({
   recording: vi.fn(),
@@ -23,8 +24,10 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/api")>()), api }));
 
-const { EmailComposerPage, SubjectField, composeTemplateBody, plainSendError, undoWindowMs } = await import("./email-composer-page");
-const { EmailRows, SentEmailSheet, emailRows } = await import("./email-record");
+const { EmailComposerPage, SubjectField } = await import("./email-composer-page");
+const { composeTemplateBody, plainSendError, undoWindowMs } = await import("./email-composer");
+const { EmailRows, SentEmailSheet } = await import("./email-record");
+const { emailRows } = await import("./email-rows");
 
 const CONTEXT = {
   ok: true,

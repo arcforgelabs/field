@@ -125,13 +125,17 @@ export function CataloguePage() {
   const supplierName = view.supplier ? data.suppliers.find((supplier) => supplier.uid === view.supplier)?.name || "Supplier" : null;
 
   // Selection follows what's on screen: rows filtered away drop out of it.
-  useEffect(() => {
+  // Adjusted while rendering, when the rows shown change (React's pattern
+  // for state that follows other state), so no stale selection is drawn.
+  // Compared by uid: `visible` can be a new array on every render.
+  const shownKey = visible.map((row) => row.uid).join("\n");
+  const [selectionFollows, setSelectionFollows] = useState(shownKey);
+  if (selectionFollows !== shownKey) {
+    setSelectionFollows(shownKey);
     const shown = new Set(visible.map((row) => row.uid));
-    setSelected((current) => {
-      const next = new Set([...current].filter((uid) => shown.has(uid)));
-      return next.size === current.size ? current : next;
-    });
-  }, [visible]);
+    const next = new Set([...selected].filter((uid) => shown.has(uid)));
+    if (next.size !== selected.size) setSelected(next);
+  }
 
   const sortBy = (key: SortKey) => update({
     sort: key,

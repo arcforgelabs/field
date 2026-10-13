@@ -52,6 +52,18 @@ function when(value: string | null) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
 }
 
+type LoadedItem = Awaited<ReturnType<typeof fetchItem>>;
+
+async function fetchItem(ref: string) {
+  const item = await catalogueApi.item(ref);
+  const [links, priceRows, fieldRows] = await Promise.all([
+    priceBookApi.itemSuppliers(item.uid),
+    priceBookApi.priceHistory(item.uid).catch(() => [] as PriceHistoryRow[]),
+    priceBookApi.fieldHistory(item.uid).catch(() => [] as FieldHistoryRow[]),
+  ]);
+  return { item, links, priceRows, fieldRows };
+}
+
 export function ItemDrawer({ itemRef, rows, categories, tags, suppliers, issuesFor, onClose, onOpen, onChanged, onManageSuppliers }: Props) {
   const shell = useShell();
   const isNew = itemRef === NEW_ITEM;
@@ -59,6 +71,9 @@ export function ItemDrawer({ itemRef, rows, categories, tags, suppliers, issuesF
   const [base, setBase] = useState<ItemDraft | null>(null);
   const [draft, setDraft] = useState<ItemDraft>(emptyDraft);
   const [prices, setPrices] = useState<PriceHistoryRow[] | null>(null);
+  // When the price history was read: a price dated after it is "scheduled",
+  // as the server's `current` flag on the same rows is as of that read.
+  const [pricesReadAt, setPricesReadAt] = useState(0);
   const [changes, setChanges] = useState<FieldHistoryRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -68,29 +83,25 @@ export function ItemDrawer({ itemRef, rows, categories, tags, suppliers, issuesF
   const [showAllPrices, setShowAllPrices] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async (ref: string) => {
-    const item = await catalogueApi.item(ref);
-    const [links, priceRows, fieldRows] = await Promise.all([
-      priceBookApi.itemSuppliers(item.uid),
-      priceBookApi.priceHistory(item.uid).catch(() => [] as PriceHistoryRow[]),
-      priceBookApi.fieldHistory(item.uid).catch(() => [] as FieldHistoryRow[]),
-    ]);
+  const show = useCallback(({ item, links, priceRows, fieldRows }: LoadedItem) => {
     const fresh = draftFromDetail(item, links);
     setDetail(item);
     setBase(fresh);
     setPrices(priceRows);
+    setPricesReadAt(Date.now());
     setChanges(fieldRows);
     return fresh;
   }, []);
+  const load = useCallback(async (ref: string) => show(await fetchItem(ref)), [show]);
 
   useEffect(() => {
     if (isNew) { titleRef.current?.focus(); return; }
     let live = true;
-    load(itemRef)
-      .then((fresh) => { if (live) setDraft(structuredClone(fresh)); })
+    fetchItem(itemRef)
+      .then((loaded) => { const fresh = show(loaded); if (live) setDraft(structuredClone(fresh)); })
       .catch((err) => { if (live) setLoadError(errorCode(err) === "NOT_FOUND" || /not found/i.test(errorMessage(err, "")) ? "This item isn't in the catalogue any more." : errorMessage(err, "The item could not be loaded.")); });
     return () => { live = false; };
-  }, [isNew, itemRef, load]);
+  }, [isNew, itemRef, show]);
 
   const row = useMemo(() => rows.find((candidate) => candidate.uid === detail?.uid) || null, [rows, detail]);
   const recipeParts = useMemo(() => (detail?.children || []).filter((child) => child.source === "recipe"), [detail]);
@@ -505,7 +516,7 @@ export function ItemDrawer({ itemRef, rows, categories, tags, suppliers, issuesF
                       <thead><tr><th>From</th><th className="fx-r">Cost</th><th className="fx-r fx-hide-sm">Markup</th><th className="fx-r">Selling</th><th className="fx-hide-sm">By</th></tr></thead>
                       <tbody>
                         {shownPrices.map((price) => {
-                          const scheduled = price.effective_from ? Date.parse(price.effective_from) > Date.now() : false;
+                          const scheduled = price.effective_from ? Date.parse(price.effective_from) > pricesReadAt : false;
                           return (
                             <tr key={price.price_id} title={price.reason || undefined}>
                               <td>{when(price.effective_from)}{price.current ? <span className="fx-mute"> · current</span> : scheduled ? <span style={{ color: "var(--t-warn)" }}> · scheduled</span> : null}</td>

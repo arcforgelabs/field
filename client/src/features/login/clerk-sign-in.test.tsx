@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HashRouter } from "react-router-dom";
 import type { ReactNode } from "react";
-import { AuthProvider, useAuth } from "@/contexts/auth-context";
-import { safeReturnTo } from "@/contexts/clerk-auth-provider";
+import { useAuth } from "@/contexts/auth-context";
+import { AuthProvider } from "@/contexts/auth-provider";
+import { safeReturnTo } from "@/contexts/return-to";
 import { api, setSessionTokenProvider } from "@/lib/api";
 import { App } from "@/app";
 import { PeopleSection } from "@/features/settings/people-section";
@@ -168,6 +169,34 @@ describe("sign-in shell", () => {
       </AuthProvider>,
     );
     await waitFor(() => expect(screen.getByTestId("probe").textContent).toBe("clerk:active:true"));
+  });
+  it("asks the server again when the same person signs in again, without the earlier answer", async () => {
+    clerkState.isSignedIn = true;
+    clerkState.userId = "user_owner";
+    routes["/api/auth/me"] = () => ({
+      body: { ok: true, user: { id: "o1", email: "owner@example.com", name: "Owner", status: "active", fieldRole: "owner" } },
+    });
+    const seen: string[] = [];
+    function Probe() {
+      const auth = useAuth();
+      seen.push(auth.access);
+      return <div data-testid="probe">{auth.access}</div>;
+    }
+    const view = render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId("probe").textContent).toBe("active"));
+
+    // Signed out in another tab, then disabled, then signed in again here.
+    clerkState.isSignedIn = false;
+    view.rerender(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId("probe").textContent).toBe("signed-out"));
+    routes["/api/auth/me"] = () => ({
+      body: { ok: true, user: { id: "o1", email: "owner@example.com", name: "Owner", status: "disabled", fieldRole: "owner" } },
+    });
+    seen.length = 0;
+    clerkState.isSignedIn = true;
+    view.rerender(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId("probe").textContent).toBe("disabled"));
+    expect(seen).not.toContain("active");
   });
 });
 
