@@ -68,6 +68,28 @@ credential value anywhere public.
 - CI runs gitleaks on every push and pull request
   (`.github/workflows/secret-scan.yml`).
 
+## Dependency Advisories
+
+Dependabot (`.github/dependabot.yml`) raises weekly update pull requests for
+the server (`/`), the client (`/client`) and the GitHub Actions workflows.
+Check the lockfiles with:
+
+```bash
+npm audit --package-lock-only
+npm --prefix client audit --package-lock-only
+```
+
+A high advisory in a package the server or the browser bundle runs is fixed,
+not accepted. The advisories below remain because no fix exists, and the
+vulnerable code never runs in the server or the browser bundle. Do not silence
+`npm audit` for them. Recheck each one by its date, or sooner when Dependabot
+offers an update for the named direct package.
+
+| Advisory | Path | Why it is not fixed | Why it is not reachable | Recheck |
+| --- | --- | --- | --- | --- |
+| [GHSA-67mh-4wv8-2f99](https://github.com/advisories/GHSA-67mh-4wv8-2f99) (moderate): esbuild's development server answers any website | `drizzle-kit` > `@esbuild-kit/esm-loader` > `@esbuild-kit/core-utils` > `esbuild` 0.18 | `drizzle-kit` 0.31.11 (latest) still depends on `@esbuild-kit/esm-loader`; npm's only suggestion is a downgrade to `drizzle-kit` 0.18.1 | `drizzle-kit` is a development dependency, run only for `npm run db:*` scripts on a developer's machine and in CI. It never calls esbuild's `serve`, and the Docker image prunes it (`npm prune --omit=dev`) | 2027-01-13 |
+| [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) (high): braces stack exhaustion from deeply nested patterns | `shadcn` > `@shadcn/registry`, `ts-morph` and `fast-glob` > `micromatch` > `braces` 3.0.3 | No patched `braces` release exists (3.0.3 is the latest), and `shadcn` 4.21.4 is the latest | The client uses only `shadcn/tailwind.css`, which Vite compiles into the stylesheet at build time. The `shadcn` command-line tool, and the globbing code under it, never enter the browser bundle or the server, and it reads only patterns a developer types | 2027-01-13 |
+
 ## Out of Scope
 
 - Vulnerabilities in a third-party service Field connects to (Clerk, Google,

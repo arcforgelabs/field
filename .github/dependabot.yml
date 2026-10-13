@@ -1,0 +1,45 @@
+# Weekly update pull requests. Minor and patch updates arrive grouped in one
+# pull request per directory; each major update arrives on its own, so it can
+# be proven alone (quote and invoice proof, email HTML) before it merges.
+# Titles start with "chore:", the typed title CONTRIBUTING.md asks for.
+# SECURITY.md ("Dependency Advisories") records the advisories accepted for now.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Australia/Adelaide
+    commit-message:
+      prefix: chore
+    open-pull-requests-limit: 3
+    groups:
+      server-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /client
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Australia/Adelaide
+    commit-message:
+      prefix: chore
+    open-pull-requests-limit: 3
+    groups:
+      client-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Australia/Adelaide
+    commit-message:
+      prefix: chore
+    open-pull-requests-limit: 2
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
