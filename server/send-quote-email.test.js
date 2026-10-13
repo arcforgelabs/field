@@ -262,8 +262,8 @@ const SAMPLE_TEMPLATE_ARGS = {
   replyToEmail: "quotes@example.com",
 };
 
-test("renderQuoteEmailHtml summary mode returns body without pricing table", () => {
-  const html = renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "summary" });
+test("renderQuoteEmailHtml summary mode returns body without pricing table", async () => {
+  const html = await renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "summary" });
   assert.ok(html.includes("<!doctype html>") || html.includes("<html"), "should be HTML document");
   assert.ok(html.includes("Jane Smith"), "should include client name");
   assert.ok(html.includes("Retaining wall"), "should include job title");
@@ -274,34 +274,34 @@ test("renderQuoteEmailHtml summary mode returns body without pricing table", () 
   assert.ok(html.includes("Your Business"), "should include company name");
 });
 
-test("renderQuoteEmailHtml simple mode omits pricing", () => {
-  const html = renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "simple" });
+test("renderQuoteEmailHtml simple mode omits pricing", async () => {
+  const html = await renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "simple" });
   assert.ok(!html.includes("$11,220.00") && !html.includes("11,220"), "should not include total");
   assert.ok(!html.includes("Concrete sleeper wall"), "should NOT include individual line items");
   assert.ok(html.includes("attached as a PDF"), "should mention PDF attachment");
 });
 
-test("renderQuoteEmailHtml handles missing client name gracefully", () => {
-  const html = renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, clientName: null, mode: "summary" });
+test("renderQuoteEmailHtml handles missing client name gracefully", async () => {
+  const html = await renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, clientName: null, mode: "summary" });
   assert.ok(html.includes("Hi,"), "should fall back to generic greeting");
   assert.ok(!html.includes("Hi null"), "should not show 'null'");
 });
 
-test("renderQuoteEmailHtml handles empty line items in summary mode", () => {
-  const html = renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, lineItems: [], mode: "summary" });
+test("renderQuoteEmailHtml handles empty line items in summary mode", async () => {
+  const html = await renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, lineItems: [], mode: "summary" });
   assert.ok(!html.includes("$11,220.00") && !html.includes("11,220"), "should not show total");
 });
 
-test("renderQuoteEmailHtml escapes HTML in job title", () => {
-  const html = renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, jobTitle: '<script>alert("xss")</script>', mode: "summary" });
+test("renderQuoteEmailHtml escapes HTML in job title", async () => {
+  const html = await renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, jobTitle: '<script>alert("xss")</script>', mode: "summary" });
   assert.ok(!html.includes("<script>"), "should escape script tags");
   assert.ok(html.includes("&lt;script&gt;"), "should have escaped HTML entities");
 });
 
 // ── Custom body tests ──
 
-test("renderQuoteEmailHtml with null customBody uses stock greeting and body", () => {
-  const html = renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "summary", customBody: null });
+test("renderQuoteEmailHtml with null customBody uses stock greeting and body", async () => {
+  const html = await renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "summary", customBody: null });
   assert.ok(html.includes("Hi Jane Smith"), "should include personalized greeting");
   assert.ok(html.includes("Retaining wall"), "should include job title in intro");
   assert.ok(html.includes("Reply to this email"), "should include reply prompt");
@@ -310,9 +310,9 @@ test("renderQuoteEmailHtml with null customBody uses stock greeting and body", (
   assert.ok(html.includes("ABN"), "should include footer");
 });
 
-test("renderQuoteEmailHtml with customBody replaces greeting/body section", () => {
+test("renderQuoteEmailHtml with customBody replaces greeting/body section", async () => {
   const custom = "<p>Hi Jordan,</p><p>As discussed on site, I've included the alternative dump location pricing.</p>";
-  const html = renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "summary", customBody: custom });
+  const html = await renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "summary", customBody: custom });
   assert.ok(html.includes("As discussed on site"), "should include custom body text");
   assert.ok(html.includes("alternative dump location"), "should include full custom message");
   // Stock body text should NOT be present
@@ -325,18 +325,18 @@ test("renderQuoteEmailHtml with customBody replaces greeting/body section", () =
   assert.ok(!html.includes("background:#0b0d11"), "email should not use the old black summary header");
 });
 
-test("renderQuoteEmailHtml sanitizes dangerous tags from customBody", () => {
+test("renderQuoteEmailHtml sanitizes dangerous tags from customBody", async () => {
   const malicious = '<p>Hello</p><script>alert("xss")</script><iframe src="evil.com"></iframe><p onclick="steal()">Click</p>';
-  const html = renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "summary", customBody: malicious });
+  const html = await renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "summary", customBody: malicious });
   assert.ok(!html.includes("<script"), "should strip script tags");
   assert.ok(!html.includes("<iframe"), "should strip iframe tags");
   assert.ok(!html.includes("onclick"), "should strip event handlers");
   assert.ok(html.includes("Hello"), "should keep safe content");
 });
 
-test("renderQuoteEmailHtml customBody preserves allowed formatting tags", () => {
+test("renderQuoteEmailHtml customBody preserves allowed formatting tags", async () => {
   const styled = '<p>Hi <strong>Jordan</strong>, this is <em>important</em>.</p>';
-  const html = renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "summary", customBody: styled });
+  const html = await renderQuoteEmailHtml({ ...SAMPLE_TEMPLATE_ARGS, mode: "summary", customBody: styled });
   assert.ok(html.includes("<strong>Jordan</strong>"), "should preserve strong tags");
   assert.ok(html.includes("<em>important</em>"), "should preserve em tags");
 });
