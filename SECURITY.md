@@ -42,7 +42,9 @@ credential value anywhere public.
 - **Machine access.** A CLI/API bearer token, or the owner break-glass key
   (`authToken`, `FIELD_TOKEN`), acts as an operator of that installation;
   whoever holds one is trusted. AI agents connect through OAuth MCP, limited
-  to the scopes the approving person holds (`docs/REMOTE_MCP.md`).
+  to the scopes the approving person holds now (`docs/REMOTE_MCP.md`). Field
+  checks a person's token or MCP grant against their current access on every
+  use, and reads tokens only from the `Authorization` header, never a URL.
 - **Sent documents are records.** A quote or invoice a customer has been sent
   is never changed in place; a change produces a new version. Tampering with
   that history is a security issue.

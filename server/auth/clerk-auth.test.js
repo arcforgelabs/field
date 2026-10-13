@@ -27,7 +27,7 @@ import {
 } from "./clerk-auth.js";
 import { resolveTrustProxy } from "./trust-proxy.js";
 import { findFieldUserByEmail, importLegacyUsers, listFieldUsers } from "./field-users-store.js";
-import { createRemoteMcpRouter, MCP_SCOPES } from "../mcp/remote-mcp.js";
+import { createRemoteMcpRouter, MCP_SCOPES, TOOL_SCOPES } from "../mcp/remote-mcp.js";
 import { authorizeFieldMcpScopes } from "../mcp/scope-authority.js";
 
 const BREAK_GLASS_KEY = "break-glass-fixture-key";
@@ -93,7 +93,8 @@ function fakeClerk(directory) {
       calls.getUser.push(userId);
       if (directory.failing) throw new Error("Clerk API unavailable (test)");
       const user = directory.get(userId);
-      if (!user) throw new Error(`Clerk user ${userId} not found`);
+      // Clerk's backend API answers 404 for a deleted user.
+      if (!user) throw Object.assign(new Error(`Clerk user ${userId} not found`), { status: 404 });
       return user;
     },
   };
@@ -333,6 +334,19 @@ test("trust proxy: one hop on Replit, off elsewhere, never `true`", () => {
   assert.throws(() => resolveTrustProxy({ FIELD_TRUST_PROXY: "true" }), /hop count/);
   assert.throws(() => resolveTrustProxy({ FIELD_TRUST_PROXY: "everyone" }), /FIELD_TRUST_PROXY/);
   assert.throws(() => resolveTrustProxy({ FIELD_TRUST_PROXY: "99" }), /between 0 and 10/);
+  // Subnets that match every address are `true` by another name.
+  for (const value of ["0.0.0.0/0", "::/0", "loopback, 0.0.0.0/0", "10.0.0.1, ::/00"]) {
+    assert.throws(() => resolveTrustProxy({ FIELD_TRUST_PROXY: value }), /same as true/, value);
+  }
+  // Junk that looks like hex or a number is refused here, not at boot by Express.
+  for (const value of ["1e3", "abc", "10.0.0.0/33", "fe80::/129", "10.0.0.0/8/8", ","]) {
+    assert.throws(() => resolveTrustProxy({ FIELD_TRUST_PROXY: value }), /FIELD_TRUST_PROXY/, value);
+  }
+  assert.deepEqual(resolveTrustProxy({ FIELD_TRUST_PROXY: "127.0.0.1, fd00::/8" }), { value: "127.0.0.1, fd00::/8", source: "FIELD_TRUST_PROXY" });
+  // Every accepted value is one Express can compile.
+  for (const value of ["loopback, 10.0.0.0/8", "127.0.0.1, fd00::/8", "uniquelocal"]) {
+    assert.doesNotThrow(() => express().set("trust proxy", resolveTrustProxy({ FIELD_TRUST_PROXY: value }).value));
+  }
 });
 
 test("break-glass rate limiting is per client behind one trusted proxy hop", async (t) => {
@@ -427,25 +441,24 @@ test("signed out is 401; a non-Field ?token= is never a session", async () => {
   assert.equal((await call("GET", "/api/jobs", { token: "field_not-a-real-token" })).status, 401);
 });
 
-test("a stale ?token= on a PDF/preview link falls back to the session cookie for reads only", async () => {
+test("a token in the URL (?token=) never authenticates; a read falls back to the session cookie", async () => {
   const owner = await signInOwner();
   const cookie = { cookie: `__session=${owner}` };
-  const stale = "field_stale-password-era-token";
-  const read = await call("GET", `/api/jobs?token=${stale}`, { headers: cookie });
-  assert.equal(read.status, 200);
-  assert.equal(read.body.caller.via, "clerk");
-  assert.equal(read.body.caller.id, legacyOwner.id);
-  // No session: still refused.
-  assert.equal((await call("GET", `/api/jobs?token=${stale}`)).status, 401);
-  // Never for changes, cookie or not.
-  assert.equal((await call("POST", `/api/owner-only?token=${stale}`, { headers: cookie })).status, 401);
-  // A recognised token for someone without access is refused, not laundered through the cookie.
-  ctx.directory.set("user_staff", clerkUser("user_staff", "staff@example.com"));
-  const owner2 = sessionToken("user_owner", { mfa: true });
-  await call("PATCH", `/api/users/${legacyStaff.id}`, { session: owner2, body: { status: "pending" } });
-  const pending = await call("GET", `/api/jobs?token=${encodeURIComponent(staffToken)}`, { headers: cookie });
-  assert.equal(pending.status, 403);
-  assert.equal(pending.body.code, "field_access_pending");
+  for (const token of [ownerToken, staffToken, serviceToken, "field_stale-password-era-token"]) {
+    const query = `token=${encodeURIComponent(token)}`;
+    // No header, no session: refused, even for a valid Field token.
+    assert.equal((await call("GET", `/api/jobs?${query}`)).status, 401);
+    assert.equal((await call("POST", `/api/owner-only?${query}`)).status, 401);
+    // With the session cookie, a read is the cookie's person, never the token's.
+    const read = await call("GET", `/api/jobs?${query}`, { headers: cookie });
+    assert.equal(read.status, 200);
+    assert.equal(read.body.caller.via, "clerk");
+    assert.equal(read.body.caller.id, legacyOwner.id);
+    // Never a change, cookie or not.
+    assert.equal((await call("POST", `/api/owner-only?${query}`, { headers: cookie })).status, 401);
+  }
+  // /api/auth/me does not treat a URL token as machine access either.
+  assert.equal((await call("GET", `/api/auth/me?token=${encodeURIComponent(ownerToken)}`)).status, 401);
 });
 
 // ── Pending users and approval ───────────────────────────────────
@@ -661,8 +674,8 @@ test("existing Field bearer tokens keep working, with the role from PostgreSQL",
   const asService = await call("GET", "/api/jobs", { token: serviceToken });
   assert.equal(asService.status, 200);
   assert.equal(asService.body.caller.kind, "service");
-  // ?token= (PDF links, previews) still works for Field tokens.
-  assert.equal((await call("GET", `/api/jobs?token=${encodeURIComponent(staffToken)}`)).status, 200);
+  // Only in the Authorization header: ?token= is never read.
+  assert.equal((await call("GET", `/api/jobs?token=${encodeURIComponent(staffToken)}`)).status, 401);
   assert.equal((await call("GET", "/api/auth/me", { token: ownerToken })).body.user.id, legacyOwner.id);
   // Bearer tokens never touch Clerk.
   assert.deepEqual(ctx.clerk.calls.getUser, []);
@@ -697,6 +710,84 @@ test("a disabled or removed person's old tokens stop working, and are revoked", 
   assert.equal(users.findUserByEmail("staff@example.com"), null);
   assert.deepEqual(ctx.revokedSubjects, [legacyStaff.id, legacyStaff.id]);
   assert.ok(ctx.log.lines.some((line) => /cut off machine access for Field user .*users\.json record removed/.test(line)));
+});
+
+test("setting someone back to pending stops and revokes their tokens", async () => {
+  const owner = await signInOwner();
+  assert.equal((await call("GET", "/api/jobs", { token: staffToken })).status, 200);
+  assert.equal((await call("PATCH", `/api/users/${legacyStaff.id}`, { session: owner, body: { status: "pending" } })).status, 200);
+  // Revoked, so no longer a Field token at all.
+  assert.equal((await call("GET", "/api/jobs", { token: staffToken })).status, 401);
+  assert.deepEqual(users.listUserTokens(legacyStaff.id), []);
+  assert.deepEqual(ctx.revokedSubjects, [legacyStaff.id]);
+});
+
+test("a token is checked against the person's membership on every use, even when nothing was revoked", async () => {
+  // Changes made straight in PostgreSQL, so no route revokes anything: the
+  // check at use is the only thing that can refuse the token.
+  const membership = eq(schema.orgMemberships.userUid, legacyStaff.id);
+  assert.equal((await call("GET", "/api/jobs", { token: staffToken })).status, 200);
+  await ctx.db.update(schema.orgMemberships).set({ status: "disabled" }).where(membership);
+  assert.equal((await call("GET", "/api/jobs", { token: staffToken })).body.code, "field_access_disabled");
+  await ctx.db.update(schema.orgMemberships).set({ status: "active" }).where(membership);
+  assert.equal((await call("GET", "/api/jobs", { token: staffToken })).status, 200);
+  // Out of the organisation: no membership, no access.
+  await ctx.db.delete(schema.orgMemberships).where(membership);
+  assert.equal((await call("GET", "/api/jobs", { token: staffToken })).body.code, "no_field_access");
+  assert.ok(users.listUserTokens(legacyStaff.id).length > 0, "the token itself was never revoked");
+
+  // A demoted owner's token acts as staff from the next request.
+  const owner = eq(schema.orgMemberships.userUid, legacyOwner.id);
+  assert.equal((await call("GET", "/api/jobs", { token: ownerToken })).body.caller.fieldRole, "owner");
+  await ctx.db.update(schema.orgMemberships).set({ role: "staff" }).where(owner);
+  const demoted = await call("GET", "/api/jobs", { token: ownerToken });
+  assert.equal(demoted.body.caller.fieldRole, "staff");
+  assert.equal(demoted.body.caller.role, "user");
+});
+
+test("a person removed, banned or locked in Clerk loses their tokens, though nobody changed them in Field", async () => {
+  let clock = 1_000_000;
+  ctx.setClock(() => clock);
+  // The staff member signs in once, which links their Clerk account.
+  ctx.directory.set("user_staff", clerkUser("user_staff", "staff@example.com"));
+  assert.equal((await call("GET", "/api/jobs", { session: sessionToken("user_staff") })).status, 200);
+  assert.equal((await call("GET", "/api/jobs", { token: staffToken })).status, 200);
+
+  ctx.directory.get("user_staff").banned = true;
+  clock += 61_000;
+  const banned = await call("GET", "/api/jobs", { token: staffToken });
+  assert.equal(banned.status, 403);
+  assert.equal(banned.body.code, "clerk_account_suspended");
+
+  ctx.directory.get("user_staff").banned = false;
+  ctx.directory.get("user_staff").locked = true;
+  clock += 61_000;
+  assert.equal((await call("GET", "/api/jobs", { token: staffToken })).body.code, "clerk_account_suspended");
+
+  ctx.directory.delete("user_staff");
+  clock += 61_000;
+  const removed = await call("GET", "/api/jobs", { token: staffToken });
+  assert.equal(removed.status, 403);
+  assert.equal(removed.body.code, "clerk_account_removed");
+  // A person who never signed in has no Clerk account to ask about.
+  assert.ok(!ctx.clerk.calls.getUser.includes("user_owner"));
+});
+
+test("when Clerk cannot be asked, the last good answer stands for an hour, then tokens are refused", async () => {
+  let clock = 1_000_000;
+  ctx.setClock(() => clock);
+  ctx.directory.set("user_staff", clerkUser("user_staff", "staff@example.com"));
+  assert.equal((await call("GET", "/api/jobs", { session: sessionToken("user_staff") })).status, 200);
+  assert.equal((await call("GET", "/api/jobs", { token: staffToken })).status, 200);
+  ctx.directory.failing = true;
+  clock += 30 * 60_000;
+  assert.equal((await call("GET", "/api/jobs", { token: staffToken })).status, 200);
+  clock += 31 * 60_000;
+  const refused = await call("GET", "/api/jobs", { token: staffToken });
+  assert.equal(refused.status, 503);
+  assert.equal(refused.body.code, "auth_unavailable");
+  ctx.directory.failing = false;
+  assert.equal((await call("GET", "/api/jobs", { token: staffToken })).status, 200);
 });
 
 test("a removed person's tokens never come back for a new row with the same email", async () => {
@@ -763,6 +854,13 @@ test("a service account cannot share a person's email, and emails must be ASCII"
   assert.equal(clash.status, 409);
   assert.equal(clash.body.code, "email_in_use");
   assert.equal((await call("POST", "/api/users", { session: owner, body: { email: "robot@example.com", kind: "service" } })).status, 201);
+  // Both ways: a person cannot take a service account's email either.
+  for (const email of ["agent-cli@example.com", "Robot@Example.com"]) {
+    const taken = await call("POST", "/api/users", { session: owner, body: { email, role: "staff" } });
+    assert.equal(taken.status, 409, email);
+    assert.equal(taken.body.code, "email_in_use");
+  }
+  assert.equal(await fieldRow("robot@example.com"), null);
   for (const email of ["jos\u00e9@example.com", "crew@ex\u0430mple.com", "crew @example.com"]) {
     for (const kind of [undefined, "service"]) {
       const response = await call("POST", "/api/users", { session: owner, body: { email, kind } });
@@ -849,6 +947,7 @@ test("MCP OAuth: only an MFA-verified owner's session approves an MCP client; it
     authenticate: async () => null,
     approveWithSession: (req, res) => ctx.auth.authenticateOwnerSession(req, res),
     authorizeScopes: authorizeFieldMcpScopes,
+    currentScopes: (subject) => ctx.auth.currentMcpScopes(subject),
     authenticateInstallationRequest: [ctx.auth.requireAuth, ctx.auth.requireOwner],
     service: { call: async (name, args, actor) => { calls.push({ name, actor }); return { ok: true }; } },
   });
@@ -982,4 +1081,152 @@ test("MCP OAuth: only an MFA-verified owner's session approves an MCP client; it
   });
   assert.equal(refreshed.status, 400);
   assert.deepEqual(built.store.listInstallations({ subject: legacyOwner.id }), []);
+});
+
+// ── MCP grants are checked at use ────────────────────────────────
+// A Field MCP router wired the way server/index.js wires it, and a grant
+// issued straight from its store for `subject` (as if they approved it).
+// ctx.revokeMcp stays the no-op stand-in, so nothing is revoked when people
+// change: only the check at use can refuse a grant.
+async function mcpGrant(t, subject, scope = [...MCP_SCOPES]) {
+  const mcpDataDir = await mkdtemp(join(tmpdir(), "field-clerk-mcp-use-"));
+  t.after(() => rm(mcpDataDir, { recursive: true, force: true }));
+  const port = 19000 + Math.floor(Math.random() * 900);
+  const publicOrigin = `http://127.0.0.1:${port}`;
+  const built = await createRemoteMcpRouter({
+    dataDir: mcpDataDir,
+    publicOrigin,
+    authenticate: async () => null,
+    approveWithSession: (req, res) => ctx.auth.authenticateOwnerSession(req, res),
+    authorizeScopes: authorizeFieldMcpScopes,
+    currentScopes: (id) => ctx.auth.currentMcpScopes(id),
+    authenticateInstallationRequest: [ctx.auth.requireAuth, ctx.auth.requireOwner],
+    service: { call: async () => ({ ok: true }) },
+  });
+  const app = express();
+  app.use(express.json());
+  app.use(built.router);
+  const server = createServer(app);
+  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const client = await (await fetch(`${publicOrigin}/oauth/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ client_name: "Example Agent", redirect_uris: ["http://127.0.0.1/callback"] }),
+  })).json();
+  const tokens = await built.store.transaction((data) => built.store.issue(data, {
+    clientId: client.client_id,
+    subject,
+    scope,
+    resource: `${publicOrigin}/mcp`,
+  }));
+  const rpc = async (method, params) => {
+    const response = await fetch(`${publicOrigin}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${tokens.access_token}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  };
+  const refresh = async () => {
+    const response = await fetch(`${publicOrigin}/oauth/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: tokens.refresh_token, client_id: client.client_id }),
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  return { built, rpc, refresh };
+}
+
+const toolNames = (result) => result.body.result.tools.map((tool) => tool.name).sort();
+
+test("MCP: a removed person's grant is refused at use, though its revocation never ran", async (t) => {
+  const grant = await mcpGrant(t, legacyStaff.id, ["quote.read"]);
+  await users.updateUser(legacyStaff.id, { permissions: ["quote.read"] });
+  assert.equal((await grant.rpc("tools/list")).status, 200);
+
+  const owner = await signInOwner();
+  assert.equal((await call("DELETE", `/api/users/${legacyStaff.id}`, { session: owner })).status, 200);
+  assert.deepEqual(ctx.revokedSubjects, [legacyStaff.id], "the no-op stand-in revoked nothing");
+  assert.equal(grant.built.store.listInstallations({ subject: legacyStaff.id }).length, 1, "the grant is still on file");
+
+  const listed = await grant.rpc("tools/list");
+  assert.equal(listed.status, 401);
+  assert.equal(listed.body.error, "invalid_token");
+  assert.equal((await grant.rpc("tools/call", { name: "field_quote_list", arguments: {} })).status, 401);
+  // Its refresh token is refused too, and that refusal revokes the grant.
+  const refreshed = await grant.refresh();
+  assert.equal(refreshed.status, 400);
+  assert.equal(refreshed.body.error, "invalid_grant");
+  assert.deepEqual(grant.built.store.listInstallations({ subject: legacyStaff.id }), []);
+});
+
+test("MCP: a grant is refused while its approver is pending, turned off or out of the organisation", async (t) => {
+  const grant = await mcpGrant(t, legacyOwner.id);
+  const membership = eq(schema.orgMemberships.userUid, legacyOwner.id);
+  assert.equal((await grant.rpc("tools/list")).status, 200);
+  for (const status of ["pending", "disabled"]) {
+    await ctx.db.update(schema.orgMemberships).set({ status }).where(membership);
+    assert.equal((await grant.rpc("tools/list")).status, 401, status);
+  }
+  await ctx.db.update(schema.orgMemberships).set({ status: "active" }).where(membership);
+  assert.equal((await grant.rpc("tools/list")).status, 200);
+  await ctx.db.delete(schema.orgMemberships).where(membership);
+  assert.equal((await grant.rpc("tools/list")).status, 401);
+});
+
+test("MCP: a demoted owner's grant keeps only what a staff member may authorize", async (t) => {
+  const grant = await mcpGrant(t, legacyOwner.id);
+  assert.equal(toolNames(await grant.rpc("tools/list")).length, Object.keys(TOOL_SCOPES).length);
+
+  await users.updateUser(legacyOwner.id, { permissions: ["quote.read"] });
+  const owner = eq(schema.orgMemberships.userUid, legacyOwner.id);
+  await ctx.db.update(schema.orgMemberships).set({ role: "staff" }).where(owner);
+  const quoteReadTools = Object.entries(TOOL_SCOPES)
+    .filter(([, scopes]) => scopes.every((scope) => scope === "quote.read"))
+    .map(([name]) => name)
+    .sort();
+  assert.deepEqual(toolNames(await grant.rpc("tools/list")), quoteReadTools);
+  const write = await grant.rpc("tools/call", { name: "field_price_item_update", arguments: {} });
+  assert.equal(write.status, 403);
+  assert.equal(write.body.error, "insufficient_scope");
+  // A refresh is issued with the narrowed scope only.
+  const refreshed = await grant.refresh();
+  assert.equal(refreshed.status, 200);
+  assert.equal(refreshed.body.scope, "quote.read");
+
+  // With no MCP permissions as staff, the grant is refused outright.
+  await users.updateUser(legacyOwner.id, { permissions: [] });
+  assert.equal((await grant.rpc("tools/list")).status, 401);
+});
+
+test("MCP: a grant is refused once its approver's Clerk account is removed or banned", async (t) => {
+  let clock = 1_000_000;
+  ctx.setClock(() => clock);
+  const session = await signInOwner();
+  assert.equal((await call("GET", "/api/jobs", { session })).status, 200);
+  const grant = await mcpGrant(t, legacyOwner.id);
+  assert.equal((await grant.rpc("tools/list")).status, 200);
+
+  ctx.directory.get("user_owner").banned = true;
+  clock += 61_000;
+  assert.equal((await grant.rpc("tools/list")).status, 401);
+
+  ctx.directory.delete("user_owner");
+  clock += 61_000;
+  assert.equal((await grant.rpc("tools/list")).status, 401);
+  assert.equal((await grant.refresh()).status, 400);
+});
+
+test("MCP: when Field cannot check the approver, /mcp answers 503 rather than trusting the grant", async (t) => {
+  let clock = 1_000_000;
+  ctx.setClock(() => clock);
+  const session = await signInOwner();
+  assert.equal((await call("GET", "/api/jobs", { session })).status, 200);
+  const grant = await mcpGrant(t, legacyOwner.id);
+  ctx.directory.failing = true;
+  clock += 2 * 60 * 60_000;
+  assert.equal((await grant.rpc("tools/list")).status, 503);
+  assert.equal((await grant.refresh()).status, 503);
 });

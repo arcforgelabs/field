@@ -3,9 +3,10 @@ import { filterCatalogItems } from "../../../shared/catalog-search.js";
 const getToken = () => localStorage.getItem("fr_token") || "";
 
 // Clerk sign-in (FIELD_AUTH=clerk): requests carry the Clerk session token,
-// fetched fresh for each request, instead of a stored Field token. URLs that
-// a browser opens directly (PDF links, previews) rely on Clerk's session
-// cookie, so no session token is ever put in a URL.
+// fetched fresh for each request, instead of a stored Field token. No token
+// of any kind is ever put in a URL: the server reads credentials only from the
+// Authorization header (or, for a browser opening a link directly, Clerk's
+// session cookie).
 type SessionTokenProvider = () => Promise<string | null>;
 let sessionTokenProvider: SessionTokenProvider | null = null;
 let sessionKey = "";
@@ -13,14 +14,6 @@ let sessionKey = "";
 export function setSessionTokenProvider(provider: SessionTokenProvider | null, key = "") {
   sessionTokenProvider = provider;
   sessionKey = provider ? key : "";
-}
-
-// The Field token to put in a URL the browser opens directly (PDF links, wall
-// renders). With Clerk sign-in there is none: the session cookie authorizes
-// those reads, and a leftover password-era fr_token must never be sent.
-function urlToken(): string {
-  if (sessionTokenProvider) return "";
-  return getToken();
 }
 
 async function authorizationToken(): Promise<string> {
@@ -1121,8 +1114,6 @@ export const api = {
     documentType?: import("./types.ts").JobDocumentType | null,
   ) {
     const params = new URLSearchParams();
-    const token = urlToken();
-    if (token) params.set("token", token);
     if (version) params.set("version", version);
     if (milestoneIndex != null) params.set("milestoneIndex", String(milestoneIndex));
     if (documentType) params.set("documentType", documentType);
@@ -1177,8 +1168,6 @@ export const api = {
   },
   wallRenderUrl(id: string, zoneId: string, version?: string | null, theme?: string | null) {
     const params = new URLSearchParams();
-    const token = urlToken();
-    if (token) params.set("token", token);
     params.set("format", "html");
     if (version) params.set("version", version);
     if (theme) params.set("theme", theme);

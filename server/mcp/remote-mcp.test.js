@@ -89,6 +89,11 @@ async function fixture(t, overrides = {}) {
       return null;
     }),
     authorizeScopes: overrides.authorizeScopes || ((_user, requested) => requested),
+    // What each approver may use now: a removed user (deleted from `users`)
+    // has nothing.
+    currentScopes: overrides.currentScopes || (async (subject) => (
+      Object.values(users).find((user) => user.id === subject)?.permissions ?? null
+    )),
     authenticateInstallationRequest: (req, res, next) => {
       const identity = req.headers["x-test-user"];
       if (identity === "admin") req.caller = { id: "admin-1", role: "admin" };
@@ -263,6 +268,7 @@ test("public origin must have pathname / and no URL extras", async (t) => {
       publicOrigin: badOrigin,
       authenticate: () => null,
       authorizeScopes: () => [],
+      currentScopes: async () => [],
       service: { call: async () => ({}) },
     }), /pathname \/|HTTPS origin/);
   }
@@ -505,4 +511,58 @@ test("tool scope matrix contains no delivery or financial lifecycle tools", () =
   )), false);
   assert.deepEqual(TOOL_SCOPES.field_price_item_update, ["catalog.read", "catalog.write"]);
   assert.deepEqual(TOOL_SCOPES.field_quote_draft_update, ["quote.read", "quote.draft"]);
+});
+
+test("a grant works only within what its approver may use now, and not at all once they are removed", async (t) => {
+  const f = await fixture(t);
+  const login = await loginOn(f);
+  assert.equal((await rpc(f, login.tokens.access_token, "tools/list", {})).status, 200);
+
+  // Their permissions shrink: tools and calls shrink with them, and so does a refresh.
+  f.users.operator.permissions = ["quote.read"];
+  const listed = await (await rpc(f, login.tokens.access_token, "tools/list", {})).json();
+  assert.ok(listed.result.tools.length > 0);
+  assert.ok(listed.result.tools.every((tool) => TOOL_SCOPES[tool.name].every((scope) => scope === "quote.read")));
+  const write = await rpc(f, login.tokens.access_token, "tools/call", { name: "field_price_item_update", arguments: {} });
+  assert.equal(write.status, 403);
+  const refreshed = await form(`${f.base}/oauth/token`, {
+    grant_type: "refresh_token",
+    client_id: login.client.client_id,
+    refresh_token: login.tokens.refresh_token,
+  });
+  assert.equal(refreshed.status, 200);
+  const narrowed = await refreshed.json();
+  assert.equal(narrowed.scope, "quote.read");
+
+  // Removed: nothing revoked the grant, but it is refused at use and on refresh.
+  delete f.users.operator;
+  const refused = await rpc(f, narrowed.access_token, "tools/list", {});
+  assert.equal(refused.status, 401);
+  assert.match(refused.headers.get("www-authenticate"), /resource_metadata=/);
+  const refreshAgain = await form(`${f.base}/oauth/token`, {
+    grant_type: "refresh_token",
+    client_id: login.client.client_id,
+    refresh_token: narrowed.refresh_token,
+  });
+  assert.equal(refreshAgain.status, 400);
+  assert.equal((await refreshAgain.json()).error, "invalid_grant");
+  assert.deepEqual(f.built.store.listInstallations({ subject: "user-1" }), []);
+});
+
+test("a failed access check refuses the grant with 503, never trusts it", async (t) => {
+  let failing = false;
+  const f = await fixture(t, {
+    currentScopes: async () => {
+      if (failing) throw new Error("database unavailable (test)");
+      return [...MCP_SCOPES];
+    },
+  });
+  const login = await loginOn(f);
+  failing = true;
+  assert.equal((await rpc(f, login.tokens.access_token, "tools/list", {})).status, 503);
+  assert.equal((await form(`${f.base}/oauth/token`, {
+    grant_type: "refresh_token",
+    client_id: login.client.client_id,
+    refresh_token: login.tokens.refresh_token,
+  })).status, 503);
 });

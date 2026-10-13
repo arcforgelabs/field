@@ -6,7 +6,8 @@
 // Clerk. Machine access stays Field-issued: CLI/API bearer tokens (users.json)
 // and MCP OAuth grants keep working, but issuing or revoking them needs
 // a verified owner sign-in (see ownerVerification below: a recent second factor,
-// or Google Workspace sign-in on an allowed domain with no password).
+// or Google Workspace sign-in on an allowed domain with no password). Every
+// use of one is checked against the person's access now (machineCaller).
 //
 // With FIELD_AUTH unset none of this is loaded and Field authenticates exactly
 // as before (password login minting per-user bearer tokens).
@@ -32,6 +33,8 @@ import {
   updateFieldUser,
 } from "./field-users-store.js";
 import { DEFAULT_ORG_UID, orgScope } from "../db-runtime/tenancy.js";
+import { authorizeFieldMcpScopes } from "../mcp/scope-authority.js";
+import { MCP_SCOPES } from "../mcp/scopes.js";
 
 export const BREAK_GLASS_HEADER = "x-field-break-glass";
 const BREAK_GLASS_WINDOW_MS = 15 * 60 * 1000;
@@ -45,6 +48,11 @@ const COOKIE_SAFE_METHODS = new Set(["GET", "HEAD"]);
 // Clerk user is trusted for the Google Workspace owner check.
 export const DEFAULT_OWNER_MFA_MAX_AGE_MINUTES = 12 * 60;
 const CLERK_USER_CACHE_MS = 60 * 1000;
+// How long a Clerk account check (still there, not banned or locked) counts
+// for machine access, and how long the last good answer may stand in while
+// Clerk cannot be asked. A removed or suspended account is refused at once.
+const CLERK_ACCOUNT_CACHE_MS = 60 * 1000;
+const CLERK_ACCOUNT_GRACE_MS = 60 * 60 * 1000;
 
 function readEnv(env, name) {
   const value = env?.[name];
@@ -234,6 +242,8 @@ const DENIALS = {
     error: "Your Field access has been turned off. Ask a Field owner if this is a mistake.",
   },
   no_field_access: { status: 403, error: "This credential has no Field access." },
+  clerk_account_removed: { status: 403, error: "The sign-in account behind this credential was removed. Ask a Field owner if this is a mistake." },
+  clerk_account_suspended: { status: 403, error: "The sign-in account behind this credential is suspended. Ask a Field owner if this is a mistake." },
   auth_unavailable: { status: 503, error: "Sign-in is unavailable right now. Try again shortly." },
 };
 
@@ -333,10 +343,6 @@ function bearerFrom(req) {
   return null;
 }
 
-function queryTokenFrom(req) {
-  return typeof req.query?.token === "string" && req.query.token.trim() ? req.query.token.trim() : null;
-}
-
 /**
  * @param {object} options
  * @param {object} options.db                 Drizzle instance holding the users table
@@ -361,6 +367,8 @@ export function createClerkAuth({
   ownerMfaMaxAgeMinutes = DEFAULT_OWNER_MFA_MAX_AGE_MINUTES,
   ownerGoogleDomains = [],
   clerkUserCacheMs = CLERK_USER_CACHE_MS,
+  clerkAccountCacheMs = CLERK_ACCOUNT_CACHE_MS,
+  clerkAccountGraceMs = CLERK_ACCOUNT_GRACE_MS,
 }) {
   if (!database) throw new Error("createClerkAuth: db is required");
   const db = orgScope(database, orgUid);
@@ -373,6 +381,8 @@ export function createClerkAuth({
   // Clerk users fetched for the Google Workspace owner check, briefly cached so
   // an owner's burst of requests costs one Clerk API call. Failures are never cached.
   const clerkUserCache = new Map();
+  // Clerk account checks for machine access: clerkUserId -> { denial, checkedAt }.
+  const clerkAccountChecks = new Map();
 
   function runClerkMiddleware(req, res) {
     if (req.fieldClerkDone) return Promise.resolve(true);
@@ -526,24 +536,50 @@ export function createClerkAuth({
     return next();
   }
 
-  // Field-issued bearer token (CLI/API, or a token Field minted earlier).
-  // Returns a caller, a denial code, or null when it is not a Field token.
-  // A token is bound to the users.json record that holds it, and that record's
-  // id is the person's PostgreSQL id (imports keep ids; Clerk-mode holders are
-  // created under the row id). It is never matched by email: a removed
-  // person's token must not come back to life for a new row with their email.
-  async function tokenCaller(token) {
-    const holder = legacy.findUserByToken(token);
-    if (!holder) return null;
-    const row = await findFieldUserById(db, holder.id);
+  // Is the Clerk account behind a linked person still there and usable? A
+  // person removed, banned or locked in Clerk keeps no machine access, even
+  // when nobody changed them in Field. Returns null when fine, or a denial.
+  // A Clerk API failure falls back to the last good answer for
+  // clerkAccountGraceMs, then fails closed.
+  async function clerkAccountDenial(clerkUserId) {
+    if (!clerkUserId) return null;
+    const at = now();
+    const known = clerkAccountChecks.get(clerkUserId);
+    if (known && at - known.checkedAt < clerkAccountCacheMs) return known.denial;
+    let denial;
+    try {
+      const clerkUser = await clerk.getUser(clerkUserId);
+      denial = clerkUser?.banned || clerkUser?.locked ? "clerk_account_suspended" : null;
+    } catch (error) {
+      if (error?.status !== 404) {
+        log.error?.(`[auth] Clerk account check failed for Clerk user ${clerkUserId}: ${error.message}`);
+        if (known && !known.denial && at - known.checkedAt < clerkAccountGraceMs) return null;
+        return "auth_unavailable";
+      }
+      denial = "clerk_account_removed";
+    }
+    if (denial) log.warn?.(`[auth] Clerk user ${clerkUserId} refused machine access: ${denial}`);
+    if (clerkAccountChecks.size > 500) clerkAccountChecks.clear();
+    clerkAccountChecks.set(clerkUserId, { denial, checkedAt: at });
+    return denial;
+  }
+
+  // Who a machine credential (CLI/API token or MCP grant) acts as, checked on
+  // every use against the person's access now: their membership of this
+  // organisation, its status and role in PostgreSQL, and their Clerk account.
+  // A change takes effect without anything being revoked, so nothing can be
+  // missed. `holder` is the users.json record (settings, permissions).
+  // Returns { caller } or { denial }.
+  async function machineCaller(subjectId, holder = legacy.findUserById?.(subjectId) ?? null) {
+    const row = await findFieldUserById(db, subjectId);
     if (row) {
-      const denial = statusDenial(row.status);
+      const denial = statusDenial(row.status) ?? (await clerkAccountDenial(row.clerkUserId));
       if (denial) return { denial };
       return { caller: humanCaller(row, holder, { via: "token", mfaVerified: false }) };
     }
-    // A person Field no longer knows keeps no access through old tokens;
+    // A person Field no longer knows keeps no access through old credentials;
     // service accounts are machine identities and live only in users.json.
-    if (holder.kind !== "service") return { denial: "no_field_access" };
+    if (holder?.kind !== "service" || holder.id !== subjectId) return { denial: "no_field_access" };
     return {
       caller: {
         ...holder,
@@ -556,17 +592,31 @@ export function createClerkAuth({
     };
   }
 
+  // Field-issued bearer token (CLI/API, or a token Field minted earlier).
+  // Returns a caller, a denial code, or null when it is not a Field token.
+  // A token is bound to the users.json record that holds it, and that record's
+  // id is the person's PostgreSQL id (imports keep ids; Clerk-mode holders are
+  // created under the row id). It is never matched by email: a removed
+  // person's token must not come back to life for a new row with their email.
+  async function tokenCaller(token) {
+    const holder = legacy.findUserByToken(token);
+    if (!holder) return null;
+    return machineCaller(holder.id, holder);
+  }
+
   async function requireAuth(req, res, next) {
     const presented = req.headers[BREAK_GLASS_HEADER];
     if (presented !== undefined) return handleBreakGlass(req, res, next, Array.isArray(presented) ? presented[0] : presented);
 
+    // Credentials come only from the Authorization header. A ?token= in the
+    // URL is never read: URLs end up in logs, history and Referer headers. A
+    // browser opening a link directly (PDFs, previews) is authorized by the
+    // session cookie below, for GET and HEAD only.
     const bearer = bearerFrom(req);
-    const queryToken = bearer ? null : queryTokenFrom(req);
-    const fieldToken = bearer ?? queryToken;
-    if (fieldToken) {
+    if (bearer) {
       let resolved;
       try {
-        resolved = await tokenCaller(fieldToken);
+        resolved = await tokenCaller(bearer);
       } catch (error) {
         log.error?.(`[auth] token check failed: ${error.message}`);
         return deny(res, "auth_unavailable");
@@ -576,13 +626,7 @@ export function createClerkAuth({
         req.caller = resolved.caller;
         return next();
       }
-      // A ?token= that is not a Field token (typically a stale one left in a
-      // browser from password sign-in) is ignored, never treated as a session
-      // token: a GET/HEAD falls through to the session cookie below, exactly as
-      // if no token had been sent, and is refused if there is no session.
-      // This cannot widen access: the cookie alone already authorizes GET/HEAD,
-      // and anything else is refused below without a Bearer header. Otherwise
-      // the bearer is a Clerk session token: fall through.
+      // Not a Field token: the bearer is a Clerk session token; fall through.
     }
     if (!bearer && !COOKIE_SAFE_METHODS.has(req.method)) return deny(res, "signed_out");
 
@@ -665,8 +709,16 @@ export function createClerkAuth({
   // Field-issued token) rather than a Clerk session.
   function isMachineRequest(req) {
     if (req.headers[BREAK_GLASS_HEADER] !== undefined) return true;
-    const token = bearerFrom(req) ?? queryTokenFrom(req);
+    const token = bearerFrom(req);
     return Boolean(token && legacy.findUserByToken(token));
+  }
+
+  // The MCP scopes an MCP grant's approver may use now (remote-mcp.js
+  // currentScopes), or null when they no longer have Field access.
+  async function currentMcpScopes(subjectId) {
+    const resolved = await machineCaller(subjectId);
+    if (resolved.denial === "auth_unavailable") throw new Error("Field access check unavailable");
+    return resolved.caller ? authorizeFieldMcpScopes(resolved.caller, MCP_SCOPES) : null;
   }
 
   // /api/auth/me in Clerk mode: also answers pending/disabled people (with their
@@ -700,6 +752,7 @@ export function createClerkAuth({
     authenticateOwnerSession,
     describeSession,
     isMachineRequest,
+    currentMcpScopes,
     deny,
     ownerGoogleDomains: googleDomains,
     ownerMfaMaxAgeMinutes,
@@ -768,7 +821,7 @@ export function createClerkAuthRouter({ auth, db: database, users, revokeMcpAcce
   function cutOffFailed(res, row, error) {
     log.error?.(`[auth] Field user ${row.id} changed but revoking their machine access failed: ${error.message}`);
     return res.status(500).json({
-      error: "The change was saved, but revoking their tokens or MCP connections failed. Their tokens no longer authenticate; retry to finish revoking.",
+      error: "The change was saved and their tokens and MCP connections no longer work, but clearing them from the lists failed. Revoke what is left on the MCP installations screen.",
       code: "revoke_failed",
     });
   }
@@ -834,6 +887,10 @@ export function createClerkAuthRouter({ auth, db: database, users, revokeMcpAcce
         return res.status(400).json({ error: error.message });
       }
     }
+    // And the other way round: a person must not take a service account's email.
+    if (users.findUserByEmail(email)?.kind === "service") {
+      return res.status(409).json({ error: "A service account already uses that email. Give the person their own address.", code: "email_in_use" });
+    }
     try {
       const row = await createInvitedUser(db, { email, name, role: role ?? "staff" });
       log.info?.(`[auth] owner ${req.caller.id} added Field user ${row.id} (${row.role})`);
@@ -864,7 +921,9 @@ export function createClerkAuthRouter({ auth, db: database, users, revokeMcpAcce
       const row = await updateFieldUser(db, req.params.id, { name, role, status });
       if (!row) return res.status(404).json({ error: "user not found" });
       log.info?.(`[auth] owner ${req.caller.id} updated Field user ${row.id}: ${row.role}, ${row.status}`);
-      if (row.status === "disabled") {
+      // Every use is checked again (machineCaller); revoking here keeps the
+      // token and installation lists honest.
+      if (row.status !== "active") {
         try {
           await cutOffMachineAccess(row, { remove: false });
         } catch (error) {

@@ -393,8 +393,7 @@ function resolveReferenceHref(reference, sourceContext = {}) {
     return reference.path;
   }
   if ((reference.type === "price_catalog_item" || reference.type === "catalog_item") && sourceContext.priceCatalogBase && reference.itemCode) {
-    const token = sourceContext.authToken ? `?token=${sourceContext.authToken}` : "";
-    return `${sourceContext.priceCatalogBase}/items/${encodeURIComponent(reference.itemCode)}${token}`;
+    return `${sourceContext.priceCatalogBase}/items/${encodeURIComponent(reference.itemCode)}`;
   }
   if (reference.type === "authority_price_record" && sourceContext.authorityBaseUrl) {
     const base = normalizeAuthorityBaseUrl(sourceContext.authorityBaseUrl);

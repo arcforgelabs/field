@@ -210,6 +210,7 @@ import { createPriceCatalogRouter } from "./price-catalog/catalog-api.js";
 import {
   createRemoteMcpRouter,
   createFieldMcpService,
+  MCP_SCOPES,
   resolveRemoteMcpRuntimeConfig,
 } from "./mcp/remote-mcp.js";
 import { authorizeFieldMcpScopes } from "./mcp/scope-authority.js";
@@ -691,15 +692,14 @@ if (existsSync(clientDist)) {
   app.use(express.static(clientDist));
 }
 
-// Auth middleware — per-user bearer token (query param fallback for <audio>/<video> tags)
+// Auth middleware — per-user bearer token, from the Authorization header only.
+// A token in the URL (?token=) is never read: URLs end up in logs, browser
+// history and Referer headers, and the token would authorise everything.
 function extractToken(req) {
   const header = req.headers.authorization;
   if (typeof header === "string" && header.startsWith("Bearer ")) {
     const token = header.slice("Bearer ".length).trim();
     if (token) return token;
-  }
-  if (typeof req.query.token === "string" && req.query.token.trim()) {
-    return req.query.token.trim();
   }
   return null;
 }
@@ -761,14 +761,6 @@ const QUOTE_PDF_PREVIEW_TTL_MS = 15 * 60 * 1000;
 const QUOTE_PDF_PREVIEW_LIMIT = 64;
 const quotePdfPreviewCache = new Map();
 
-// The Field token to embed in a preview URL. A Clerk session token is never put
-// in a URL: with Clerk sign-in the browser's session cookie authorizes it.
-function getRequestAuthToken(req) {
-  const token = extractToken(req) || "";
-  if (clerkAuth && token && !findUserByToken(token)) return "";
-  return token;
-}
-
 function cleanupQuotePdfPreviewCache(now = Date.now()) {
   for (const [previewId, preview] of quotePdfPreviewCache) {
     if ((preview?.expiresAt || 0) <= now) quotePdfPreviewCache.delete(previewId);
@@ -784,7 +776,10 @@ function cleanupQuotePdfPreviewCache(now = Date.now()) {
   }
 }
 
-function createQuotePdfPreview({ jobId, pdfBuffer, fileName, authToken }) {
+// The preview URL carries no credential: it is fetched with the caller's
+// Authorization header (the client and the CLI), or with the Clerk session
+// cookie when a browser opens it directly.
+function createQuotePdfPreview({ jobId, pdfBuffer, fileName }) {
   const now = Date.now();
   cleanupQuotePdfPreviewCache(now);
 
@@ -797,12 +792,10 @@ function createQuotePdfPreview({ jobId, pdfBuffer, fileName, authToken }) {
     expiresAt: now + QUOTE_PDF_PREVIEW_TTL_MS,
   });
 
-  const params = new URLSearchParams();
-  params.set("token", authToken);
   return {
     previewId,
     fileName,
-    url: `/api/jobs/${encodeURIComponent(jobId)}/quote-pdf-preview/${encodeURIComponent(previewId)}?${params.toString()}`,
+    url: `/api/jobs/${encodeURIComponent(jobId)}/quote-pdf-preview/${encodeURIComponent(previewId)}`,
   };
 }
 
@@ -2555,7 +2548,6 @@ app.post("/api/jobs/:id/quote-pdf-preview", requireAuth, async (req, res) => {
           jobId: job.meta.id,
           pdfBuffer: issuedQuote.bytes,
           fileName: buildQuotePdfFilename(job.meta, prepared.preparedQuote, "", "quote"),
-          authToken: getRequestAuthToken(req),
         }),
       });
     }
@@ -2580,7 +2572,6 @@ app.post("/api/jobs/:id/quote-pdf-preview", requireAuth, async (req, res) => {
           jobId: job.meta.id,
           pdfBuffer: issued.storedArtifact.pdfBuffer,
           fileName: issuedPreviewPdfName,
-          authToken: getRequestAuthToken(req),
         }),
       });
     }
@@ -2607,7 +2598,6 @@ app.post("/api/jobs/:id/quote-pdf-preview", requireAuth, async (req, res) => {
         jobId: job.meta.id,
         pdfBuffer,
         fileName: previewPdfName,
-        authToken: getRequestAuthToken(req),
       }),
     });
   } catch (err) {
@@ -6028,6 +6018,14 @@ if (remoteMcpRuntime.enabled) {
     authenticate: clerkAuth ? async () => null : authenticateUser,
     approveWithSession: clerkAuth ? (req, res) => clerkAuth.authenticateOwnerSession(req, res) : null,
     authorizeScopes: authorizeFieldMcpScopes,
+    // Every /mcp call and refresh is checked against the approver's access
+    // now, so removing, disabling or demoting someone takes effect at once.
+    currentScopes: clerkAuth
+      ? (subject) => clerkAuth.currentMcpScopes(subject)
+      : (subject) => {
+        const user = findUserById(subject);
+        return user ? authorizeFieldMcpScopes(user, MCP_SCOPES) : null;
+      },
     authenticateInstallationRequest: clerkAuth ? [requireAuth, requireAdmin] : requireAuth,
     service: mcpService,
   });
