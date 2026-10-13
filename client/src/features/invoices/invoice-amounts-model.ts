@@ -4,7 +4,8 @@
 // with 409 while the first runs, and one run can take 15 s or more).
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import type { InvoiceAmountEntry, InvoiceAmountReport, InvoiceAmountSource, InvoiceAmountState } from "@/lib/types";
+import { jobRef, jobTitle, money } from "@/lib/job-status";
+import type { InvoiceAmountEntry, InvoiceAmountReport, InvoiceAmountSource, InvoiceAmountState, RecordingMeta } from "@/lib/types";
 
 export const SOURCE_LABEL: Record<InvoiceAmountSource, string> = {
   "milestone-record": "Milestone record",
@@ -27,9 +28,20 @@ export const STATE_LABEL: Record<InvoiceAmountState, string> = {
   settled: "Settled",
 };
 
-/** How many invoices wait for the owner to choose (state "needs-owner-decision"). */
+/** How many invoices wait for the owner: every one not settled yet. */
 export function decisionCount(report: Pick<InvoiceAmountReport, "invoices"> | null | undefined): number {
-  return (report?.invoices || []).filter((entry) => entry.state === "needs-owner-decision").length;
+  return (report?.invoices || []).filter((entry) => entry.state !== "settled").length;
+}
+
+/** "Open job EQ-2607-01 · 12 Example Street" when the job list is loaded, else "Open job". */
+export function jobLinkLabel(job: RecordingMeta | null | undefined) {
+  if (!job) return "Open job";
+  return `Open job ${jobRef(job)} · ${jobTitle(job)}`;
+}
+
+/** The server's note prints bare amounts ("5115.00"): show them as money ("$5,115.00"). */
+export function noteWithMoney(note: string): string {
+  return note.replace(/(?<![\d.$])\d+\.\d{2}(?![\d.])/g, (figure) => money(Number(figure)));
 }
 
 /** The invoices still to settle, then the settled ones. */
@@ -89,7 +101,7 @@ export function loadAmountReport(): Promise<InvoiceAmountReport> {
 }
 
 /**
- * Owners only: how many invoices need a decision, from this browser
+ * Owners only: how many invoices are not settled yet, from this browser
  * session's last report (at most 10 minutes old), else from a new one run
  * quietly. 0 until known, and on any error.
  */

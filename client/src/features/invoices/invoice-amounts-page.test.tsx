@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { HashRouter } from "react-router-dom";
 import { api } from "@/lib/api";
-import type { InvoiceAmountEntry, InvoiceAmountReport } from "@/lib/types";
+import { refreshJobs } from "@/lib/use-jobs";
+import type { InvoiceAmountEntry, InvoiceAmountReport, RecordingMeta } from "@/lib/types";
 import { InvoiceAmountsPage } from "./invoice-amounts-page";
-import { resetAmountReportCache, useAmountDecisionCount } from "./invoice-amounts-model";
+import { noteWithMoney, resetAmountReportCache, useAmountDecisionCount } from "./invoice-amounts-model";
 
 const toast = vi.fn();
 vi.mock("@/components/shell/shell-context", () => ({ useShell: () => ({ toast }) }));
@@ -77,7 +78,8 @@ describe("InvoiceAmountsPage", () => {
     finish(report([open, settled]));
 
     const card = await openCard();
-    const job = within(card).getByRole("link", { name: "Open job job-synthetic-a" }) as HTMLAnchorElement;
+    // No job list loaded: the link does not show the raw job id.
+    const job = within(card).getByRole("link", { name: "Open job" }) as HTMLAnchorElement;
     expect(job.getAttribute("href")).toBe("#/jobs/job-synthetic-a");
     expect(within(card).getByText("Current")).toBeTruthy();
     expect(within(card).getByText("Needs your decision")).toBeTruthy();
@@ -93,7 +95,7 @@ describe("InvoiceAmountsPage", () => {
     expect(within(pdf).getByText("$360.00")).toBeTruthy();
     expect(within(pdf).getByText("$3,960.00")).toBeTruthy();
     expect(within(pdf).getByText(/Matches the total of quote version 1/)).toBeTruthy();
-    expect(within(card).getByText(open.note!)).toBeTruthy();
+    expect(within(card).getByText("No copy of what was emailed is held. Field bills the record's $5,115.00 until you settle; the emails list the quote version each send was built against.")).toBeTruthy();
     expect(within(card).getByText(/Field kept no copy/)).toBeTruthy();
 
     const done = screen.getByRole("article", { name: "Invoice EI-2607-02-M1" });
@@ -191,6 +193,26 @@ describe("InvoiceAmountsPage", () => {
     expect(within(card).getAllByRole("radio").map((radio) => (radio as HTMLInputElement).value)).toEqual(["sent-copy"]);
     expect(within(card).getAllByText("Field holds the copy it emailed. Only the sent copy can be chosen.")).toHaveLength(2);
   });
+
+  it("names the job by its number and address when the job list is already loaded", async () => {
+    vi.spyOn(api, "recordings").mockResolvedValue([
+      { id: "job-synthetic-a", quoteNumber: "EQ-2607-01", siteAddress: "1 Example Road, Testville" } as RecordingMeta,
+    ]);
+    await refreshJobs();
+    vi.spyOn(api, "invoiceAmountDisagreements").mockResolvedValue(report([open]));
+    renderPage();
+    const card = await openCard();
+    const link = within(card).getByRole("link", { name: "Open job EQ-2607-01 · 1 Example Road, Testville" });
+    expect(link.getAttribute("href")).toBe("#/jobs/job-synthetic-a");
+  });
+});
+
+describe("noteWithMoney", () => {
+  it("shows the note's bare amounts as money and leaves other numbers alone", () => {
+    expect(noteWithMoney("Field holds the copy it emailed (3960.00), but the job page still bills the record's 15115.00 until you settle with \"sent-copy\"."))
+      .toBe("Field holds the copy it emailed ($3,960.00), but the job page still bills the record's $15,115.00 until you settle with \"sent-copy\".");
+    expect(noteWithMoney("Quote version 2 and 3 emails.")).toBe("Quote version 2 and 3 emails.");
+  });
 });
 
 describe("useAmountDecisionCount", () => {
@@ -201,9 +223,9 @@ describe("useAmountDecisionCount", () => {
     expect(load).not.toHaveBeenCalled();
   });
 
-  it("counts only the invoices that need the owner's decision", async () => {
+  it("counts every invoice not settled yet, sent copy found included", async () => {
     vi.spyOn(api, "invoiceAmountDisagreements").mockResolvedValue(report([open, { ...open, invoiceNumber: "EI-2607-03-M1" }, settled, { ...open, invoiceNumber: "EI-2607-04-M1", state: "sent-differs-from-recorded" }]));
     const { result } = renderHook(() => useAmountDecisionCount(true));
-    await waitFor(() => expect(result.current).toBe(2));
+    await waitFor(() => expect(result.current).toBe(3));
   });
 });

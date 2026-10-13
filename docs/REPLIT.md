@@ -180,7 +180,7 @@ The invoice rows backfill uses what was emailed:
 
 To see and settle every affected invoice, sign in as an owner and open
 Invoices › Choose amounts (`/#/invoices/amounts`). The Invoices page shows
-the notice when an invoice needs your decision. The screen uses the two
+the notice while an invoice is not settled. The screen uses the two
 routes below; you can also call them directly.
 
 The report route:

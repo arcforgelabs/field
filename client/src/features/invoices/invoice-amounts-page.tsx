@@ -8,11 +8,14 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, RotateCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { money } from "@/lib/job-status";
-import type { InvoiceAmountEntry, InvoiceAmountReport, InvoiceAmountSet, InvoiceAmountSource } from "@/lib/types";
+import { useLoadedJobs } from "@/lib/use-jobs";
+import type { InvoiceAmountEntry, InvoiceAmountReport, InvoiceAmountSet, InvoiceAmountSource, RecordingMeta } from "@/lib/types";
 import { useShell } from "@/components/shell/shell-context";
 import {
   groupEntries,
+  jobLinkLabel,
   loadAmountReport,
+  noteWithMoney,
   reportErrorMessage,
   settleErrorMessage,
   SOURCE_LABEL,
@@ -45,6 +48,9 @@ function versionList(versions: number[] | undefined) {
 
 export function InvoiceAmountsPage() {
   const [load, setLoad] = useState<Load>({ status: "loading", report: null });
+  // The shell has usually loaded the jobs already; this never fetches them.
+  const jobs = useLoadedJobs();
+  const jobFor = (id: string) => jobs?.find((job) => job.id === id) || null;
 
   const fetchReport = useCallback(() => {
     loadAmountReport()
@@ -109,13 +115,13 @@ export function InvoiceAmountsPage() {
         {report && open.length > 0 && (
           <section className="fx-amt__group" aria-labelledby="amt-open">
             <h2 className="fx-amt__h" id="amt-open">To settle <span className="fx-badge">{open.length}</span></h2>
-            {open.map((entry) => <AmountEntry key={`${entry.jobId}/${entry.invoiceNumber}`} entry={entry} onSettled={reload} />)}
+            {open.map((entry) => <AmountEntry key={`${entry.jobId}/${entry.invoiceNumber}`} entry={entry} job={jobFor(entry.jobId)} onSettled={reload} />)}
           </section>
         )}
         {report && settled.length > 0 && (
           <section className="fx-amt__group" aria-labelledby="amt-settled">
             <h2 className="fx-amt__h" id="amt-settled">Settled <span className="fx-badge">{settled.length}</span></h2>
-            {settled.map((entry) => <AmountEntry key={`${entry.jobId}/${entry.invoiceNumber}`} entry={entry} onSettled={reload} />)}
+            {settled.map((entry) => <AmountEntry key={`${entry.jobId}/${entry.invoiceNumber}`} entry={entry} job={jobFor(entry.jobId)} onSettled={reload} />)}
           </section>
         )}
       </div>
@@ -160,7 +166,7 @@ function amountSets(entry: InvoiceAmountEntry): SetCard[] {
   return cards;
 }
 
-export function AmountEntry({ entry, onSettled }: { entry: InvoiceAmountEntry; onSettled: () => void }) {
+export function AmountEntry({ entry, job = null, onSettled }: { entry: InvoiceAmountEntry; job?: RecordingMeta | null; onSettled: () => void }) {
   const shell = useShell();
   const [choice, setChoice] = useState<InvoiceAmountSource | null>(null);
   const [reason, setReason] = useState("");
@@ -199,7 +205,7 @@ export function AmountEntry({ entry, onSettled }: { entry: InvoiceAmountEntry; o
         <span className={`fx-status ${superseded ? "fx-status--doc-superseded" : "fx-status--doc-issued"}`}>{superseded ? "Superseded" : "Current"}</span>
         <span className={`fx-status ${settled ? "fx-status--paid" : "fx-status--invoicing"}`}>{STATE_LABEL[entry.state] || entry.state}</span>
         <span className="fx-spacer" />
-        <Link className="fx-amt__job" to={`/jobs/${encodeURIComponent(entry.jobId)}`}>Open job {entry.jobId}</Link>
+        <Link className="fx-amt__job" to={`/jobs/${encodeURIComponent(entry.jobId)}`}>{jobLinkLabel(job)}</Link>
       </div>
 
       <dl className="fx-amt__facts">
@@ -213,7 +219,7 @@ export function AmountEntry({ entry, onSettled }: { entry: InvoiceAmountEntry; o
         </div>
       </dl>
 
-      {entry.note && <p className="fx-amt__note">{entry.note}</p>}
+      {entry.note && <p className="fx-amt__note">{noteWithMoney(entry.note)}</p>}
 
       {settled && (
         <div className="fx-notice fx-amt__notice" role="note">
