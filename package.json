@@ -56,5 +56,10 @@
     "@types/node": "24.10.1",
     "drizzle-kit": "0.31.10",
     "typescript": "5.9.3"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.12"
+    }
   }
 }
