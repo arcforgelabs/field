@@ -74,7 +74,7 @@ export async function pin(version, { env = process.env, fetchImpl = fetch, repos
   if (sidecar.split(/\s+/)[0] !== sha256) fail(`release-manifest.json for v${version} does not match its .sha256`);
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   if (manifest.version !== version || manifest.npm?.package !== PACKAGE) fail(`the manifest for v${version} describes ${manifest.npm?.package}@${manifest.version}`);
-  const served = await fetchOk(`${registry(env)}/${PACKAGE.replace("/", "%2f")}/${version}`, fetchImpl);
+  const served = await fetchOk(`${registry(env)}/${PACKAGE.replaceAll("/", "%2f")}/${version}`, fetchImpl);
   if (served.dist?.integrity !== manifest.npm.integrity) {
     fail(`npm serves ${served.dist?.integrity} for ${PACKAGE}@${version}; the release manifest says ${manifest.npm.integrity}`);
   }
@@ -91,7 +91,7 @@ export async function pin(version, { env = process.env, fetchImpl = fetch, repos
 
 // The provenance statement npm holds for one version, decoded.
 async function provenance(lock, { env, fetchImpl }) {
-  const url = `${registry(env)}/-/npm/v1/attestations/${PACKAGE.replace("/", "%2f")}@${lock.version}`;
+  const url = `${registry(env)}/-/npm/v1/attestations/${PACKAGE.replaceAll("/", "%2f")}@${lock.version}`;
   const { attestations = [] } = await fetchOk(url, fetchImpl);
   const slsa = attestations.find((attestation) => attestation.predicateType === SLSA_V1);
   if (!slsa) fail(`${PACKAGE}@${lock.version} has no SLSA provenance on npm`);
