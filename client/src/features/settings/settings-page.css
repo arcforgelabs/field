@@ -86,3 +86,11 @@
 .xero__secrets { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
 .xero__secrets li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .xero__secrets code { font: 12px var(--t-data); color: var(--t-text); }
+.xero__creds { margin: 0; display: grid; gap: 6px; }
+.xero__cred { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12.5px; }
+.xero__cred dt { width: 110px; color: var(--t-dim); }
+.xero__cred dd { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.xero__credform { display: grid; gap: 10px; }
+.xero__history { font-size: 12.5px; }
+.xero__history summary { cursor: pointer; color: var(--t-dim); }
+.xero__history ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; }

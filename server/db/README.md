@@ -366,15 +366,40 @@ app's client id and secret stay deployment secrets. `field_app` may read,
 insert and update. Run `rollback/0017_xero_connection.down.sql` before
 0016's. Operating it: `docs/XERO.md`.
 
+`0018_xero_invoice_sync` (#93) adds `xero_invoice_syncs`, one row per issued
+invoice on its way to one Xero organisation (its state, attempts, next try,
+the worker's lease, last error code and reason, and the Xero invoice it
+became); `invoices.xero_invoice_id`, `xero_tenant_id` and `xero_status`; and
+`xero_invoice_links`, append-only, every Xero invoice an invoice has had by
+organisation (`field_app` may read and insert). It replaces 0013's
+issued-invoice trigger function so that those three columns may change on an
+issued invoice: an id is replaced only when the earlier one is in
+`xero_invoice_links` and either belongs to another organisation or is
+recorded as voided or deleted in Xero. It also adds
+`xero_connections.codes_checked_at` and `codes_problem`, the saved codes
+checked against the connected organisation.
+
+`0019_integration_credentials` (#112) adds `integration_credentials`, an
+integration's credentials per organisation, encrypted by `server/secrets/`
+under `FIELD_SECRETS_KEY` with the key's id, and `integration_audit_events`,
+append-only, who changed an integration and when, never a value. `field_app`
+may read, insert, update and delete credentials, and read and insert audit
+events. Run `rollback/0019_integration_credentials.down.sql` before 0018's:
+it marks a Xero connection whose tokens this release encrypted as needing
+reconnect.
+Nothing else about an issued invoice may change. Run
+`rollback/0018_xero_invoice_sync.down.sql` before 0017's: it restores 0013's
+function before it drops the columns.
+
 ### Milestone rules
 
-`0018_milestone_rules` (#29) adds the organisation's milestone rules as
+`0020_milestone_rules` (#29) adds the organisation's milestone rules as
 rows: `milestone_rules` (one band of contract value in one region: every
 region, a country, or a state), `milestone_rule_milestones` (its default
 milestones) and `milestone_rule_caps` (at most one cap per milestone kind,
 `hard` or `soft`), and `business_settings.country` and `.region`. Rules are
 settings, not issued documents: an owner replaces them, so `field_app` may
-delete them. Run `rollback/0018_milestone_rules.down.sql` before 0017's.
+delete them. Run `rollback/0020_milestone_rules.down.sql` before 0019's.
 
 ### Adding tables
 

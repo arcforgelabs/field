@@ -30,7 +30,8 @@ Secrets, which reach the app as environment variables:
 | `FIELD_CONFIG_JSON` | The whole config object as one JSON value, shaped like `config.json.example`: `authToken`, `publicUrl`, `mail` (sender and `deliveryPolicy`), `googleOAuth` (`clientId`, `clientSecret`), `googleDriveFolderId`, `bootstrapUsers`, `mcp`, and `businessProfile` (your trading name, ABN, address, contact details and bank account; README "Business profile"). Leave out `port` and `dataDir`. When it is set, `FIELD_CONFIG` and `config.json` are ignored, and invalid JSON stops Field at boot. |
 | `FIELD_TOKEN` | Optional. Overrides `authToken`. |
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | Optional. The service account key JSON itself (paste the whole file). A file path still works elsewhere, and `googleServiceAccountKey` in config can hold either. |
-| `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET` | Optional. Your own Xero app's client id and client secret, to create Field's invoices in your Xero organisation (`docs/XERO.md`). Settings, Integrations, Xero shows only whether each is set. Republish after setting them. |
+| `FIELD_SECRETS_KEY` | The key that encrypts integration credentials and tokens (Xero), 32 random bytes in base64. Without it, integrations stay off. `FIELD_SECRETS_KEY_PREVIOUS` holds the earlier key while rotating (`docs/INTEGRATIONS.md`). |
+| `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET` | Optional override. The Xero app's credentials are entered in Settings, Integrations, Xero; when both of these are set they win, and the screen says so (`docs/XERO.md`). |
 
 Every value in `FIELD_CONFIG_JSON` is treated as secret, so keep it a Secret,
 never a plain env var or a file in the repo. Field never writes config back:
@@ -737,14 +738,35 @@ starts Field from `.field-deploy/`. The default ref is the tip of `main`.
 
 - The fetch needs no token. If it fails, the build fails and the publish
   stops; it never deploys the workspace copy instead.
+- Only a commit that passed GitHub CI is built. After the fetch, the build
+  asks GitHub's API, without a token, for the commit's check runs
+  (`scripts/deploy-checks.js`). `test`, `client-build`, `docker-build` (CI)
+  and `gitleaks` (Secret Scan) must each have completed with success, as
+  reported by GitHub Actions. Otherwise the build fails and the publish
+  stops. A pinned `FIELD_DEPLOY_REF` is checked the same way.
 - It only writes `.field-deploy/` (gitignored). It never resets or deletes
   the workspace's own files, wherever it runs.
 - `.field-deploy/` holds no `data/`, so the published app rebuilds its data
   directory from PostgreSQL alone. The workspace's own `data/` is still in
   Replit's snapshot, but nothing reads it, so boot quarantines nothing from it
   (#87).
-- The build log names what it deployed: `[deploy] fetched main at <commit>`,
-  then `[deploy] built github main at <commit>`. The start log repeats it.
+- The build log names what it deployed and its CI result:
+  `[deploy] fetched main at <commit>`, `[deploy] checks: passed (test,
+  client-build, docker-build, gitleaks) at <commit>`, then
+  `[deploy] built github main at <commit> into .field-deploy/ (checks: passed)`.
+  The start log repeats it, and `GET /health` shows it as `build.checks`.
+
+The check refuses the build, and names the reason in the log, when:
+
+| Build log | What it means | What to do |
+| --- | --- | --- |
+| `checks: NOT passed`, then `<check>: still in progress` (or `queued`) | `main`'s CI is still running on the merged commit. A merge to `main` runs CI again on the new commit, which takes a few minutes | Wait for the commit's checks on GitHub, then publish again |
+| `checks: NOT passed`, then `<check>: failure` (or another result) | The commit failed CI | Fix it on `main`, or pin a commit that passed |
+| `<check>: no run on this commit` | The check never ran on that commit (for example a pinned commit from a branch whose CI was not run) | Pin a commit on `main` |
+| `checks: could not be read: GitHub's API rate limit ... is used up. It resets at <time>` | Without a token, GitHub allows 60 API requests an hour from one address, and Replit's build machines may share one | Publish again after that time |
+| `checks: could not be read: GitHub did not answer` (or `HTTP 5xx`) | The network or GitHub failed, after three tries | Publish again; check [githubstatus.com](https://www.githubstatus.com) |
+
+It never treats an unreadable answer as a pass.
 
 To deploy what is merged on `main`:
 
@@ -757,10 +779,11 @@ To deploy what is merged on `main`:
 2. When Replit says it is done, Field still needs about a minute to rebuild
    its data directory from PostgreSQL; until then requests get "Internal
    Server Error". `GET /health` answers once it is up. Its `build` shows what
-   is live: `revision` (the commit), `ref` (`main`, or the pinned ref) and
-   `source` (`github`, or `workspace` for an emergency build). Check that
+   is live: `revision` (the commit), `ref` (`main`, or the pinned ref),
+   `source` (`github`, or `workspace` for an emergency build) and `checks`
+   (`passed`, or `unchecked` when an emergency override built it). Check that
    `revision` is the commit you meant to deploy (the tip of `main` on
-   GitHub).
+   GitHub) and that `checks` is `passed`.
 3. Bring the workspace to the same level, so the next publish does not stop
    at the prompt above: `scripts/github-sync.sh pull`, then
    `npm run db:apply`, then `npm run db:smoke` must report `"pending":0`. Do
@@ -769,8 +792,8 @@ To deploy what is merged on `main`:
    instead of `main`, apply only that ref's migrations, from a checkout of
    it.
 
-`.replit` and `scripts/replit-deploy.sh` are the only files a publish takes
-from the workspace. Before the first publish with them, pull the workspace
+`.replit`, `scripts/replit-deploy.sh` and `scripts/deploy-checks.js` are the
+only files a publish takes from the workspace. Before the first publish with them, pull the workspace
 once so its `.replit` has the deploy commands. When a commit changes them, the build log says
 `note: ... differs from main`; pull the workspace before the next publish so
 the new ones take effect.
@@ -796,13 +819,26 @@ put the ref in the build command itself, in `.replit`:
 A fork sets `FIELD_DEPLOY_REPO` to its own repository's `https://` URL; the
 fetch is anonymous, so the repository must be public.
 
+### Emergency: build a commit whose CI has not passed
+
+`FIELD_DEPLOY_ALLOW_UNCHECKED=1` (deployment secret, or in the build command as
+above) builds the fetched commit even when its CI did not pass or GitHub
+could not say. The build still asks, and logs the answer, then
+`WARNING: FIELD_DEPLOY_ALLOW_UNCHECKED=1: building <ref> at <commit> although
+CI did not pass or could not be read`. `/health` then shows
+`checks: "unchecked"` (a commit that did pass still shows `passed`). Use it
+only when production must change and CI cannot pass in time, for example
+during a GitHub Actions outage, and remove it at the next publish.
+
 ### Emergency: publish the workspace files
 
-`FIELD_DEPLOY_FROM_WORKSPACE=1` (deployment secret, or in the build command as
-above) builds the workspace's files as they are, uncommitted edits included,
-with no fetch. Files `.gitignore` excludes (`data/`, `node_modules/`, config)
-are left out. `/health` then shows `source: "workspace"`. Use it only when
-GitHub cannot be reached or a fix cannot wait for a merge, and remove it at
+`FIELD_DEPLOY_FROM_WORKSPACE=1`, together with `FIELD_DEPLOY_ALLOW_UNCHECKED=1`
+(no CI ran on these files), builds the workspace's files as they are,
+uncommitted edits included, with no fetch. Without
+`FIELD_DEPLOY_ALLOW_UNCHECKED=1` the build refuses. Files `.gitignore`
+excludes (`data/`, `node_modules/`, config) are left out. `/health` then
+shows `source: "workspace"` and `checks: "unchecked"`. Use it only when
+GitHub cannot be reached or a fix cannot wait for a merge, and remove both at
 the next publish.
 
 Production secrets (Publishing > Adjust settings) are separate from the
@@ -824,11 +860,12 @@ jobs at ...`).
 ## GitHub
 
 The workspace tracks `main` on the GitHub repository
-([embarkearthworks/field](https://github.com/embarkearthworks/field) for the
+([arcforgelabs/field](https://github.com/arcforgelabs/field) for the
 upstream project; your fork otherwise).
 
-- Nothing commits to `main` directly, here or on GitHub. Work on a branch,
-  open a PR, merge on GitHub, then pull. Publishing does not need the pull
+- Nothing commits to `main` directly, here or on GitHub; the ruleset on
+  `main` refuses a direct push (`CONTRIBUTING.md`, "Merging to main"). Work
+  on a branch, open a PR, merge on GitHub, then pull. Publishing does not need the pull
   ("Publishing"); the workspace's database and its `.replit` do.
 - `scripts/github-sync.sh status`: remote, ahead/behind, and whether
   `GITHUB_TOKEN` works.

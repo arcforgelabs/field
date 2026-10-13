@@ -126,6 +126,17 @@ describe("invoice issue service", () => {
     assert.equal((await issue(a)).number, formatInvoiceNumber(period, 3));
   });
 
+  test("the issue works out the reference line once: rendered into the PDF and stored with the document (#93)", async () => {
+    const seen = [];
+    const result = await issue(a, { key: "reference-line", render: async (number, options) => { seen.push(options?.referenceLine ?? null); return pdfFor(number); }, quoteNumber: "EQ-2610-03" });
+    assert.deepEqual(seen, ["Job 2610-03 · Quote EQ-2610-03 v2"], "no quote row: the files' number");
+    assert.equal(result.referenceLine, "Job 2610-03 · Quote EQ-2610-03 v2");
+    const [document] = await withOrg(t.db, ORG_A, (tx) => queryRows(sql`select details from issued_documents where uid = ${result.issuedDocumentUid}`, tx));
+    assert.equal(document.details.referenceLine, "Job 2610-03 · Quote EQ-2610-03 v2");
+    const replay = await issue(a, { key: "reference-line", render: async () => { throw new Error("not rendered again"); } });
+    assert.equal(replay.referenceLine, "Job 2610-03 · Quote EQ-2610-03 v2", "a retry returns what was issued");
+  });
+
   test("the PDF is rendered once with the number, stored, and recorded as issued with the frozen row", async () => {
     const result = await issue(a, { key: "frozen-row" });
     assert.equal(renders.at(-1), result.number);

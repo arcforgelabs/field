@@ -9,19 +9,29 @@
 # FIELD_DEPLOY_REF names (a branch, a tag or a full commit hash). The fetch is
 # anonymous; the repository is public.
 #
+# Before it builds, it asks GitHub whether that commit passed CI
+# (scripts/deploy-checks.js): test, client-build, docker-build and gitleaks must
+# have completed with success. Otherwise, or when GitHub cannot say (its rate
+# limit, the network), the build fails. A pinned FIELD_DEPLOY_REF is checked
+# the same way.
+#
 # It only ever writes .field-deploy/ (gitignored). It never resets, checks out
 # or deletes the workspace's own files, so it is safe wherever it runs.
 #
 #   FIELD_DEPLOY_REF=<ref>          deploy this ref instead of main (pin or roll back)
 #   FIELD_DEPLOY_REPO=<url>         fetch from here (default: the public repository; a fork sets its own)
+#   FIELD_DEPLOY_ALLOW_UNCHECKED=1  emergency only: build even when CI did not pass or cannot be read
 #   FIELD_DEPLOY_FROM_WORKSPACE=1   emergency only: build the workspace files as they are, no fetch
+#                                   (no CI ran on them, so it also needs FIELD_DEPLOY_ALLOW_UNCHECKED=1)
 #
 # If the fetch fails, the build fails. It never falls back to the workspace copy.
+# The build records whether CI passed (.field-deploy-checks: passed or
+# unchecked); start passes it on, and GET /health shows it as build.checks.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/.field-deploy"
-DEFAULT_REPO="https://github.com/embarkearthworks/field.git"
+DEFAULT_REPO="https://github.com/arcforgelabs/field.git"
 
 log() { echo "[deploy] $*"; }
 die() { echo "[deploy] FAILED: $*" >&2; exit 1; }
@@ -54,12 +64,30 @@ copy_workspace() {
     | tar -C "$OUT" -xf -
 }
 
+# Did the fetched commit pass CI? Sets checks to passed or unchecked, or fails
+# the build.
+check_ci() {
+  local repo="$1" ref="$2" revision="$3"
+  if node "$ROOT/scripts/deploy-checks.js" "$repo" "$revision"; then
+    checks=passed
+  elif [ "${FIELD_DEPLOY_ALLOW_UNCHECKED:-}" = "1" ]; then
+    checks=unchecked
+    log "WARNING: FIELD_DEPLOY_ALLOW_UNCHECKED=1: building $ref at $revision although CI did not pass or could not be read. Emergency only; remove it at the next publish"
+  else
+    rm -rf "$OUT"
+    die "$ref at $revision has not passed GitHub CI, so nothing was built. Wait for its checks to pass and publish again, or deploy a commit that passed (FIELD_DEPLOY_REF). In an emergency only, FIELD_DEPLOY_ALLOW_UNCHECKED=1 builds it anyway"
+  fi
+}
+
 cmd_build() {
-  local source ref revision repo
+  local source ref revision repo checks
   rm -rf "$OUT"
 
   if [ "${FIELD_DEPLOY_FROM_WORKSPACE:-}" = "1" ]; then
+    [ "${FIELD_DEPLOY_ALLOW_UNCHECKED:-}" = "1" ] \
+      || die "FIELD_DEPLOY_FROM_WORKSPACE=1 builds files no CI ran on, so it also needs FIELD_DEPLOY_ALLOW_UNCHECKED=1"
     source=workspace
+    checks=unchecked
     ref=workspace
     log "FIELD_DEPLOY_FROM_WORKSPACE=1: building the workspace files as they are, NOT GitHub"
     copy_workspace
@@ -86,11 +114,12 @@ cmd_build() {
     # .replit and this script come from the workspace, not from the fetched
     # commit. Say so when they differ, so the workspace can be pulled.
     local f
-    for f in .replit scripts/replit-deploy.sh; do
+    for f in .replit scripts/replit-deploy.sh scripts/deploy-checks.js; do
       if ! cmp -s "$ROOT/$f" "$OUT/$f"; then
         log "note: $f in the workspace differs from $ref; the workspace copy ran this build. Pull the workspace (scripts/github-sync.sh pull) to use the new one"
       fi
     done
+    check_ci "$repo" "$ref" "$revision"
   fi
 
   [ -f "$OUT/scripts/replit-build.sh" ] || die "$ref has no scripts/replit-build.sh to build with"
@@ -105,26 +134,30 @@ cmd_build() {
   fi
   printf '%s\n' "$ref" > "$OUT/.field-deploy-ref"
   printf '%s\n' "$source" > "$OUT/.field-deploy-source"
-  log "built $source $ref at ${revision:-an unknown commit} into .field-deploy/"
+  printf '%s\n' "$checks" > "$OUT/.field-deploy-checks"
+  log "built $source $ref at ${revision:-an unknown commit} into .field-deploy/ (checks: $checks)"
 }
 
 cmd_start() {
   if [ ! -f "$OUT/.field-deploy-source" ] || [ ! -f "$OUT/scripts/replit-start.sh" ]; then
     die "no deployment build in .field-deploy/; the deployment build command is 'bash scripts/replit-deploy.sh build'"
   fi
-  local built_ref source revision
+  local built_ref source revision checks
   built_ref="$(cat "$OUT/.field-deploy-ref")"
   source="$(cat "$OUT/.field-deploy-source")"
   revision="$(cat "$OUT/.field-revision" 2>/dev/null || true)"
+  # A build from before the CI check has no record: it was not checked.
+  checks="$(cat "$OUT/.field-deploy-checks" 2>/dev/null || echo unchecked)"
   if [ "$source" = github ] && [ "${FIELD_DEPLOY_REF:-main}" != "$built_ref" ]; then
     log "WARNING: FIELD_DEPLOY_REF is '${FIELD_DEPLOY_REF:-main}' now, but this build fetched '$built_ref'. Publish again to deploy it"
   fi
   if [ "$source" = github ] && [ "${FIELD_DEPLOY_FROM_WORKSPACE:-}" = "1" ]; then
     log "WARNING: FIELD_DEPLOY_FROM_WORKSPACE=1 is set now, but this build fetched '$built_ref' from GitHub. Publish again to deploy the workspace"
   fi
-  log "starting $source $built_ref at ${revision:-an unknown commit}"
+  log "starting $source $built_ref at ${revision:-an unknown commit} (checks: $checks)"
   export FIELD_DEPLOYED_REF="$built_ref"
   export FIELD_DEPLOYED_FROM="$source"
+  export FIELD_DEPLOYED_CHECKS="$checks"
   # The commit this build is, whatever the environment says.
   if [ -n "$revision" ]; then export FIELD_REVISION="$revision"; else unset FIELD_REVISION; fi
   exec bash "$OUT/scripts/replit-start.sh"

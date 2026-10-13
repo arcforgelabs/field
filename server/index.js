@@ -38,12 +38,15 @@ import { AU_REGIONS } from "../shared/regions.js";
 import { createXeroHttp } from "./xero/client.js";
 import { fakeXeroBaseUrl, readXeroSecrets, xeroEndpoints } from "./xero/config.js";
 import { createXeroConnectionService } from "./xero/connection.js";
+import { loadSecretsKeyring } from "./secrets/keyring.js";
+import { createCredentialStore } from "./secrets/credentials.js";
+import { createXeroInvoiceSync } from "./xero/invoice-sync.js";
 import { registerXeroRoutes } from "./xero/routes.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
 // A job detail's quote read from its rows (#10), kept beside the detail object.
 const jobDetailQuoteRows = new WeakMap();
-import { createReplicaFallbackBlobStore } from "./documents/blob-store.js";
+import { createPostgresBlobStore, createReplicaFallbackBlobStore } from "./documents/blob-store.js";
 import { resolveDocumentReplicaConfig } from "./documents/r2-config.js";
 import { createR2ObjectStore } from "./documents/r2-client.js";
 import { createDisabledReplicator, createDocumentReplicator } from "./documents/replicator.js";
@@ -72,11 +75,13 @@ import { applyStoredGmailOAuthUsers, saveGmailOAuthUser } from "./gmail-oauth-st
 import { hasGoogleServiceAccountKey } from "./google-service-account.js";
 import {
   initFieldSentry,
+  reportBackgroundError,
   sentryBrowserBootstrapScript,
   sentryErrorResponseReporter,
   sentryPublicStatus,
   setupSentryExpress,
 } from "./observability/sentry.js";
+import { JOB_LIST_PER_JOB_MS, listJobsWithinDeadline, withDeadline } from "./job-list-guard.js";
 import { assertCommit, assertDigest, assertVerificationConfig } from "../scripts/verification/contract.js";
 import { ensureVerificationFixtureState } from "../scripts/verification/start.js";
 import { uploadMoasureBatchToDrive, getDriveClient } from "./drive-upload.js";
@@ -542,17 +547,57 @@ try {
 }
 installIssuedDocumentRecorder(issuedDocumentRecorder);
 
+// Integration secrets (#112, docs/INTEGRATIONS.md): credentials entered in
+// Settings, Integrations, and OAuth tokens, per organisation, encrypted under
+// FIELD_SECRETS_KEY (FIELD_SECRETS_KEY_PREVIOUS while rotating). Without a
+// usable key, integrations fail closed. Boot re-encrypts values an earlier
+// key wrote.
+const secretsKeyring = loadSecretsKeyring(process.env);
+if (secretsKeyring.problem) console.warn(`[secrets] ${secretsKeyring.problem}: integration credentials and tokens cannot be stored or read (docs/INTEGRATIONS.md)`);
+const integrationCredentials = deploymentOrg ? createCredentialStore({ db: getDb(), orgUid: deploymentOrg.uid, keyring: secretsKeyring }) : null;
+if (integrationCredentials) await integrationCredentials.rewrap().catch((error) => console.warn(`[secrets] re-encrypting with the current key failed (${error?.code || "error"})`));
+
+// Xero (#93, docs/XERO.md): the owner's own Xero app. Its client id and
+// secret are entered in Settings (stored as above); XERO_CLIENT_ID and
+// XERO_CLIENT_SECRET in the environment override them. The connection and
+// its encrypted tokens are in PostgreSQL. Issued invoices go to Xero after
+// their issue commits (server/xero/invoice-sync.js): the issued invoice rows
+// are the outbox, so issuing and emailing never wait on Xero.
+const xeroSecrets = readXeroSecrets(process.env);
+const xeroHttpFor = (secrets) => createXeroHttp({ clientId: secrets.clientId, clientSecret: secrets.clientSecret, endpoints: xeroEndpoints(fakeXeroBaseUrl()) });
+const xeroConnection = deploymentOrg
+  ? createXeroConnectionService({ db: getDb(), orgUid: deploymentOrg.uid, keyring: secretsKeyring, credentialStore: integrationCredentials, environment: xeroSecrets, http: xeroHttpFor })
+  : null;
+if (xeroConnection) await xeroConnection.upgradeStoredTokens();
+const xeroSyncIntervalMs = Number(process.env.FIELD_XERO_SYNC_INTERVAL_MS);
+const xeroInvoiceSync = xeroConnection ? createXeroInvoiceSync({
+  db: getDb(),
+  orgUid: deploymentOrg.uid,
+  connection: xeroConnection,
+  http: () => xeroHttpFor(xeroSecrets),
+  blobs: issuedDocumentBlobs || createPostgresBlobStore(),
+  ...(Number.isFinite(xeroSyncIntervalMs) && xeroSyncIntervalMs >= 1000 ? { intervalMs: xeroSyncIntervalMs, firstDelayMs: xeroSyncIntervalMs } : {}),
+}) : null;
+if (xeroInvoiceSync) {
+  xeroConnection.onChange((event) => { if (event.type !== "disconnected") xeroInvoiceSync.kick(); });
+  xeroInvoiceSync.start();
+}
+
 // The invoice issue service (#28, step 4b): an invoice is issued when it is
 // finalised (authorised, sent, revised), in one PostgreSQL transaction that
 // allocates its INV-YYYY-M-N number, renders and stores its PDF and writes
 // its row. Without a database, issuing an invoice is refused: it is never
-// issued outside the sequence.
+// issued outside the sequence. After it commits, the Xero sync is told; it
+// never runs inside the issue.
 try {
   installInvoiceIssuer(createInvoiceIssueService({
     db: getDb(),
     orgUid: deploymentOrg?.uid,
     ...(issuedDocumentBlobs ? { blobs: issuedDocumentBlobs } : {}),
-    onBlobsStored: (sha256s) => documentReplica.notifyStored(sha256s),
+    onBlobsStored: (sha256s) => {
+      xeroInvoiceSync?.kick();
+      return documentReplica.notifyStored(sha256s);
+    },
   }));
 } catch (err) {
   const reason = err.code === "FIELD_NO_DATABASE" ? "this server has no database" : err.message;
@@ -1051,7 +1096,7 @@ app.get(["/demo", "/demo-account-create"], async (_req, res) => {
 
 // ── User management ──────────────────────────────────────────────
 // Each bearer token maps to exactly one user. Admin endpoints require role === "admin".
-app.get("/api/storage/status", requireAuth, requireAdmin, (_req, res) => {
+app.get("/api/storage/status", requireAuth, requireAdmin, async (_req, res) => {
   res.json({
     ...(durableStorage ? durableStorage.status() : { enabled: false }),
     issuedDocuments: issuedDocumentRecorder.status(),
@@ -1059,6 +1104,7 @@ app.get("/api/storage/status", requireAuth, requireAdmin, (_req, res) => {
     invoiceRows: invoiceRowRecorder.status(),
     quoteReads: quoteReadsStatus(),
     documentReplica: documentReplica.status(),
+    xero: xeroInvoiceSync ? await xeroInvoiceSync.status().catch(() => ({ enabled: true, error: "XERO_STATUS_FAILED" })) : { enabled: false },
   });
 });
 
@@ -1385,16 +1431,23 @@ app.put("/api/settings/milestone-rules", requireAuth, requireAdmin, async (req, 
   }
 });
 
-// Xero (#93, docs/XERO.md): the owner's own Xero app, its client id and
-// secret from deployment secrets (XERO_CLIENT_ID, XERO_CLIENT_SECRET); the
-// connection and its encrypted tokens in PostgreSQL. Owners only.
-const xeroSecrets = readXeroSecrets(process.env);
-const xeroHttpFor = (secrets) => createXeroHttp({ clientId: secrets.clientId, clientSecret: secrets.clientSecret, endpoints: xeroEndpoints(fakeXeroBaseUrl()) });
-const xeroConnection = deploymentOrg ? createXeroConnectionService({ db: getDb(), orgUid: deploymentOrg.uid, secrets: xeroSecrets, http: xeroHttpFor }) : null;
+// Settings, Integrations, Xero and the invoices' Xero state (#93, #112).
+// Changes are for owners only; the screen and a job's Xero state are
+// read-only for everyone signed in.
 registerXeroRoutes(app, {
   requireAuth,
   requireOwner: requireAdmin,
+  isOwner: (req) => new Promise((resolve) => {
+    // The owner gate, asked without answering the request.
+    const probe = { status: () => probe, json: () => resolve(false), send: () => resolve(false), setHeader: () => {}, end: () => resolve(false) };
+    try {
+      requireAdmin(req, probe, () => resolve(true));
+    } catch {
+      resolve(false);
+    }
+  }),
   connection: () => xeroConnection,
+  sync: () => xeroInvoiceSync,
   publicUrl: () => config.publicUrl || null,
   actorOf: (req) => req.caller?.name || req.caller?.email || req.caller?.id || null,
 });
@@ -1607,16 +1660,28 @@ async function listIndexedJobRows(reason) {
 
 // List jobs
 app.get("/api/jobs", requireAuth, async (_req, res) => {
-  // Fast path: read from DB
+  // Fast path: read from DB. Every step has a time limit
+  // (server/job-list-guard.js): a job whose files cannot be read in time is
+  // left out and reported, so one stuck read never hangs the whole board.
   if (fieldDb) {
     try {
-      const rows = await listIndexedJobRows("job list");
-      const deletionDeps = await buildJobListDeletionDeps();
-      const jobs = [];
-      for (const row of rows) {
-        const meta = await readNormalizedJobMeta(row.dir);
-        if (meta) jobs.push(await listJobWithDeletable(row.dir, meta, deletionDeps));
-      }
+      const rows = await withDeadline(listIndexedJobRows("job list"), JOB_LIST_PER_JOB_MS, "index")
+        .catch((error) => {
+          if (error?.code !== "FIELD_JOB_LIST_TIMEOUT") throw error;
+          reportJobListSkip({ id: null, step: "index", reason: "timeout" }, error);
+          return listJobsFromDb(fieldDb);
+        });
+      const deletionDeps = await withDeadline(buildJobListDeletionDeps(), JOB_LIST_PER_JOB_MS, "scheduled emails")
+        .catch((error) => {
+          reportJobListSkip({ id: null, step: "scheduled emails", reason: error?.code === "FIELD_JOB_LIST_TIMEOUT" ? "timeout" : "error" }, error);
+          return { ...jobDeletionDeps(), listScheduledEmails: async () => [] };
+        });
+      const { jobs, skipped } = await listJobsWithinDeadline(rows, {
+        readMeta: (row) => readNormalizedJobMeta(row.dir),
+        listJob: (row, meta) => listJobWithDeletable(row.dir, meta, deletionDeps),
+        onSkip: reportJobListSkip,
+      });
+      if (skipped.length) res.set("X-Field-Jobs-Skipped", String(skipped.length));
       return res.json(jobs);
     } catch { /* fall through to directory scan */ }
   }
@@ -1642,6 +1707,18 @@ app.get("/api/jobs", requireAuth, async (_req, res) => {
   } catch { /* empty data dir */ }
   res.json(jobs);
 });
+
+// One line and one Sentry event per job left out of the list: the job id and
+// the step, never its folder (older folders are named after the site address).
+function reportJobListSkip(entry, error) {
+  console.warn(`[jobs] job list left out ${entry.id ? `job ${entry.id}` : "a step"}: ${entry.step} ${entry.reason}`);
+  reportBackgroundError(error instanceof Error ? error : new Error(`job list ${entry.step} ${entry.reason}`), {
+    area: "job-list",
+    step: entry.step,
+    reason: entry.reason,
+    job: entry.id || undefined,
+  });
+}
 
 // The list only needs a yes/no, so the assessment stops at the first reason;
 // most jobs are ruled out by their meta alone without reading more files.

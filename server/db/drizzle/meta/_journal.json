@@ -131,8 +131,22 @@
     {
       "idx": 18,
       "version": "7",
-      "when": 1791868756687,
-      "tag": "0018_milestone_rules",
+      "when": 1791868356919,
+      "tag": "0018_xero_invoice_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791870921310,
+      "tag": "0019_integration_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791893052562,
+      "tag": "0020_milestone_rules",
       "breakpoints": true
     }
   ]

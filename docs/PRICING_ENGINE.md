@@ -628,7 +628,7 @@ differences:**
 - `receipts` are one per payment. Today a receipt is issued for a milestone
   once it is paid in full. Its row is for the payment that cleared it, with
   the amount it acknowledges, and is voided if that payment is.
-**Built (step 4c, #29, migration `0018_milestone_rules`): milestone
+**Built (step 4c, #29, migration `0020_milestone_rules`): milestone
 rules.** The owner's decisions (2026-10-13): rules are settings, never
 code, so Field gives no legal or business advice; a rule set for a region is
 the organisation's and only an owner changes it, in Settings; a job's own
@@ -1010,7 +1010,7 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
 | 4a | Invoices, payments and receipts as rows (#27): `payment_milestones`, `invoices`, `invoice_lines`, `payments`, `receipts`, and the shape of `credit_notes` (migration 0013); dual-write after every committed milestone change; a backfill verified against what was issued | Built |
 | 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (revisions made in place before them stay as issued); issue separate from email; claim-line invoice documents | Built (issue service, migration 0014; credit notes, migrations 0015 and 0016; claim-line documents) |
-| 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Built (migration 0018) |
+| 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Built (migration 0020) |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
 How step 2 fills the tables:
@@ -1220,8 +1220,13 @@ number and bytes now come from PostgreSQL.
   after the transaction committed) returns the same invoice, number and
   bytes and allocates nothing.
 - **Reference.** The job number (the quote's, else the job's, else the job
-  part of the quote number) is the invoice's required reference, printed as
-  "Job reference" and stored on the row. With none, issuing is refused.
+  part of the quote number) is the invoice's required reference, stored on
+  the row. With none, issuing is refused. Since #93 the issue also records
+  the line the invoice prints with the quote it bills, "Reference: Job
+  2610-07 · Quote EQ-2610-07 v2" (no "v1"; the quote number from the quote
+  row), stored with the issued document and sent as its Xero invoice's
+  Reference. Invoices issued before print "Job reference", and so do their
+  reconstructed copies.
 - **Drafts.** A draft is tracked under its provisional `EI-…-M<n>` and its
   preview prints "Draft, not yet issued" and no payment reference. After an
   unsend it goes back to the provisional number; issuing the same content

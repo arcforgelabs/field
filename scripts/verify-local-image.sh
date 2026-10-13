@@ -9,7 +9,7 @@ full_sha="$(git -C "$SCRIPT_DIR" rev-parse HEAD)"
 tag="field-verification:verify-${short_sha}"
 
 docker build \
-  --label "org.opencontainers.image.source=https://github.com/embarkearthworks/field" \
+  --label "org.opencontainers.image.source=https://github.com/arcforgelabs/field" \
   --label "org.opencontainers.image.revision=${full_sha}" \
   --tag "$tag" \
   "$SCRIPT_DIR"

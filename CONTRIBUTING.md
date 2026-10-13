@@ -58,3 +58,33 @@ missing authored text under any of these headings:
 
 Edit the pull request body when someone asks for more proof; the body stays
 the record.
+
+## Merging to main
+
+A repository ruleset on `main` (`.github/rulesets/main.json`) requires a pull
+request, and requires the checks `test`, `client-build`, `docker-build`
+(CI), `gitleaks` (Secret Scan) and `context` (PR context) to pass on the
+pull request's latest commit. GitHub Actions must report them. It blocks
+force pushes and deletion of `main`. No approving review is required.
+
+The maintainer (the repository admin role) can bypass it for emergencies
+only, and only through a pull request: the merge button then offers to merge
+before the checks pass. The bypass never allows a direct push, a force push
+or deletion of `main`. A bypassed merge still does not reach production
+until `main`'s own CI passes on the merged commit (`docs/REPLIT.md`,
+"Publishing").
+
+GitHub's security-advisory merge ("Merge commit from fork") merges a
+temporary private fork. GitHub runs no checks there and says it does not
+enforce the branch's protection rules for that merge. If the ruleset refuses
+it, disable the ruleset (repository Settings > Rules > Rulesets, or
+`gh api -X PUT repos/arcforgelabs/field/rulesets/<id> -f enforcement=disabled`),
+merge the advisory, and enable it again at once (`-f enforcement=active`).
+The merged commit then runs CI on `main` like any other.
+
+To change the ruleset, edit `.github/rulesets/main.json` in a pull request,
+then apply it:
+
+```bash
+gh api -X PUT repos/arcforgelabs/field/rulesets/$(gh api repos/arcforgelabs/field/rulesets --jq '.[] | select(.name == "main: pull request and passing CI") | .id') --input .github/rulesets/main.json
+```

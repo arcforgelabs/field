@@ -36,6 +36,7 @@ import { mapMilestoneState } from "./from-milestones.js";
 import { allocateCreditedPayments, insertCreditNoteRow, insertIssuedInvoiceRow, isIssuedInvoice, refreshAmountsPaid } from "./invoice-rows.js";
 import { formatSequenceNumber, invoicePeriod } from "./numbers.js";
 import { readCreditNoteOnReissue } from "./business-settings.js";
+import { invoiceQuoteNumber, jobQuoteReference } from "./customer-wording.js";
 
 export { CREDIT_NOTE_NUMBER_PATTERN, INVOICE_NUMBER_PATTERN, RECEIPT_NUMBER_PATTERN, SEQUENCE_PREFIXES, formatCreditNoteNumber, formatInvoiceNumber, formatReceiptNumber, formatSequenceNumber, invoicePeriod, isSequenceInvoiceNumber, isSequenceReceiptNumber } from "./numbers.js";
 
@@ -168,8 +169,8 @@ export function createInvoiceIssueService({
   }
 
   // The bytes, the issued document and its `issued` event.
-  async function storeDocument(tx, { jobId, documentType, number, render, quoteVersion = null, revision = null, issuedDate, actor, details, eventData, at }) {
-    const rendered = await render(number);
+  async function storeDocument(tx, { jobId, documentType, number, render, renderOptions = {}, quoteVersion = null, revision = null, issuedDate, actor, details, eventData, at }) {
+    const rendered = await render(number, renderOptions);
     if (!rendered || !rendered.length) throw new InvoiceIssueError(`${documentType} ${number} rendered no bytes`, { statusCode: 500 });
     const pdfBytes = Buffer.from(rendered);
     const pdfSha256 = await blobs.put(pdfBytes, { tx, contentType: "application/pdf" });
@@ -197,6 +198,19 @@ export function createInvoiceIssueService({
     await tx.insert(documentEvents).values({ uid: newDocumentEventUid(createdAt.getTime()), ...event, createdAt });
   }
 
+  // The reference an issued invoice prints and its Xero invoice carries (#93):
+  // "Job 2610-07 · Quote EQ-2610-07 v2", the quote number from the quote row
+  // the invoice bills (invoiceQuoteNumber). Worked out once, here, rendered
+  // into the PDF and stored with the issued document, so a reconstruction and
+  // the Xero sync use exactly what was issued.
+  async function referenceLineFor(tx, { jobId, reference, invoice, quoteNumber = null }) {
+    const version = Number(invoice?.quoteVersion);
+    const [quoteRow] = version > 0
+      ? await tx.select({ number: quotes.number }).from(quotes).where(and(eq(quotes.jobId, jobId), eq(quotes.version, version)))
+      : [];
+    return jobQuoteReference({ jobReference: reference, quoteNumber: invoiceQuoteNumber({ quoteRow, fallback: quoteNumber }), quoteVersion: version > 0 ? version : null });
+  }
+
   async function links(tx, jobId, invoice) {
     const milestoneIndex = Number(invoice.milestoneKey);
     const [milestone] = Number.isInteger(milestoneIndex)
@@ -212,19 +226,21 @@ export function createInvoiceIssueService({
 
   // Allocate, render, store and write one invoice. Returns what issueInvoice
   // returns, without the replay flag.
-  async function issueInvoiceNow(tx, { jobId, key, reference, issuedDate, actor, invoice, details, render, supersedesInvoiceUid = null, eventData = {} }) {
+  async function issueInvoiceNow(tx, { jobId, key, reference, quoteNumber = null, issuedDate, actor, invoice, details, render, supersedesInvoiceUid = null, eventData = {} }) {
     const at = now();
     const number = await allocate(tx, "invoice", issuedDate, at);
+    const referenceLine = await referenceLineFor(tx, { jobId, reference, invoice, quoteNumber });
     const stored = await storeDocument(tx, {
       jobId,
       documentType: "invoice",
       number,
       render,
+      renderOptions: { referenceLine },
       quoteVersion: invoice.quoteVersion,
       revision: Number(invoice.revision) > 0 ? Number(invoice.revision) : 1,
       issuedDate,
       actor,
-      details: { ...(details && typeof details === "object" ? details : {}), reference },
+      details: { ...(details && typeof details === "object" ? details : {}), reference, ...(referenceLine ? { referenceLine } : {}) },
       eventData: { reference, issueKey: key, ...eventData },
       at,
     });
@@ -238,7 +254,7 @@ export function createInvoiceIssueService({
       actor,
       at,
     });
-    return { number, reference, invoiceUid, issuedDocumentUid: stored.issuedDocumentUid, pdfSha256: stored.pdfSha256, pdfBytes: stored.pdfBytes, issuedAt: issuedDate.toISOString() };
+    return { number, reference, referenceLine, invoiceUid, issuedDocumentUid: stored.issuedDocumentUid, pdfSha256: stored.pdfSha256, pdfBytes: stored.pdfBytes, issuedAt: issuedDate.toISOString() };
   }
 
   async function documentBytes(tx, issuedDocumentUid, label) {
@@ -248,7 +264,7 @@ export function createInvoiceIssueService({
     if (!document) throw new InvoiceIssueError(`${label} was issued without its document`, { code: "INVOICE_ISSUE_INCOMPLETE", statusCode: 500 });
     const bytes = await blobs.get(document.pdfSha256, { tx, orgUid: scope.orgUid });
     if (!bytes) throw new DocumentBytesError(`the bytes of ${document.uid} (${document.pdfSha256}) are not stored`, { code: "DOCUMENT_BYTES_MISSING" });
-    return { issuedDocumentUid: document.uid, pdfSha256: document.pdfSha256, pdfBytes: bytes };
+    return { issuedDocumentUid: document.uid, pdfSha256: document.pdfSha256, pdfBytes: bytes, referenceLine: document.details?.referenceLine || null };
   }
 
   async function replayInvoice(tx, row) {
@@ -308,14 +324,14 @@ export function createInvoiceIssueService({
      * that number printed. Returns { replayed, number, reference, invoiceUid,
      * issuedDocumentUid, pdfSha256, pdfBytes, issuedAt }.
      */
-    async issueInvoice({ jobId, idempotencyKey, reference, issuedAt, issuedBy = null, invoice, details = {}, render }) {
+    async issueInvoice({ jobId, idempotencyKey, reference, quoteNumber = null, issuedAt, issuedBy = null, invoice, details = {}, render }) {
       const input = validated({ jobId, idempotencyKey, reference, issuedAt, issuedBy });
       checkInvoice(invoice, render);
       const result = await scope.transaction(async (tx) => {
         await lock(tx);
         const [existing] = await tx.select().from(invoices).where(eq(invoices.issueKey, input.key));
         if (existing) return { replayed: true, ...(await replayInvoice(tx, existing)) };
-        return { replayed: false, ...(await issueInvoiceNow(tx, { ...input, invoice, details, render })) };
+        return { replayed: false, ...(await issueInvoiceNow(tx, { ...input, quoteNumber, invoice, details, render })) };
       });
       if (!result.replayed) afterCommit([result.pdfSha256]);
       if (sha256Hex(result.pdfBytes) !== result.pdfSha256) throw new DocumentBytesError(`the bytes of invoice ${result.number} do not match their hash`);
@@ -400,7 +416,7 @@ export function createInvoiceIssueService({
      * pdfSha256, pdfBytes, issuedAt } or null, invoice: (as issueInvoice),
      * decision: { whenToCredit, setting, evidence, credited } }.
      */
-    async creditAndReissue({ jobId, idempotencyKey, reference, issuedAt, issuedBy = null, reason, credited, creditNote, renderCreditNote, invoice, details = {}, creditNoteDetails = {}, render, whenToCredit = "always" }) {
+    async creditAndReissue({ jobId, idempotencyKey, reference, quoteNumber = null, issuedAt, issuedBy = null, reason, credited, creditNote, renderCreditNote, invoice, details = {}, creditNoteDetails = {}, render, whenToCredit = "always" }) {
       if (!["always", "by-setting"].includes(whenToCredit)) throw new InvoiceIssueError(`whenToCredit must be always or by-setting, not ${JSON.stringify(whenToCredit)}`);
       const input = validated({ jobId, idempotencyKey, reference, issuedAt, issuedBy });
       checkInvoice(invoice, render);
@@ -450,9 +466,10 @@ export function createInvoiceIssueService({
           const issued = await issueInvoiceNow(tx, {
             ...input,
             key: invoiceIssueKeyFor(input.key),
+            quoteNumber,
             invoice,
             details,
-            render: (number) => render(number, { creditNoteNumber: null }),
+            render: (number, options) => render(number, { ...options, creditNoteNumber: null }),
             supersedesInvoiceUid: creditedRow.uid,
           });
           return { replayed: false, creditNote: null, invoice: issued, decision };
@@ -476,16 +493,18 @@ export function createInvoiceIssueService({
         });
 
         // The replacement, under the number already allocated.
+        const referenceLine = await referenceLineFor(tx, { jobId: input.jobId, reference: input.reference, invoice, quoteNumber });
         const invoiceStored = await storeDocument(tx, {
           jobId: input.jobId,
           documentType: "invoice",
           number: invoiceNumber,
-          render: () => render(invoiceNumber, { creditNoteNumber: noteNumber }),
+          render: (_number, options) => render(invoiceNumber, { ...options, creditNoteNumber: noteNumber }),
+          renderOptions: { referenceLine },
           quoteVersion: invoice.quoteVersion,
           revision: Number(invoice.revision) > 0 ? Number(invoice.revision) : 1,
           issuedDate: input.issuedDate,
           actor: input.actor,
-          details: { ...(details && typeof details === "object" ? details : {}), reference: input.reference, replacesInvoiceNumber: credited.number, creditNoteNumber: noteNumber },
+          details: { ...(details && typeof details === "object" ? details : {}), reference: input.reference, ...(referenceLine ? { referenceLine } : {}), replacesInvoiceNumber: credited.number, creditNoteNumber: noteNumber },
           eventData: { reference: input.reference, issueKey: invoiceIssueKeyFor(input.key), replacesInvoiceNumber: credited.number, creditNoteNumber: noteNumber },
           at,
         });
@@ -536,7 +555,7 @@ export function createInvoiceIssueService({
         return {
           replayed: false,
           creditNote: { number: noteNumber, creditNoteUid, issuedDocumentUid: noteStored.issuedDocumentUid, pdfSha256: noteStored.pdfSha256, pdfBytes: noteStored.pdfBytes, issuedAt: input.issuedDate.toISOString() },
-          invoice: { number: invoiceNumber, reference: input.reference, invoiceUid, issuedDocumentUid: invoiceStored.issuedDocumentUid, pdfSha256: invoiceStored.pdfSha256, pdfBytes: invoiceStored.pdfBytes, issuedAt: input.issuedDate.toISOString() },
+          invoice: { number: invoiceNumber, reference: input.reference, referenceLine, invoiceUid, issuedDocumentUid: invoiceStored.issuedDocumentUid, pdfSha256: invoiceStored.pdfSha256, pdfBytes: invoiceStored.pdfBytes, issuedAt: input.issuedDate.toISOString() },
           decision,
         };
       });

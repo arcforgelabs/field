@@ -150,6 +150,9 @@ export function normalizeInvoiceRevision(entry = null) {
     // The job number an invoice issued from the sequence (INV-…, step 4b)
     // carries as its reference, as printed. Null on an older EI-… invoice.
     ...(cleanText(entry.jobReference) ? { jobReference: cleanText(entry.jobReference) } : {}),
+    // The reference line it printed, "Job 2610-07 · Quote EQ-2610-07 v2" (#93),
+    // recorded at issue. A revision without one printed "Job reference".
+    ...(cleanText(entry.referenceLine) ? { referenceLine: cleanText(entry.referenceLine) } : {}),
     quoteVersion: Number.isFinite(Number(entry.quoteVersion)) && Number(entry.quoteVersion) > 0
       ? Number(entry.quoteVersion)
       : null,

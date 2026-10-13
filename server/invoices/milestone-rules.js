@@ -1,7 +1,7 @@
 // Milestone rules (#29, pricing engine phase 3 step 4c): the organisation's
 // default milestones and caps, by contract value band and region, as rows
 // (milestone_rules, milestone_rule_milestones, milestone_rule_caps;
-// migration 0018).
+// migration 0020).
 //
 //   - A rule is one band of contract value ("from $20,000", "under
 //     $20,000") in one region: every region, a country, or a state of it.

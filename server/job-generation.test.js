@@ -8,6 +8,7 @@ import {
   JOB_GENERATION_POINTER,
   JOB_GENERATIONS_DIR,
   JOB_GENERATION_LOCK,
+  forgetVerifiedJobGenerations,
   resolveActiveJobGeneration,
   runAtomicJobGeneration,
   withJobGenerationLock,
@@ -79,7 +80,9 @@ test("readers ignore and quarantine an uncommitted generation instead of choosin
 });
 
 test("readers quarantine a committed generation whose critical bytes were modified, deleted, or added", async () => {
-  for (const mutation of ["modified", "deleted", "extra"]) {
+  // Each mutation happens after a read has verified (and remembered) the
+  // generation: "same-size" keeps the length, so only the change time tells.
+  for (const mutation of ["modified", "same-size", "deleted", "extra"]) {
     const jobDir = await mkdtemp(join(tmpdir(), `field-generation-manifest-${mutation}-`));
     try {
       await writeFile(join(jobDir, "meta.json"), JSON.stringify({ version: 1 }));
@@ -89,6 +92,7 @@ test("readers quarantine a committed generation whose critical bytes were modifi
       });
       const active = await resolveActiveJobGeneration(jobDir);
       if (mutation === "modified") await writeFile(join(active, "meta.json"), JSON.stringify({ version: 99 }));
+      if (mutation === "same-size") await writeFile(join(active, "meta.json"), JSON.stringify({ version: 3 }));
       if (mutation === "deleted") await rm(join(active, "meta.json"));
       if (mutation === "extra") await writeFile(join(active, "unexpected-critical.txt"), "unexpected");
 
@@ -206,5 +210,44 @@ test("generation staging rejects root and nested symlinks without following them
   } finally {
     await rm(rootLinkJob, { recursive: true, force: true });
     await rm(nestedLinkJob, { recursive: true, force: true });
+  }
+});
+
+test("reading a job with a long history stays fast: committed generations are not re-hashed on every read", async () => {
+  // Regression for the 2026-10-13 jobs-board outage (docs/lessons-learned.md):
+  // every read used to hash every file of every generation, so a job's read
+  // cost grew with its whole history. 60 generations, each adding a 200 KB
+  // PDF: a read that re-hashes them all (the verification forgotten) is the
+  // cost of the bug, and a read with the verification remembered must cost a
+  // small part of it. Both are timed in the same process, so a slow or busy
+  // runner slows both; a wall-clock limit failed under CI load (run
+  // 38354926356) though the cache worked.
+  const jobDir = await mkdtemp(join(tmpdir(), "field-generation-history-"));
+  try {
+    await writeFile(join(jobDir, "meta.json"), JSON.stringify({ version: 0 }));
+    const pdf = Buffer.alloc(200_000, 7);
+    for (let index = 0; index < 60; index += 1) {
+      await runAtomicJobGeneration(jobDir, async (stage) => {
+        await writeFile(join(stage, "meta.json"), JSON.stringify({ version: index + 1 }));
+        await writeFile(join(stage, `quote-v${index}.pdf`), pdf);
+      });
+    }
+    const coldReads = [];
+    for (let read = 0; read < 3; read += 1) {
+      forgetVerifiedJobGenerations();
+      const started = performance.now();
+      await resolveActiveJobGeneration(jobDir);
+      coldReads.push(performance.now() - started);
+    }
+    const cold = coldReads.sort((a, b) => a - b)[1];
+    const started = performance.now();
+    for (let read = 0; read < 20; read += 1) await resolveActiveJobGeneration(jobDir);
+    const warm = (performance.now() - started) / 20;
+    assert.ok(
+      warm * 4 < cold,
+      `a remembered read took ${warm.toFixed(1)} ms, not under a quarter of a re-hashing read (${cold.toFixed(1)} ms)`,
+    );
+  } finally {
+    await rm(jobDir, { recursive: true, force: true });
   }
 });

@@ -1,5 +1,6 @@
 // Settings: your account (Clerk's own screens, in Field's theme), the team,
-// the terms printed on quotes, integrations (Xero, owners only) and how Field
+// the terms printed on quotes, integrations (Xero: owners change it, everyone
+// sees it) and how Field
 // looks.
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -27,7 +28,7 @@ export function SettingsPage() {
     { id: "team", label: "Team", show: mode === "clerk" && isOwner },
     { id: "documents", label: "Quotes and invoices", show: true },
     { id: "email", label: "Email", show: true },
-    { id: "integrations", label: "Integrations", show: isOwner },
+    { id: "integrations", label: "Integrations", show: true },
     { id: "appearance", label: "Appearance", show: true },
   ];
   const requested = params.get("section") as Section | null;

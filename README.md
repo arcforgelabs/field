@@ -9,7 +9,7 @@ external systems, AI agents included, can build and revise quotes. See
 `VISION.md`.
 
 Field was built for Embark Landscaping & Earthworks, which maintains it at
-[embarkearthworks/field](https://github.com/embarkearthworks/field).
+[arcforgelabs/field](https://github.com/arcforgelabs/field).
 
 Licence: MIT (`LICENSE`).
 
@@ -32,6 +32,7 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `docs/CLERK_SIGN_IN.md` | Clerk sign-in runbook and cutover |
 | `docs/GMAIL_SENDING.md` | How quote and invoice email is sent, and how to restore sending |
 | `docs/XERO.md` | Connecting your own Xero app, and how Field creates its invoices in Xero |
+| `docs/INTEGRATIONS.md` | Integration credentials entered in Settings, the `FIELD_SECRETS_KEY` key and its rotation, and who may change what |
 | `docs/CATALOG_BACKUP_RESTORE.md` | Backing up and restoring the price catalogue |
 | `docs/REMOTE_MCP.md` | The OAuth MCP surface AI agents and other systems connect through |
 | `docs/concepts/surveyor.md` | Surveyor, Field's before/after proof lane |
