@@ -104,14 +104,13 @@ jobs:
           ref: ${{ needs.resolve.outputs.commit }}
           persist-credentials: false
 
+      # No Actions cache: what is published is built from the registry and
+      # the lockfiles alone, and a release run never writes a cache that
+      # main's later runs would read.
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            client/package-lock.json
 
       - name: Build the data layer and the client bundle
         run: |
