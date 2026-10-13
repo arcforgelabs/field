@@ -19,6 +19,8 @@
 // invoice was issued with (a milestone's share of the quote's GST can differ
 // by a cent) goes on the largest line with GST.
 
+import { jobQuoteReference } from "../invoices/customer-wording.js";
+
 const NO_GST_TAX_TYPE = "EXEMPTOUTPUT";
 const DESCRIPTION_MAX = 4000;
 const REFERENCE_MAX = 255;
@@ -36,12 +38,9 @@ function text(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-/** "Job 2610-07 · Quote EQ-2610-07 v2", from what the invoice row and its quote say. */
+/** "Job 2610-07 · Quote EQ-2610-07 v2": the reference Field's invoice prints (customer-wording.js), within Xero's 255 characters. */
 export function xeroReference({ jobReference = null, quoteNumber = null, quoteVersion = null }) {
-  const parts = [];
-  if (text(jobReference)) parts.push(`Job ${text(jobReference)}`);
-  if (text(quoteNumber)) parts.push(`Quote ${text(quoteNumber)}${Number(quoteVersion) > 0 ? ` v${Number(quoteVersion)}` : ""}`);
-  const reference = parts.join(" · ");
+  const reference = jobQuoteReference({ jobReference, quoteNumber, quoteVersion });
   return reference ? reference.slice(0, REFERENCE_MAX) : null;
 }
 

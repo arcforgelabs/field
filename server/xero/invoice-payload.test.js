@@ -12,6 +12,7 @@ function line(overrides) {
 
 test("the reference names the job and the quote", () => {
   assert.equal(xeroReference({ jobReference: "2610-07", quoteNumber: "EQ-2610-07", quoteVersion: 2 }), "Job 2610-07 · Quote EQ-2610-07 v2");
+  assert.equal(xeroReference({ jobReference: "2610-07", quoteNumber: "EQ-2610-07", quoteVersion: 1 }), "Job 2610-07 · Quote EQ-2610-07", "never v1");
   assert.equal(xeroReference({ jobReference: "2610-07" }), "Job 2610-07");
   assert.equal(xeroReference({ quoteNumber: "EQ-2610-07" }), "Quote EQ-2610-07");
   assert.equal(xeroReference({}), null);

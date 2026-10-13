@@ -32,7 +32,7 @@ import { countFieldMetric } from "./observability/sentry.js";
 import { findAnyIssuedDocument, readQuoteIssuanceLedger } from "./quote-issuance.js";
 import { applyBusinessProfileOverride, businessDisplayName, configuresBusinessName } from "./business-profile.js";
 import { loadQuoteRows } from "./quotes/read-model.js";
-import { claimDescription, customerQuoteReference, quoteReferenceFromMeta, quoteReferenceLine } from "./invoices/customer-wording.js";
+import { claimDescription, customerQuoteReference, jobQuoteReference, quoteReferenceFromMeta, quoteReferenceLine } from "./invoices/customer-wording.js";
 import { isSequenceInvoiceNumber } from "./invoices/numbers.js";
 import { extractInvoicePdfTotals } from "./invoices/issued-totals.js";
 
@@ -1556,8 +1556,17 @@ function renderParties(doc, {
           ? `For invoice: ${milestoneInvoice.issuedReceipt?.invoiceNumber || milestoneInvoice.issuedRevision?.invoiceNumber || milestoneInvoice.invoiceNumber}`
           : null,
         !isReceipt && milestoneInvoice?.dueDate ? `Due: ${formatDate(milestoneInvoice.dueDate)}` : null,
-        // An invoice issued from the sequence (INV-…) carries the job number.
-        !isReceipt && milestoneInvoice?.issuedRevision?.jobReference ? `Job reference: ${milestoneInvoice.issuedRevision.jobReference}` : null,
+        // An issued invoice (INV-…) names its job and the quote it bills,
+        // as its Xero invoice's Reference does (#93): "Job 2610-07 · Quote
+        // EQ-2610-07 v2". Issued PDFs are stored and never drawn again, so
+        // only invoices issued from this change print it.
+        !isReceipt && milestoneInvoice?.issuedRevision?.jobReference
+          ? `Reference: ${jobQuoteReference({
+            jobReference: milestoneInvoice.issuedRevision.jobReference,
+            quoteNumber: milestoneInvoice.reference || quote?.quoteNumber || meta?.quoteNumber,
+            quoteVersion: milestoneInvoice.issuedRevision.quoteVersion,
+          })}`
+          : null,
         // An invoice issued in place of a credited one says which.
         !isReceipt && milestoneInvoice?.issuedRevision?.creditNoteNumber && milestoneInvoice.issuedRevision.supersedesInvoiceNumber
           ? `Replaces: ${milestoneInvoice.issuedRevision.supersedesInvoiceNumber}`

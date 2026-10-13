@@ -31,6 +31,22 @@ export function claimDescription(milestone) {
   return `${label}: fixed amount`;
 }
 
+/**
+ * The reference that links an invoice to its job and the quote it bills (#93,
+ * owner's decision 2026-10-13): "Job 2610-07 · Quote EQ-2610-07 v2". Printed
+ * on Field's invoice and sent as the Xero invoice's Reference, the same
+ * whichever system numbers the invoice. The version shows from v2 on: a
+ * document never prints "v1" (the wording above). Null when neither is known.
+ */
+export function jobQuoteReference({ jobReference = null, quoteNumber = null, quoteVersion = null } = {}) {
+  const job = String(jobReference ?? "").trim();
+  const quote = String(quoteNumber ?? "").trim();
+  const parts = [];
+  if (job) parts.push(`Job ${job}`);
+  if (quote) parts.push(`Quote ${quote}${Number(quoteVersion) > 1 ? ` v${Number(quoteVersion)}` : ""}`);
+  return parts.length ? parts.join(" · ") : null;
+}
+
 /** "Quote EQ-2601-01, revision 2, accepted 14 September 2026". */
 export function quoteReferenceLine(reference) {
   if (!reference?.number) return null;

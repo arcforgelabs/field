@@ -72,7 +72,7 @@ test("an issued milestone invoice is a tax invoice with one claim line in plain 
   has("Sample Earthworks Pty Ltd");
   has("ABN 11 111 111 111");
   has("Issued: 12 October 2026");
-  has("Job reference: 2610-05");
+  has("Reference: Job 2610-05 · Quote EQ-2610-05 v2");
   has("Sam Customer");
   has("CLAIM");
   // The claim line, its quote on a quieter line, and its subtotal, GST and total.
@@ -82,7 +82,8 @@ test("an issued milestone invoice is a tax invoice with one claim line in plain 
   assert.deepEqual(runs.slice(line + 2, line + 5), ["$2,000.00", "$200.00", "$2,200.00"]);
   assert.ok(!runs.some((run) => run.includes("CONTRACT SCHEDULE")), "no quote schedule");
   assert.ok(!runs.includes("Retaining wall") && !runs.includes("Drainage"), "the quote's lines are not printed");
-  assert.ok(!runs.some((run) => NO_VERSION_LABEL.test(run)), `no "v1" anywhere: ${runs.join(" | ")}`);
+  // The only version label is the reference's, for a quote past its first version (#93).
+  assert.deepEqual(runs.filter((run) => NO_VERSION_LABEL.test(run)), ["Reference: Job 2610-05 · Quote EQ-2610-05 v2"], `no other version label: ${runs.join(" | ")}`);
   assert.ok(!runs.includes("Reconstructed copy"));
   assert.ok(runs.join(" ").includes("Milestone 1 of 2 for Quote EQ-2610-05, accepted 14 September 2026."), "the milestone reference in the same words");
   assert.deepEqual(extractInvoicePdfTotals(bytes), { subtotal: "2000.00", taxTotal: "200.00", total: "2200.00" });
@@ -164,4 +165,19 @@ test("an INV invoice drawn again keeps the step 4b layout, also marked as a reco
   assert.ok(runs.includes("Tax invoice"));
   assert.ok(runs.includes("QUOTE SUMMARY"));
   assert.ok(!runs.some((run) => run.includes("CONTRACT SCHEDULE")));
+});
+
+test("the reference names the job and the quote whichever system numbers the invoice (#93)", async () => {
+  const { meta, quote, deposit } = job();
+  // Field's number, and a number Xero allocated (the later "numbers come from Xero" mode).
+  for (const number of ["INV-2026-10-4", "INV-0042"]) {
+    const issued = { ...deposit, invoiceNumber: number, issuedRevision: { ...deposit.issuedRevision, invoiceNumber: number } };
+    const { runs } = await render({ meta: { ...meta, milestoneInvoices: [issued] }, quote, milestoneInvoice: issued });
+    assert.ok(runs.includes(number), runs.join(" | "));
+    assert.ok(runs.includes("Reference: Job 2610-05 · Quote EQ-2610-05 v2"), runs.join(" | "));
+  }
+  // A draft has no reference yet; it is given when the invoice is issued.
+  const { completion } = job();
+  const { runs } = await render({ meta, quote, milestoneInvoice: completion });
+  assert.ok(!runs.some((run) => run.startsWith("Reference: Job")), runs.join(" | "));
 });
