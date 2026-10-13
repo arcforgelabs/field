@@ -11,6 +11,7 @@ import { useShell } from "@/components/shell/shell-context";
 import { AppearanceSection } from "./appearance-section";
 import { PeopleSection } from "./people-section";
 import { InvoicingPanel } from "./invoicing-panel";
+import { MilestoneRulesPanel } from "./milestone-rules-panel";
 import { EmailSignaturePanel } from "./email-signature-panel";
 import { IntegrationsPage } from "./integrations-page";
 import "./settings-page.css";
@@ -84,6 +85,7 @@ export function SettingsPage() {
             <>
               <TermsPanel />
               <InvoicingPanel />
+              <MilestoneRulesPanel />
             </>
           )}
           {active === "email" && <EmailSignaturePanel />}

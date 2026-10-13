@@ -32,6 +32,8 @@ import {
   buildMilestoneDraftRows, buildPaymentScheduleFromDraftRows, buildVisiblePaymentSchedule, createMilestoneDraftRow,
   getPaymentScheduleValidationError, roundSchedulePercentage, type MilestoneScheduleDraftRow,
 } from "@/features/job-detail/payment-schedule";
+import { ScheduleSourceBadge } from "@/features/job-detail/milestone-rules";
+import { useJobMilestoneRules } from "@/features/job-detail/use-job-milestone-rules";
 import {
   addOneOffLine, addSection, buildInitialOrganizer, buildParentIndex, childrenOf, getSourceItems,
   insertNode, moveToParent, moveWithinParent, nodeOrigin, removeNode, type Organizer, type ParentId,
@@ -80,6 +82,19 @@ export function QuoteEditor({ detail, editable: canEdit, lockReason, onNewVersio
   );
   const [scheduleRows, setScheduleRows] = useState<MilestoneScheduleDraftRow[]>(() => buildMilestoneDraftRows(initialSchedule));
   const [scheduleDirty, setScheduleDirty] = useState(false);
+  // A job with no schedule of its own gets the account rule's when its
+  // invoices are set up (#29): show that one, marked as the rule's.
+  const milestoneRules = useJobMilestoneRules(jobId, detail.meta.paymentSchedule ? "own" : "none");
+  const proposedSchedule = !detail.meta.paymentSchedule ? milestoneRules?.proposedSchedule || null : null;
+  useEffect(() => {
+    if (proposedSchedule && !scheduleDirty) setScheduleRows(buildMilestoneDraftRows(proposedSchedule));
+    // Only when the rule's schedule arrives; an edit after that is the operator's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposedSchedule]);
+  const scheduleSource = scheduleDirty && (detail.meta.paymentSchedule?.source || proposedSchedule)
+    ? { kind: "override" as const, ruleUid: null, ruleName: detail.meta.paymentSchedule?.source?.ruleName || milestoneRules?.rule?.name || null, at: null, by: null }
+    : detail.meta.paymentSchedule?.source
+      || (proposedSchedule && milestoneRules?.rule ? { kind: "rule" as const, ruleUid: milestoneRules.rule.uid ?? null, ruleName: milestoneRules.rule.name, at: null, by: null } : null);
   const [dirty, setDirty] = useState(false);
   const [showCost, setShowCost] = useState(() => { try { return localStorage.getItem("field.showCost") !== "0"; } catch { return true; } });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -675,7 +690,7 @@ export function QuoteEditor({ detail, editable: canEdit, lockReason, onNewVersio
       </section>
 
       <section className="fx-block">
-        <h3 className="fx-block__h">Payment schedule <small>becomes the invoices once the customer accepts</small></h3>
+        <h3 className="fx-block__h">Payment schedule <small>becomes the invoices once the customer accepts</small> <ScheduleSourceBadge source={scheduleSource} /></h3>
         <div className="fx-sched" role="table" aria-label="Payment schedule">
           <div className="fx-sched__h" role="columnheader">Milestone</div>
           <div className="fx-sched__h fx-r" role="columnheader">Share</div>

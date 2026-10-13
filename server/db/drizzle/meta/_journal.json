@@ -155,6 +155,13 @@
       "when": 1791897743588,
       "tag": "0021_integration_setup",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791906832734,
+      "tag": "0022_milestone_rules",
+      "breakpoints": true
     }
   ]
 }

@@ -448,6 +448,29 @@ function printPresentationTree(organizer, nodeIds, depth = 0) {
   }
 }
 
+function describeRegionText(region) {
+  if (!region?.country) return "not set";
+  return region.region ? `${region.region}, ${region.country}` : region.country;
+}
+
+function summarizeScheduleSource(source) {
+  if (!source?.kind) return null;
+  if (source.kind === "rule") return `account rule "${source.ruleName}"${source.milestonesFrom === "default" ? " (Field's default milestones)" : ""}`;
+  return `override, set on this job by ${source.by || "someone"}${source.ruleName ? ` (account rule "${source.ruleName}")` : ""}`;
+}
+
+function summarizeRule(rule) {
+  const money = (value) => formatMoney(value);
+  const band = rule.maxValue != null
+    ? (rule.minValue > 0 ? `${money(rule.minValue)} to under ${money(rule.maxValue)}` : `under ${money(rule.maxValue)}`)
+    : (rule.minValue > 0 ? `from ${money(rule.minValue)}` : "any value");
+  const milestones = rule.milestones.length
+    ? rule.milestones.map((milestone) => `${milestone.label} ${milestone.fixedTotal ? money(milestone.fixedTotal) : `${milestone.percentage}%`}`).join(", ")
+    : "Field's default milestones";
+  const caps = rule.caps.map((cap) => `${cap.kind} <= ${[cap.maxAmount ? money(cap.maxAmount) : null, cap.maxPercent ? `${cap.maxPercent}%` : null].filter(Boolean).join(" and ")} (${cap.mode})`).join(", ");
+  return `${rule.name} [${rule.country ? describeRegionText(rule) : "every region"}, ${band}, ${rule.valueBasis}]: ${milestones}${caps ? `; caps: ${caps}` : ""}`;
+}
+
 function summarizeMilestone(milestone) {
   const humanNumber = Number(milestone?.milestoneIndex || 0) + 1;
   return [
@@ -1041,6 +1064,8 @@ const commands = {
     if (!id) throw new Error("usage: list-milestones <id>");
     const result = await requestJson("GET", `${jobPath(id)}/milestones`);
     const milestones = result?.milestones || [];
+    const source = summarizeScheduleSource(result?.paymentSchedule?.source);
+    if (source) console.log(`Schedule: ${source}`);
     if (!milestones.length) {
       console.log("No milestone invoices");
       return;
@@ -1053,16 +1078,80 @@ const commands = {
 
   async "generate-milestones"(args) {
     const scheduleSource = parseFlag(args, "--schedule");
+    const applyAccountRule = hasFlag(args, "--account-rule");
     const [id] = collectPositionals(args, { flagsWithValue: ["--schedule"] });
-    if (!id) throw new Error("usage: generate-milestones <id> [--schedule <file-or-inline-json>]");
+    if (!id || (scheduleSource && applyAccountRule)) throw new Error("usage: generate-milestones <id> [--schedule <file-or-inline-json> | --account-rule]");
     const paymentSchedule = scheduleSource ? await parseJsonSource(scheduleSource) : null;
     const result = await requestJson("POST", `${jobPath(id)}/milestones/generate`, {
-      body: paymentSchedule ? { paymentSchedule } : {},
+      body: paymentSchedule ? { paymentSchedule } : applyAccountRule ? { applyAccountRule: true } : {},
     });
     console.log(`Milestone schedule saved: ${(result?.milestones || []).length} milestone(s)`);
+    const source = summarizeScheduleSource(result?.paymentSchedule?.source);
+    if (source) console.log(`  schedule: ${source}`);
     for (const milestone of result?.milestones || []) {
       console.log(`- ${summarizeMilestone(milestone)}`);
     }
+  },
+
+  // Milestone rules (#29): the organisation's default milestones and caps by
+  // region and contract value. Reading is for everyone; `set` and
+  // `business-region` need an owner's key.
+  async "milestone-rules"(args) {
+    const [action, ...rest] = args;
+    if (action === "list" || !action) {
+      const result = await requestJson("GET", "/api/settings/milestone-rules");
+      if (hasFlag(rest, "--json")) {
+        console.log(JSON.stringify({ rules: result.rules, version: result.version }, null, 2));
+        return;
+      }
+      console.log(`Business region: ${describeRegionText(result.businessRegion)}${result.businessRegion?.from ? ` (from ${result.businessRegion.from})` : ""}`);
+      console.log(`Milestone rules: ${result.rules.length} (version ${result.version})`);
+      for (const rule of result.rules) console.log(`- ${summarizeRule(rule)}`);
+      return;
+    }
+    if (action === "set") {
+      const file = parseFlag(rest, "--file");
+      const expectedVersion = trimText(parseFlag(rest, "--expect-version"));
+      if (!file) throw new Error("usage: milestone-rules set --file <rules.json> [--expect-version V]");
+      const parsed = await parseJsonSource(file);
+      const rules = Array.isArray(parsed) ? parsed : parsed?.rules;
+      const result = await requestJson("PUT", "/api/settings/milestone-rules", {
+        body: { rules, ...(expectedVersion ? { expectedVersion } : {}) },
+      });
+      console.log(`Milestone rules saved: ${result.rules.length} (version ${result.version})`);
+      for (const rule of result.rules) console.log(`- ${summarizeRule(rule)}`);
+      return;
+    }
+    if (action === "business-region") {
+      const [country, region] = collectPositionals(rest);
+      if (!country) throw new Error("usage: milestone-rules business-region <country|none> [region]");
+      const clear = country.toLowerCase() === "none";
+      const result = await requestJson("PUT", "/api/settings/invoicing", {
+        body: { country: clear ? null : country, region: clear ? null : region || null },
+      });
+      console.log(`Business region: ${describeRegionText(result)}`);
+      return;
+    }
+    if (action === "check") {
+      const [id] = collectPositionals(rest);
+      if (!id) throw new Error("usage: milestone-rules check <job-id>");
+      const result = await requestJson("GET", `${jobPath(id)}/milestone-rules`);
+      if (!result.hasRules) {
+        console.log("No milestone rules: Field's default schedule, no caps");
+        return;
+      }
+      console.log(`Region: ${describeRegionText(result.region)}${result.region?.from ? ` (from ${result.region.from})` : ""}`);
+      console.log(`Rule: ${result.rule ? `${result.rule.name}, contract value ${formatMoney(result.contractValue)}` : "none applies"}`);
+      const source = summarizeScheduleSource(result.scheduleSource);
+      if (source) console.log(`Schedule: ${source}`);
+      for (const milestone of result.milestones || []) {
+        const state = milestone.blocked ? "BLOCKED" : milestone.findings.length ? "alert" : "ok";
+        console.log(`- M${milestone.milestoneIndex + 1} ${milestone.label} (${milestone.kind}) ${formatMoney(milestone.total)} ${state}`);
+        for (const finding of milestone.findings) console.log(`    ${finding.mode} cap: ${finding.message}`);
+      }
+      return;
+    }
+    throw new Error("usage: milestone-rules list [--json] | set --file <rules.json> [--expect-version V] | check <job-id> | business-region <country|none> [region]");
   },
 
   async "list-invoice-revisions"(args) {
@@ -1334,7 +1423,9 @@ Presentation:
 
 Milestones:
   list-milestones <id>
-  generate-milestones <id> [--schedule <file-or-inline-json>]
+  generate-milestones <id> [--schedule <file-or-inline-json> | --account-rule]
+                       a schedule given here is an override of the account rule;
+                       --account-rule puts the rule's schedule back
   update-milestone <id> <milestone-number> [--status draft|authorised|paid] [--due-date YYYY-MM-DD]
   list-invoice-revisions <id> <milestone-number>
   credit-invoice <id> <milestone-number> --reason "why" [--version vNNN] [--expect-revision N]
@@ -1343,6 +1434,12 @@ Milestones:
   record-milestone-payment <id> <milestone-number> <amount> [--date YYYY-MM-DD] [--reference text] [--method text]
   mark-milestone-unpaid <id> <milestone-number>
   mark-milestone-unsent <id> <milestone-number>
+
+Milestone rules (default milestones and caps by region and contract value):
+  milestone-rules list [--json]
+  milestone-rules set --file <rules.json> [--expect-version V]   (owner)
+  milestone-rules check <job-id>     the rule for a job, and the caps each milestone is over
+  milestone-rules business-region <country|none> [region]   (owner), e.g. AU SA
 
 Wall:
   upload-moasure <id> <csv-path>

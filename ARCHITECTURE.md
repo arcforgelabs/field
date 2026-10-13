@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: 2026-10-12_
+_Last updated: 2026-10-13_
 
 This maintained repository document describes implementation and target
 architecture truth for Field. Requested work, priorities, status and delivery
@@ -386,6 +386,7 @@ An issued invoice is a money document, not a projection of the current quote.
   - The owner screen `/invoices/amounts`
     (`client/src/features/invoices/invoice-amounts-page.tsx`) calls them. It
     sends the chosen set's total from the report; the owner never types it.
+- **Milestone rules (#29).** `server/invoices/milestone-rules.js` reads the organisation's rules (`milestone_rules`, `milestone_rule_milestones`, `milestone_rule_caps`, migration 0022), picks the rule for a job (its region from the site address, else the business region; the band holding its contract value; the most specific region), applies its milestones when a job's milestones are first created (`paymentSchedule.source`: `rule`, or `override` for a schedule set on the job) and checks its caps in `issueNewMilestoneInvoices` before the issue service runs: a hard cap refuses the issue (409 `MILESTONE_CAP_EXCEEDED`), a soft cap is recorded on the revision (`milestoneRule`) and the issued document's `details`. Routes: `GET`/`PUT /api/settings/milestone-rules` (owner writes), `GET /api/jobs/:id/milestone-rules`, `applyAccountRule` on `POST /api/jobs/:id/milestones/generate`; CLI `milestone-rules`; MCP `field_milestone_rules_list`, `field_milestone_check`. Without a database there are no rules.
 - `GET /api/jobs/:id/milestones/:index/pdf` serves an issued revision's stored bytes and accepts `?revision=<n>` to address a superseded one. `GET /api/jobs/:id/milestones/:index/revisions` lists the history. The `field` CLI exposes `credit-invoice` (formerly `revise-invoice`) and `list-invoice-revisions`. A credit note's PDF is an issued document: `GET /api/jobs/:id/documents` lists it and `GET /api/documents/:uid/pdf` serves it, and the email editor offers it as an attachment when the replacement invoice is sent. An invoice returned to draft and reissued with different content is credited first according to the account setting `creditNoteOnReissue` in `business_settings` (`when-emailed` by default: only when Field has evidence it was emailed or delivered; `always`; `never`), read by the issue service; "Credit and reissue" always credits.
 
 ## Presentation Organizer

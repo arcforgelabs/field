@@ -16,10 +16,12 @@ import {
   markMilestoneInvoiceUnpaid,
   normalizePaymentSchedule,
   normalizeStoredMilestoneInvoices,
+  paymentScheduleMilestonesKey,
   prepareMilestoneInvoiceDocument,
   prepareRequestedJobDocument,
   recordMilestoneInvoicePayment,
   resolveJobDocumentType,
+  resolvePaymentSchedule,
   resolveRequestedMilestoneInvoice,
   settleMilestoneInvoiceRevision,
   sumActiveMilestonePayments,
@@ -75,6 +77,8 @@ import { claimDescription, customerQuoteReference, quoteReferenceLine } from "./
 import { invoiceAmountEvidence } from "./invoices/amount-evidence.js";
 import { collectSentInvoiceCopies } from "./invoices/sent-copies.js";
 import { toCents } from "./quotes/totals.js";
+import { MilestoneCapError, describeBand, evaluateMilestoneCaps, installedMilestoneRules, resolveJobMilestoneRule, ruleReference, scheduleFromRule } from "./invoices/milestone-rules.js";
+import { invoiceKind } from "./invoices/from-milestones.js";
 import { applyQuoteCatalogChanges, computeQuoteCatalogChanges, upgradeOrganizerCatalogLinks } from "./quote-catalog-sync.js";
 import {
   buildQuoteDeliveryAttempt,
@@ -122,7 +126,7 @@ export async function updateJobQuote({
   const historicalQuoteLifecycle = await readQuoteLifecycle(jobDir);
   const currentArtifacts = await readQuoteArtifacts(jobDir);
   const nextPaymentSchedule = patch.paymentSchedule != null
-    ? normalizePaymentSchedule(patch.paymentSchedule)
+    ? await markOperatorSchedule({ paymentSchedule: patch.paymentSchedule, meta, quote: currentArtifacts?.quote || null, config, actor })
     : null;
   // Authoring-time guard: this is operator INPUT arriving
   // through a quote-update patch, not a rebuild — reject a schedule whose
@@ -880,8 +884,7 @@ function normalizeCurrentMilestoneSchedule(meta = null) {
 }
 
 function normalizeScheduleForComparison(schedule) {
-  if (!schedule) return null;
-  return JSON.stringify(normalizePaymentSchedule(schedule));
+  return paymentScheduleMilestonesKey(schedule);
 }
 
 function assertMilestoneScheduleMutationAllowed({
@@ -895,7 +898,7 @@ function assertMilestoneScheduleMutationAllowed({
   const currentScheduleSnapshot = normalizeCurrentMilestoneSchedule(meta);
   const currentSchedule = normalizeScheduleForComparison(currentScheduleSnapshot);
   const nextScheduleSnapshot = normalizePaymentSchedule(paymentSchedule);
-  const nextSchedule = JSON.stringify(nextScheduleSnapshot);
+  const nextSchedule = paymentScheduleMilestonesKey(nextScheduleSnapshot);
   if (currentSchedule === nextSchedule) return;
 
   let lockedPrefixCount = 0;
@@ -936,6 +939,171 @@ function assertMilestoneScheduleMutationAllowed({
 
 async function writePersistedMeta(jobDir, meta) {
   return await writeJobMeta(jobDir, meta);
+}
+
+// ---------------------------------------------------------------------------
+// Milestone rules (step 4c, #29; server/invoices/milestone-rules.js).
+
+function businessAddressOf({ quote = null, config = null } = {}) {
+  return quote?.quoteCatalog?.businessProfile?.address || config?.businessProfile?.address || null;
+}
+
+/** The account rule for a job's quote, or null when the organisation has no rules. */
+async function accountRuleFor({ meta = null, quote = null, config = null } = {}) {
+  if (!quote || !installedMilestoneRules()) return null;
+  return resolveJobMilestoneRule({
+    meta,
+    financials: getCustomerPresentationFinancials(quote),
+    businessAddress: businessAddressOf({ quote, config }),
+  });
+}
+
+function scheduleSource(kind, rule, actor, extra = {}) {
+  const reference = ruleReference(rule);
+  return {
+    kind,
+    ruleUid: reference?.ruleUid || null,
+    ruleName: reference?.ruleName || null,
+    ...(reference?.country ? { country: reference.country } : {}),
+    ...(reference?.region ? { region: reference.region } : {}),
+    ...(reference?.band ? { band: reference.band } : {}),
+    ...extra,
+    at: new Date().toISOString(),
+    by: actorLabel(actor) || "Field",
+  };
+}
+
+/** The schedule the account rule gives a job: its own milestones, else Field's default. */
+function ruleScheduleOf(rule, { quote = null, config = null } = {}) {
+  const fromRule = scheduleFromRule(rule);
+  return fromRule ? normalizePaymentSchedule(fromRule) : resolvePaymentSchedule({ quote, config });
+}
+
+// Operator input never says where a schedule came from: Field does.
+function withoutScheduleSource(schedule) {
+  if (!schedule || Array.isArray(schedule) || typeof schedule !== "object") return schedule;
+  const { source: _ignored, ...rest } = schedule;
+  return rest;
+}
+
+/**
+ * A schedule an operator set on the job, marked against the account rule:
+ * `rule` when it is the rule's own schedule, else `override`. Unmarked when
+ * the organisation has no milestone rules.
+ */
+async function markOperatorSchedule({ paymentSchedule, meta = null, quote = null, config = null, actor = null }) {
+  if (!paymentSchedule) return paymentSchedule;
+  const schedule = normalizePaymentSchedule(withoutScheduleSource(paymentSchedule));
+  const account = await accountRuleFor({ meta, quote, config });
+  if (!account) return schedule;
+  const ruleSchedule = account.rule ? ruleScheduleOf(account.rule, { quote, config }) : null;
+  const same = ruleSchedule && paymentScheduleMilestonesKey(ruleSchedule) === paymentScheduleMilestonesKey(schedule);
+  return {
+    ...schedule,
+    source: scheduleSource(same ? "rule" : "override", account.rule, actor, same && !scheduleFromRule(account.rule) ? { milestonesFrom: "default" } : {}),
+  };
+}
+
+/**
+ * The account rule's schedule for a job whose milestones are created now:
+ * its first, or (`force`) on an operator's request to return to the rule.
+ * Null when no rule applies, or the job already has a schedule.
+ */
+async function accountRuleSchedule({ meta = null, quote = null, config = null, actor = null, force = false }) {
+  if (!force) {
+    if (meta?.paymentSchedule) return null;
+    if (normalizeStoredMilestoneInvoices(meta?.milestoneInvoices || []).length) return null;
+    if (meta?.invoiceSentAt || Number(meta?.invoicePaidAmount || 0) > 0) return null;
+  }
+  const account = await accountRuleFor({ meta, quote, config });
+  if (!account?.rule) {
+    if (force) throw createJobActionError(account ? "no account milestone rule applies to this job" : "this organisation has no milestone rules", 409);
+    return null;
+  }
+  return {
+    ...ruleScheduleOf(account.rule, { quote, config }),
+    source: scheduleSource("rule", account.rule, actor, scheduleFromRule(account.rule) ? {} : { milestonesFrom: "default" }),
+  };
+}
+
+/**
+ * The caps of the account rule against each invoice being issued. A hard
+ * cap refuses them all (MilestoneCapError, 409, naming the rule) before any
+ * is issued; soft caps come back as the record each invoice keeps.
+ * Returns Map milestoneIndex -> milestoneRule record.
+ */
+async function checkMilestoneCaps({ meta = null, quote = null, schedule = null, entries = [], count = 0 }) {
+  const records = new Map();
+  if (!entries.length) return records;
+  const account = await accountRuleFor({ meta, quote });
+  if (!account) return records;
+  const hard = [];
+  for (const entry of entries) {
+    const revision = entry.issuedRevision || entry;
+    const findings = evaluateMilestoneCaps({
+      match: account.match,
+      milestone: { index: entry.milestoneIndex, label: entry.milestoneLabel, count, subtotal: revision.subtotal, total: revision.total },
+    });
+    hard.push(...findings.filter((finding) => finding.mode === "hard"));
+    records.set(entry.milestoneIndex, {
+      ruleUid: account.rule?.uid || null,
+      ruleName: account.rule?.name || null,
+      ...(account.rule ? { band: describeBand(account.rule) } : {}),
+      scheduleSource: schedule?.source?.kind || null,
+      capAlerts: findings.filter((finding) => finding.mode === "soft"),
+    });
+  }
+  if (hard.length) throw new MilestoneCapError(hard);
+  return records;
+}
+
+function withMilestoneRuleRecord(entry, record) {
+  if (!record) return entry;
+  return { ...entry, issuedRevision: { ...entry.issuedRevision, milestoneRule: record } };
+}
+
+/**
+ * What the account rules say about a job (GET /api/jobs/:id/milestone-rules):
+ * the region Field reads for it, the rule that applies and why, where its
+ * schedule came from, and for each milestone its kind and the caps it is
+ * over (a draft's are checked now; an issued one shows what was recorded).
+ */
+export async function readJobMilestoneRules({ jobDir, meta, config }) {
+  const { meta: resolvedMeta, selectedQuoteArtifacts } = await readDocumentQuoteArtifacts({ jobDir, meta, documentType: "invoice" });
+  const quote = selectedQuoteArtifacts?.quote || await readPersistedQuote(jobDir).catch(() => null);
+  const hydrated = await hydrateJobMeta(jobDir, resolvedMeta);
+  const account = quote ? await accountRuleFor({ meta: hydrated, quote, config }) : null;
+  const milestones = normalizeStoredMilestoneInvoices(hydrated?.milestoneInvoices || []);
+  const schedule = hydrated?.paymentSchedule || null;
+  const proposed = !milestones.length && !schedule && account?.rule ? ruleScheduleOf(account.rule, { quote, config }) : null;
+  return {
+    hasRules: Boolean(account),
+    region: account?.region || null,
+    rule: account?.rule || null,
+    contractValue: account?.contractValue ?? null,
+    scheduleSource: schedule?.source || null,
+    ...(proposed ? { proposedSchedule: proposed } : {}),
+    milestones: milestones.map((entry) => {
+      const issued = isMilestoneInvoiceIssued(entry);
+      const findings = issued
+        ? (entry.issuedRevision?.milestoneRule?.capAlerts || [])
+        : evaluateMilestoneCaps({
+            match: account?.match || null,
+            milestone: { index: entry.milestoneIndex, label: entry.milestoneLabel, count: milestones.length, subtotal: entry.subtotal, total: entry.total },
+          });
+      return {
+        milestoneIndex: entry.milestoneIndex,
+        label: entry.milestoneLabel,
+        kind: invoiceKind(entry.milestoneLabel, entry.milestoneIndex, milestones.length),
+        status: entry.status,
+        invoiceNumber: entry.invoiceNumber,
+        total: entry.total,
+        issued,
+        findings,
+        blocked: !issued && findings.some((finding) => finding.mode === "hard"),
+      };
+    }),
+  };
 }
 
 function actorLabel(actor) {
@@ -1032,6 +1200,7 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
     taxRate: quoteTaxRatePercent(quote),
   };
   const issuedBy = actorLabel(actor);
+  const ruleRecords = await checkMilestoneCaps({ meta, quote, schedule, entries: milestoneInvoices.filter(isNewlyIssuedRevision), count: milestoneInvoices.length });
   let current = milestoneInvoices;
   const renderInvoice = (entry, issuing) => {
     const prepared = prepareMilestoneInvoiceDocument({
@@ -1055,7 +1224,8 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
     const mapped = { milestoneInvoices: normalized, paymentSchedule: schedule, milestoneIndex: entry.milestoneIndex, basis, reference };
     const invoice = mapInvoiceForIssue(mapped);
     const issuedAt = revision.issuedAt || entry.issuedAt || new Date().toISOString();
-    const details = { ...invoiceRevisionDetails(entry, revision), ...partiesDetails({ meta, quote }) };
+    const ruleRecord = ruleRecords.get(entry.milestoneIndex) || null;
+    const details = { ...invoiceRevisionDetails(entry, revision), ...partiesDetails({ meta, quote }), ...(ruleRecord ? { milestoneRule: ruleRecord } : {}) };
     const toCredit = revisionToCredit(entry);
     const credited = toCredit?.previous || null;
 
@@ -1073,7 +1243,7 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
       });
       const issued = withIssuedNumber(entry, result);
       await writeIssuedInvoicePdf({ jobDir, relativePdfPath: issued.pdfPath, pdfBuffer: result.pdfBytes });
-      current = current.map((other) => (other.milestoneIndex === entry.milestoneIndex ? stored(issued, result) : other));
+      current = current.map((other) => (other.milestoneIndex === entry.milestoneIndex ? withMilestoneRuleRecord(stored(issued, result), ruleRecord) : other));
       continue;
     }
 
@@ -1142,7 +1312,7 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
     const note = result.creditNote;
     const issued = withIssuedNumber(entry, { ...result.invoice, creditNoteNumber: note?.number || null });
     await writeIssuedInvoicePdf({ jobDir, relativePdfPath: issued.pdfPath, pdfBuffer: result.invoice.pdfBytes });
-    let next = stored(issued, result.invoice);
+    let next = withMilestoneRuleRecord(stored(issued, result.invoice), ruleRecord);
     if (note) {
       const notePath = buildMilestoneInvoicePdfPath({ invoiceNumber: note.number, milestoneIndex: entry.milestoneIndex });
       await writeIssuedInvoicePdf({ jobDir, relativePdfPath: notePath, pdfBuffer: note.pdfBytes });
@@ -1598,7 +1768,11 @@ async function synchronizeMilestoneInvoices({
   paymentSchedule = null,
   writeAllArtifacts = false,
   revisionAuthorizations = null,
+  actor = null,
 }) {
+  // The first time a job's milestones are created, its schedule comes from
+  // the account rule for its region and contract value (#29).
+  if (!paymentSchedule) paymentSchedule = await accountRuleSchedule({ meta, quote, config, actor });
   const generated = buildMilestoneInvoices({
     meta,
     quote,
@@ -2973,6 +3147,7 @@ export async function markJobLanded({
     quote,
     config,
     writeAllArtifacts: true,
+    actor,
   });
   finalMeta = synchronized.meta;
   await appendJobActivity({
@@ -3002,6 +3177,8 @@ export async function generateJobMilestones({
   meta,
   config,
   paymentSchedule = null,
+  // Set the job back to the account rule's schedule (#29), ending an override.
+  applyAccountRule = false,
   actor = null,
 }) {
   const {
@@ -3012,8 +3189,14 @@ export async function generateJobMilestones({
     meta,
     documentType: "invoice",
   });
-  assertMilestoneScheduleMutationAllowed({ meta: resolvedMeta, paymentSchedule });
   const quote = selectedQuoteArtifacts?.quote || await readPersistedQuote(jobDir);
+  if (applyAccountRule && paymentSchedule) {
+    throw createJobActionError("send a payment schedule or applyAccountRule, not both", 400);
+  }
+  paymentSchedule = applyAccountRule
+    ? await accountRuleSchedule({ meta: resolvedMeta, quote, config, actor, force: true })
+    : await markOperatorSchedule({ paymentSchedule, meta: resolvedMeta, quote, config, actor });
+  assertMilestoneScheduleMutationAllowed({ meta: resolvedMeta, paymentSchedule });
   // Authoring-time guard: this is operator INPUT, not a
   // rebuild — reject a schedule whose fixed dollar amounts already exceed
   // the quote total outright, rather than letting the rebuild pro-rate it
@@ -3031,6 +3214,7 @@ export async function generateJobMilestones({
     config,
     paymentSchedule,
     writeAllArtifacts: true,
+    actor,
   });
 
   await appendJobActivity({

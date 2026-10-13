@@ -13,7 +13,9 @@ import { openDocumentPdf } from "@/lib/open-document";
 import { useShell } from "@/components/shell/shell-context";
 import { Menu, type MenuItem } from "@/components/shell/menu";
 import { INVOICE_STATE_LABEL, INVOICE_STATE_TONE, invoiceState, jobInvoices, money, shortDate } from "@/lib/job-status";
-import { buildPaymentScheduleFromDraftRows, buildVisiblePaymentSchedule, buildMilestoneDraftRows } from "@/features/job-detail/payment-schedule";
+import { buildVisiblePaymentSchedule } from "@/features/job-detail/payment-schedule";
+import { CapFindings, ScheduleSourceBadge } from "@/features/job-detail/milestone-rules";
+import { useJobMilestoneRules } from "@/features/job-detail/use-job-milestone-rules";
 
 export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
   detail: RecordingDetail;
@@ -54,6 +56,10 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
   const pdf = (invoice: MilestoneInvoice, type: "invoice" | "receipt") => void openDocumentPdf(api.quotePdfUrl(meta.id, undefined, invoice.milestoneIndex, type), shell.toast);
   const credit = (invoice: MilestoneInvoice): MenuItem => ({ label: "Credit and reissue", icon: <FileMinus />, onSelect: () => setCrediting(invoice) });
   const navigate = useNavigate();
+  // The account's milestone rules (#29): read again whenever an invoice moves.
+  const rules = useJobMilestoneRules(meta.id, JSON.stringify([meta.paymentSchedule?.source?.at ?? null, invoices.map((invoice) => [invoice.status, invoice.total, invoice.milestoneLabel])]));
+  const ruleFor = (index: number) => rules?.milestones.find((entry) => entry.milestoneIndex === index) || null;
+  const source = meta.paymentSchedule?.source || rules?.scheduleSource || null;
   // An invoice issued in place of a credited one: its adjustment note can
   // also go on its own, in the credited invoice's conversation.
   const emailNote = (invoice: MilestoneInvoice): MenuItem[] => {
@@ -62,18 +68,20 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
   };
 
   if (!invoices.length) {
-    const schedule = buildVisiblePaymentSchedule(meta.paymentSchedule || null, [], null);
+    // The job's own schedule, else the account rule's, else Field's default.
+    const proposed = !meta.paymentSchedule && rules?.proposedSchedule ? rules.proposedSchedule : null;
+    const schedule = buildVisiblePaymentSchedule(meta.paymentSchedule || proposed, [], null);
     return (
       <div className="fx-block" style={{ paddingBottom: 28 }}>
-        <h3 className="fx-block__h">No invoices yet</h3>
+        <h3 className="fx-block__h">No invoices yet {proposed && rules?.rule ? <ScheduleSourceBadge source={{ kind: "rule", ruleUid: rules.rule.uid ?? null, ruleName: rules.rule.name, milestonesFrom: rules.rule.milestones.length ? undefined : "default", at: null, by: null }} /> : <ScheduleSourceBadge source={source} />}</h3>
         <p className="fx-dim" style={{ margin: "0 0 12px", maxWidth: "60ch" }}>
-          Invoices are made from the quote's payment schedule: {schedule.milestones.map((milestone) => `${milestone.label} ${milestone.percentage}%`).join(", ")}.
+          Invoices are made from {proposed ? "the account rule's" : "the quote's"} payment schedule: {schedule.milestones.map((milestone) => `${milestone.label} ${milestone.percentage}%`).join(", ")}.
         </p>
         <button
           type="button"
           className="fx-btn fx-btn--primary"
           disabled={busy !== null}
-          onClick={() => run("milestones", () => api.generateMilestones(meta.id, buildPaymentScheduleFromDraftRows(buildMilestoneDraftRows(schedule))), "Invoices are ready to send")}
+          onClick={() => run("milestones", () => api.generateMilestones(meta.id), "Invoices are ready to send")}
         >
           Set up invoices
         </button>
@@ -83,6 +91,20 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
 
   return (
     <div>
+      {(source || rules?.rule) && (
+        <div className="fx-doc-actions" style={{ paddingBottom: 0 }} aria-label="Payment schedule source">
+          <ScheduleSourceBadge source={source} />
+          {rules?.rule && (
+            <span className="fx-mute" style={{ fontSize: 12 }}>
+              Caps from &ldquo;{rules.rule.name}&rdquo; apply to every invoice on this job{rules.region?.country ? ` (${rules.region.region ? `${rules.region.region}, ` : ""}${rules.region.country}, from the ${rules.region.from === "site-address" ? "site address" : "business region"})` : ""}.
+            </span>
+          )}
+          <span className="fx-spacer" />
+          {source?.kind === "override" && rules?.rule && (
+            <button type="button" className="fx-btn fx-btn--sm" disabled={busy !== null} onClick={() => run("rule", () => api.generateMilestones(meta.id, { applyAccountRule: true }), `Schedule set back to "${rules.rule?.name}"`)}>Use the account rule</button>
+          )}
+        </div>
+      )}
       <div className="fx-progress">
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
           <span><b className="fx-num">{money(paid)}</b> <span className="fx-dim">of {money(total)} paid</span></span>
@@ -97,9 +119,12 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
           : state === "overdue" ? `Overdue since ${shortDate(invoice.dueDate)}`
             : state === "sent" ? (invoice.dueDate ? `Due ${shortDate(invoice.dueDate)}` : `Sent ${shortDate(invoice.issuedAt)}`)
               : "Not sent";
+        const check = ruleFor(invoice.milestoneIndex);
+        const blocked = invoice.status === "draft" && Boolean(check?.blocked);
+        const recordedAlerts = invoice.status !== "draft" ? (invoice.issuedRevision?.milestoneRule?.capAlerts || []) : [];
         const menu: MenuItem[] = [
           { label: "Preview invoice", icon: <Eye />, onSelect: () => pdf(invoice, "invoice") },
-          ...(invoice.status === "draft" ? [{ label: "Mark as sent (sent outside Field)", icon: <Check />, onSelect: () => run("sent", () => api.updateMilestone(meta.id, invoice.milestoneIndex, { status: "authorised" }), `${invoice.invoiceNumber} marked sent`) } as MenuItem] : []),
+          ...(invoice.status === "draft" && !blocked ? [{ label: "Mark as sent (sent outside Field)", icon: <Check />, onSelect: () => run("sent", () => api.updateMilestone(meta.id, invoice.milestoneIndex, { status: "authorised" }), `${invoice.invoiceNumber} marked sent`) } as MenuItem] : []),
           ...(invoice.status === "authorised" ? [
             { label: "Resend invoice", icon: <Send />, onSelect: () => onSend(invoice.milestoneIndex, "invoice") } as MenuItem,
             credit(invoice),
@@ -119,6 +144,9 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
             <div style={{ minWidth: 0 }}>
               <div className="fx-ms__t">{invoice.milestoneLabel} <span className="fx-dim" style={{ fontWeight: 400 }}>· {invoice.percentage}%</span></div>
               <div className="fx-ms__s fx-num">{invoice.invoiceNumber}{invoice.payments?.length ? ` · ${invoice.payments.filter((payment) => !payment.voidedAt).length} payment${invoice.payments.length === 1 ? "" : "s"}` : ""}</div>
+              {invoice.status !== "draft" && invoice.issuedRevision?.milestoneRule?.scheduleSource === "override" && (
+                <span className="fx-badge fx-badge--outline" style={{ color: "var(--t-warn)", marginTop: 4 }} title="This invoice was issued while the job's schedule overrode the account rule.">Issued under an override{invoice.issuedRevision.milestoneRule.ruleName ? ` of "${invoice.issuedRevision.milestoneRule.ruleName}"` : ""}</span>
+              )}
               {xeroFor(invoice) && <XeroInvoiceStatus entry={xeroFor(invoice) as XeroInvoiceState} isOwner={isOwner} onRetry={retryXero} onSend={setPushing} />}
             </div>
             <div className="fx-ms__hide-sm"><span className={`fx-status fx-status--${INVOICE_STATE_TONE[state]}`} title={INVOICE_STATE_LABEL[state]}>{when}</span></div>
@@ -128,7 +156,7 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
             </div>
             <div className="fx-ms__acts">
               {invoice.status === "draft" && (
-                <button type="button" className={`fx-btn fx-btn--sm${isNext ? " fx-btn--primary" : ""}`} onClick={() => onSend(invoice.milestoneIndex, "invoice")}><Send aria-hidden />Send</button>
+                <button type="button" className={`fx-btn fx-btn--sm${isNext && !blocked ? " fx-btn--primary" : ""}`} disabled={blocked} title={blocked ? "A hard cap in the account's milestone rules blocks this invoice" : undefined} onClick={() => onSend(invoice.milestoneIndex, "invoice")}><Send aria-hidden />Send</button>
               )}
               {invoice.status === "authorised" && (
                 <button type="button" className={`fx-btn fx-btn--sm${isNext ? " fx-btn--primary" : ""}`} onClick={() => onRecordPayment(invoice.milestoneIndex)}><Wallet aria-hidden />Record payment</button>
@@ -140,11 +168,14 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
                 <button type="button" className="fx-btn fx-btn--ghost fx-btn--sm fx-btn--icon" aria-label={`${invoice.invoiceNumber} actions`} {...props}><MoreHorizontal /></button>
               )} />
             </div>
+            {invoice.status === "draft"
+              ? <CapFindings findings={check?.findings || []} />
+              : <CapFindings findings={recordedAlerts} issued />}
           </div>
         );
       })}
       <div className="fx-doc-actions">
-        <span className="fx-mute" style={{ fontSize: 12 }}>Sent and paid invoices are locked: to correct one, credit and reissue it. Later milestones follow the quote's payment schedule.</span>
+        <span className="fx-mute" style={{ fontSize: 12 }}>Sent and paid invoices are locked: to correct one, credit and reissue it. Later milestones follow the {source?.kind === "rule" ? "account rule's" : "quote's"} payment schedule.</span>
       </div>
       {pushing && (
         <XeroPushDialog

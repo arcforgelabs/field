@@ -47,6 +47,21 @@
 .appearance__custom { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--t-dim); cursor: pointer; }
 .appearance__custom input { width: 32px; height: 28px; padding: 0; border: 1px solid var(--t-brd); border-radius: var(--t-radius, 0); background: transparent; cursor: pointer; }
 
+/* Payment milestone rules (#29). */
+.fx-mr__region { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fx-mr { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--fx-line); border-radius: var(--t-radius-lg, var(--t-radius)); min-width: 0; }
+.fx-mr__head { display: flex; gap: 8px; align-items: center; }
+.fx-mr__grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.fx-mr__sub { display: grid; gap: 6px; }
+.fx-mr__subh { font-size: 12.5px; font-weight: 600; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.fx-mr__subh .fx-mute { font-weight: 400; font-size: 12px; }
+.fx-mr__row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px; align-items: center; }
+@media (max-width: 720px) {
+  .fx-mr__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fx-mr__row { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-bottom: 8px; border-bottom: 1px solid var(--fx-line); }
+  .fx-mr__row > :first-child { grid-column: 1 / -1; }
+  .fx-mr__row > :last-child { justify-self: end; }
+}
 /* Integrations: Xero (#93). */
 .xero__card { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px; border: 1px solid var(--fx-line-strong); border-radius: var(--t-radius-lg, var(--t-radius)); background: var(--t-paper); }
 .xero__row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }

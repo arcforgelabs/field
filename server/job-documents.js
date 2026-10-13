@@ -655,7 +655,39 @@ export function normalizePaymentSchedule(schedule, { allowNull = false } = {}) {
     throw createError("payment schedule percentages cannot exceed 100 when fixed milestone amounts are used", 400);
   }
 
-  return { milestones };
+  const source = normalizePaymentScheduleSource(normalizedInput.source);
+  return source ? { milestones, source } : { milestones };
+}
+
+// Where a job's schedule came from (step 4c, #29), kept beside it so the job
+// and its invoices can say so. Only set when the organisation has milestone
+// rules: `rule` (the account rule's schedule, or Field's default where the
+// rule gives none) or `override` (set on this job, departing from the rule
+// named, if one applied). A schedule with no source is one from before rules,
+// or from an organisation with none.
+export const PAYMENT_SCHEDULE_SOURCES = ["rule", "override"];
+
+export function normalizePaymentScheduleSource(source = null) {
+  if (!source || typeof source !== "object" || !PAYMENT_SCHEDULE_SOURCES.includes(source.kind)) return null;
+  const country = cleanText(source.country);
+  const region = cleanText(source.region);
+  return {
+    kind: source.kind,
+    ruleUid: cleanText(source.ruleUid),
+    ruleName: cleanText(source.ruleName),
+    ...(country ? { country } : {}),
+    ...(region ? { region } : {}),
+    ...(cleanText(source.band) ? { band: cleanText(source.band) } : {}),
+    ...(source.kind === "rule" && source.milestonesFrom === "default" ? { milestonesFrom: "default" } : {}),
+    at: normalizeIsoTimestamp(source.at),
+    by: cleanText(source.by),
+  };
+}
+
+/** The milestones alone, for comparing two schedules whatever their source. */
+export function paymentScheduleMilestonesKey(schedule) {
+  if (!schedule) return null;
+  return JSON.stringify(normalizePaymentSchedule(schedule).milestones);
 }
 
 // Authoring-time guard: `buildMilestoneInvoices` is always a
