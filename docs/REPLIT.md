@@ -138,7 +138,8 @@ recording rule:
 - No job refused: the backfill is recorded, with its summary (written,
   already present, warnings), and never runs again.
 - Some jobs refused: every job that verifies is written. Each refused job is
-  logged with its job id and both numbers, never a customer name. The
+  logged by job uid, issued-document uid and mismatch kind, never a number,
+  an amount or a customer name; the dry run shows the numbers. The
   backfill is not recorded, so the next boot runs it again. A retry is one
   pass over the jobs: a job already written is checked and left as it is,
   so a retry writes only what changed. To clear a refusal, correct the job
@@ -292,7 +293,8 @@ After the release that adds them is published:
 1. In the server log, find the two `[data-migrations]` lines for the
    backfills. `recorded` means done.
 2. `incomplete` means jobs were refused. The next lines name each refused job
-   with both numbers. Every other job is written.
+   by uid, with its issued-document uid and the kind of mismatch. Every other
+   job is written.
 3. `GET /api/admin/data-migrations/dry-run` shows the same refusals at any
    time, with the counts.
 

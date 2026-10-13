@@ -1033,7 +1033,8 @@ stay the source of truth, and nothing reads the rows yet.
   writes nothing new. Without a database, `--dry-run` checks the files
   alone. Since #36 production runs it at boot as the data migration
   `2026-10-13-quote-rows-backfill`: every job that verifies is written,
-  each refused job is logged with both numbers, and the migration is
+  each refused job is logged by uid and mismatch kind (the dry run shows the
+  numbers), and the migration is
   recorded only when nothing is refused, so a later boot retries
   (`docs/REPLIT.md`, "The row backfills").
 - **Every sent PDF's totals reproduce.** With the 2026-10-12 decisions
