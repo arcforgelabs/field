@@ -2,7 +2,7 @@
 
 `.github/workflows/ci.yml` runs one job per lane, so a failed check names what
 broke. It runs on every pull request, on every push to `main`, on demand, and
-from `release-checks.yml` for the exact commit of a release.
+from `field-release-checks.yml` for the exact commit of a release.
 
 ## Required checks
 

@@ -14,11 +14,12 @@
 //
 // Each prints JSON on stdout and exits 1 with a reason on stderr.
 //
-// Versions are calendar versions. A stable release is vYYYY.M.D (no leading
-// zeros) and a beta is vYYYY.M.D-beta.N. package.json holds the stable form;
-// a beta is a pre-release of it. npm dist-tags: a beta publishes to `beta`;
-// a stable release publishes to `next` and release-promote.yml moves `latest`
-// to it.
+// Versions are calendar versions, named as openclaw/openclaw names its own.
+// A stable release is vYYYY.M.D (no leading zeros) and a beta is
+// vYYYY.M.D-beta.N, where the beta number belongs to the upcoming stable
+// version: v2026.10.15-beta.1 and -beta.2 come before v2026.10.15.
+// package.json holds that upcoming stable version. npm dist-tags: a beta
+// publishes to `beta`, a stable release to `latest`.
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -48,7 +49,7 @@ export function parseTag(tag) {
     base,
     channel,
     beta,
-    npmDistTag: channel === "beta" ? "beta" : "next",
+    npmDistTag: channel === "beta" ? "beta" : "latest",
     prerelease: channel === "beta",
   };
 }
@@ -71,7 +72,7 @@ function releaseTags(tags) {
   return parsed;
 }
 
-// The tag release-prepare.yml creates for package.json's version.
+// The tag field-release-prepare.yml creates for package.json's version.
 export function planTag({ packageVersion, channel, tags }) {
   const { version } = parseBaseVersion(packageVersion);
   if (channel !== "beta" && channel !== "stable") throw new ReleaseError(`channel must be beta or stable, not "${channel}"`);
