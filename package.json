@@ -40,7 +40,7 @@
     "@clerk/backend": "3.20.1",
     "@clerk/express": "2.1.72",
     "@electric-sql/pglite": "0.5.8",
-    "@sentry/node": "^10.75.0",
+    "@sentry/node": "^11.6.0",
     "aws4fetch": "1.0.20",
     "better-sqlite3": "12.8.0",
     "drizzle-orm": "0.45.2",
