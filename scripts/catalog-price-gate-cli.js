@@ -7,7 +7,7 @@
 //   npm run catalog:price-gate -- --compare <file>    exit 1 if any item prices differently
 //
 // The target is the server's database (DATABASE_URL / FIELD_DB_URL) and the
-// deployment's organisation (FIELD_ORG, default embark).
+// deployment's organisation (FIELD_ORG, else the default organisation).
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadFieldConfig } from "../server/runtime-config.js";

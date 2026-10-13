@@ -128,7 +128,7 @@ test("disposal costing-basis checks", async (t) => {
   setKnownDisposalItemCodesForTests(new Set(["unclean-fill-disposal", "concrete-waste-disposal", "green-waste-disposal"]));
   store.invalidate();
 
-  const health = await report(store, { catalogId: "embark-default" });
+  const health = await report(store, { catalogId: "default" });
   assert.deepEqual(health.issues.filter((issue) => issue.key === "incomplete_pricing_basis").map((issue) => issue.code), ["clean-fill-disposal"]);
   const noSell = health.issues.filter((issue) => issue.key === "disposal_item_missing_sell_price");
   assert.deepEqual(noSell.map((issue) => issue.code).sort(), ["unclean-fill-disposal", "zero-disposal"]);
@@ -139,7 +139,7 @@ test("disposal costing-basis checks", async (t) => {
 
 test("disposal checks are scoped to the installation's own quote catalog", async (t) => {
   const { store } = await freshStore(t);
-  const sample = (await report(store, { catalogId: "embark-default" })).issues
+  const sample = (await report(store, { catalogId: "default" })).issues
     .filter((issue) => issue.key === "disposal_item_missing_basis").map((issue) => issue.code);
   assert.ok(sample.includes("unclean-fill-disposal"));
   assert.ok(!sample.some((code) => code.startsWith("verification-")));
@@ -161,13 +161,13 @@ test("the health report is strictly read-only", async (t) => {
   assert.deepEqual(await store.catalogVersion(), versionBefore);
 });
 
-test("the embark-default recipes' items are checked: missing items and per-tonne items used per metre are reported", async (t) => {
+test("the default recipes' items are checked: missing items and per-tonne items used per metre are reported", async (t) => {
   const { store } = await freshStore(t);
   // Drainage's spoil allowance is per metre of trench; this disposal item is
   // sold per tonne, with no conversion, so the recipe refuses to price it.
   await store.createItem({ code: "clean-fill-disposal", name: "Clean fill disposal", unit: "tonne", buy_price: 9, sell_price: 14 });
   await store.createItem({ code: "DRAIN-PIPE-M", name: "Drainage pipe", unit: "m", buy_price: 14, sell_price: 22 });
-  const health = await store.health({ catalogId: "embark-default" });
+  const health = await store.health({ catalogId: "default" });
 
   const missing = health.issues.filter((issue) => issue.key === "missing_referenced_item");
   const pit = missing.find((issue) => issue.code === "DRAIN-PIT");

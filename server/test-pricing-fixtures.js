@@ -40,7 +40,7 @@ export const TEST_ITEM_PRICES = Object.freeze({
   "clean-fill-disposal": [9, 14],
 });
 
-/** Sell rates for the embark-default quote rules (buy is 1 in fixtures). */
+/** Sell rates for the default quote rules (buy is 1 in fixtures). */
 export const TEST_QUOTE_RULE_SELL_RATES = Object.freeze({
   "site-establishment": 185,
   "excavator-hour": 185,
@@ -138,7 +138,7 @@ export function buildTestRateCard(prices = TEST_ITEM_PRICES) {
  * catalogue (every component in its item's unit). A code without a price is
  * a missing item.
  */
-export function buildTestRecipePricing({ quoteCatalog = getQuoteCatalog("embark-default"), prices = TEST_ITEM_PRICES } = {}) {
+export function buildTestRecipePricing({ quoteCatalog = getQuoteCatalog("default"), prices = TEST_ITEM_PRICES } = {}) {
   const lookup = new Map(Object.entries(prices).map(([code, value]) => [code.toLowerCase(), [code, value]]));
   const assemblies = {};
   for (const definition of quoteCatalog?.assemblies || []) {

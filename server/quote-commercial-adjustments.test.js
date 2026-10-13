@@ -259,8 +259,8 @@ test("generateEvidenceQuote applies commercial adjustments without treating them
   const quote = generateEvidenceQuote({
     meta: {
       id: "job-commercial-adjustment",
-      quoteCatalogId: "embark-default",
-      quoteCatalogId: "embark-default",
+      quoteCatalogId: "default",
+      quoteCatalogId: "default",
     },
     transcript: null,
     quoteInputs: {
@@ -313,7 +313,7 @@ test("generateEvidenceQuote applies unitCost overrides to line item totalCost", 
   const quote = generateEvidenceQuote({
     meta: {
       id: "job-cost-override",
-      quoteCatalogId: "embark-default",
+      quoteCatalogId: "default",
     },
     transcript: null,
     quoteInputs: {
@@ -367,7 +367,7 @@ test("generateEvidenceQuote lets unitPrice and unitCost overrides coexist on the
   const quote = generateEvidenceQuote({
     meta: {
       id: "job-both-overrides",
-      quoteCatalogId: "embark-default",
+      quoteCatalogId: "default",
     },
     transcript: null,
     quoteInputs: {

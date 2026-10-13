@@ -113,7 +113,7 @@ export const VERIFICATION_CATALOG_ITEMS = Object.freeze([
 // A fourth, verification-only fixture that exercises all three
 // disposal costing bases in one quote. Kept separate from DEMO_FIXTURES
 // (shared with scripts/reset-staging-baseline.js's "demo" fixture set,
-// which quotes against embark-default and does not have these rule codes)
+// which quotes against default and does not have these rule codes)
 // rather than added there.
 const DISPOSAL_FIXTURE = {
   id: "5e2a1c7d-8b40-4f6e-9a3c-6f0d2b9c1404",

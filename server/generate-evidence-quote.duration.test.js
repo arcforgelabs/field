@@ -21,7 +21,7 @@ async function withDisposalPriceCatalogAuthority(run) {
   try {
     const db = (await createTestPriceCatalog({ priceMaps: null })).store;
     await seedCatalogFromPriceMaps(db, {
-      // tip-truck is seeded too (matching embark-default.json5's unitPrice
+      // tip-truck is seeded too (matching default.json5's unitPrice
       // 240 exactly) because erpAuthorityActive flips true for every rule
       // once the price catalog has any active item — an explicit tip-truck
       // candidate would otherwise also become not-quoteable once this helper
@@ -77,7 +77,7 @@ const baseMeta = {
   id: "rec_wall_001",
   createdAt: "2026-03-12T00:00:00.000Z",
   title: "Retaining wall quote",
-  quoteCatalogId: "embark-default",
+  quoteCatalogId: "default",
 };
 
 const defaultSoilDump = {

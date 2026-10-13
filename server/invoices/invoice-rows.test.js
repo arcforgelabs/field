@@ -24,6 +24,7 @@ const ROLLBACK_0013 = fileURLToPath(new URL("../db/rollback/0013_invoice_rows.do
 const ROLLBACK_0014 = fileURLToPath(new URL("../db/rollback/0014_invoice_issue.down.sql", import.meta.url));
 const ROLLBACK_0015 = fileURLToPath(new URL("../db/rollback/0015_credit_notes.down.sql", import.meta.url));
 const ROLLBACK_0019 = fileURLToPath(new URL("../db/rollback/0019_integration_credentials.down.sql", import.meta.url));
+const ROLLBACK_0020 = fileURLToPath(new URL("../db/rollback/0020_neutral_default_org.down.sql", import.meta.url));
 const ROLLBACK_0018 = fileURLToPath(new URL("../db/rollback/0018_xero_invoice_sync.down.sql", import.meta.url));
 const ROLLBACK_0017 = fileURLToPath(new URL("../db/rollback/0017_xero_connection.down.sql", import.meta.url));
 const ROLLBACK_0016 = fileURLToPath(new URL("../db/rollback/0016_business_settings.down.sql", import.meta.url));
@@ -254,6 +255,7 @@ describe("migration 0013 rolls back", () => {
       await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
       const { jobId, mapped } = await collectJobInvoices(await scenarios.paid(dataDir));
       await createInvoiceRowService({ db, orgUid: ORG_A }).writeJob({ jobId, mapped });
+      await client.exec(`begin; ${readFileSync(ROLLBACK_0020, "utf8")}; commit;`);
       await client.exec(`begin; ${readFileSync(ROLLBACK_0019, "utf8")}; commit;`);
       await client.exec(`begin; ${readFileSync(ROLLBACK_0018, "utf8")}; commit;`);
       await client.exec(`begin; ${readFileSync(ROLLBACK_0017, "utf8")}; commit;`);

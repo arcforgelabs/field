@@ -116,7 +116,7 @@ const meta = {
   title: "Test Customer — 12 Sample Street, Exampleton",
   label: "Test Customer — 12 Sample Street, Exampleton",
   outputMode: "quote",
-  quoteCatalogId: "embark-default",
+  quoteCatalogId: "default",
   status: "complete",
   captureMode: "manual",
   audioFile: null, mimeType: null, sizeBytes: 0, durationMs: null, speakerCount: 0,
@@ -152,7 +152,7 @@ const quote = {
     versionLabel: "v001",
   },
   quoteCatalog: {
-    id: "embark-default",
+    id: "default",
     name: "Sample Catalogue",
     currency: "AUD",
     gstRate: 0.1,

@@ -71,7 +71,7 @@ function createQuoteFixture(meta, overrides = {}) {
     recordingIntent: "job-scope",
     summary: overrides.summary || "Quote test scope",
     quoteCatalog: {
-      id: "embark-default",
+      id: "default",
       name: "Sample Catalogue",
       currency: "AUD",
       gstRate: 0.1,
@@ -159,7 +159,7 @@ function buildSendableQuoteFixture(meta, { version = 1, deliveryStatus = "draft"
     recordingIntent: "job-scope",
     summary: "Install drainage and backfill.",
     quoteCatalog: {
-      id: "embark-default",
+      id: "default",
       name: "Sample Catalogue",
       currency: "AUD",
       gstRate: 0.1,
@@ -263,7 +263,7 @@ test("presentation-only organizer updates do not require quote inputs once a quo
       recordingIntent: "job-scope",
       summary: "Default scope text",
       quoteCatalog: {
-        id: "embark-default",
+        id: "default",
         name: "Sample Catalogue",
         currency: "AUD",
         gstRate: 0.1,
@@ -531,7 +531,7 @@ test("unlocking a sent quote forks a new draft version instead of mutating the s
       title: "Unlock sent quote fork test",
       label: "Unlock sent quote fork test",
       outputMode: "quote",
-      quoteCatalogId: "embark-default",
+      quoteCatalogId: "default",
       pipelineStage: "draft",
       quoteVersion: 1,
     };
@@ -760,7 +760,7 @@ test("presentation-only organizer updates keep legacy deliveryStatus aligned to 
       recordingIntent: "job-scope",
       summary: "Sent quote",
       quoteCatalog: {
-        id: "embark-default",
+        id: "default",
         name: "Sample Catalogue",
         currency: "AUD",
         gstRate: 0.1,
@@ -2555,7 +2555,7 @@ test("regenerateRecordingQuote forks a new version for sent quotes", async () =>
       title: "Sent quote refresh test",
       label: "Sent quote refresh test",
       outputMode: "quote",
-      quoteCatalogId: "embark-default",
+      quoteCatalogId: "default",
       pipelineStage: "draft",
       quoteVersion: 1,
     };
@@ -2681,7 +2681,7 @@ test("regenerateRecordingQuote still forks after a quote has historical sent sta
       title: "Historical sent refresh test",
       label: "Historical sent refresh test",
       outputMode: "quote",
-      quoteCatalogId: "embark-default",
+      quoteCatalogId: "default",
       pipelineStage: "draft",
       quoteVersion: 1,
     };
@@ -2794,7 +2794,7 @@ test("regenerateRecordingQuote preserves baseline scope across repeated rebuilds
       title: "Repeated rebuild baseline test",
       label: "Repeated rebuild baseline test",
       outputMode: "quote",
-      quoteCatalogId: "embark-default",
+      quoteCatalogId: "default",
       pipelineStage: "draft",
       quoteVersion: 1,
     };

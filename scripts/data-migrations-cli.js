@@ -6,7 +6,7 @@
 //   npm run data:migrate -- --dry-run [--data <dir>] [--only <id>] [--json <file>]
 //
 // The deployment's database (DATABASE_URL / FIELD_DB_URL; organisation
-// FIELD_ORG, default embark) is read through a session that cannot write
+// FIELD_ORG, else the default one) is read through a session that cannot write
 // (default_transaction_read_only). Its catalogue is copied into a throwaway
 // in-memory PostgreSQL at the same schema version and migrated to this
 // release (rehearsing the schema migrations on real data too). Job files come

@@ -108,11 +108,13 @@ isolation is enforced by the database, not by remembering a `WHERE`:
 - Blobs (photos, PDFs) are scoped the same way: `job_files` and
   `issued_documents` carry `org_uid`, so a document is only reachable through
   its owner's rows.
-- The default organisation (slug `embark`, created by migration
-  `0005_tenancy`) is the first organisation.
+- The default organisation (`DEFAULT_ORG_UID`, created by migration
+  `0005_tenancy`) is the first organisation. Its slug is `default` on a
+  database created after `0020_neutral_default_org`, and stays as it was on
+  an older one.
   Existing rows were backfilled with its `org_uid` in phase 0b (migration `0005_tenancy`).
 - Until jobs are rows (phase 3b), a deployment serves one organisation
-  (`FIELD_ORG`, default `embark`): the data directory is not per
+  (`FIELD_ORG`, else the default organisation): the data directory is not per
   organisation, so a signed-in person from another organisation is refused.
   The database layer is already multi-organisation.
 - Not schema-per-tenant or database-per-tenant: those multiply every
@@ -358,7 +360,7 @@ archived, missing or unpriced component makes the kit unpriced, never zero.
 
 One table for kits. It replaces `item_components` and the five empty
 `assembly_*` tables, and recipes move here out of
-`quote-catalogs/embark-default.json5`.
+`quote-catalogs/default.json5`.
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -716,7 +718,7 @@ default terms, quote validity days and numbering prefixes. **Built so far
 (migration `0016_business_settings`, #28):** one row per organisation with
 `credit_note_on_reissue` (see "How step 4b credits an invoice"); the rest is
 still config. All of these come
-out of `quote-catalogs/embark-default.json5`, whose `gstRate` is replaced by
+out of `quote-catalogs/default.json5`, whose `gstRate` is replaced by
 item tax codes.
 
 ## Everything else moves to tables too
@@ -766,7 +768,7 @@ was written.
 | Capture stand-ins | `createManualJob` writing a fake `transcript.json`, `evidence-pack.json` and `quote-inputs.json`, and the rebuild-on-every-save they trigger | – |
 | Evidence and ingestion stack | evidence pack, ingestion ledger, evidence index, stale detection, clarification notes, baseline-scope reconcile, breakdown source, version context, review state and projection, job state and gaps, quote proof and trace | ~4.5k |
 | Rules engine | `generate-evidence-quote`, `quote-quantity-rules`, `quote-commercial-compiler`, execution estimator, internal breakdown, quote catalogs, catalogue overlay (`catalog-pricing.js` authority pricing), commercial adjustments, recipe pricing, assembly modes | ~10.5k |
-| Rule files | the rules, `quantityRules`, assemblies and execution profile in `quote-catalogs/embark-default.json5`. The business profile moves to `business_settings` | 1k lines of json5 |
+| Rule files | the rules, `quantityRules`, assemblies and execution profile in `quote-catalogs/default.json5`. The business profile moves to `business_settings` | 1k lines of json5 |
 | Pricing attestation | `quote-pricing-attestation.js`, `quote-pricing-visibility.js`. This is what refuses quotes for missing line-item lineage | ~0.6k |
 | Retaining-wall engine | bay model, rate card, steel picker, wall zones and render. Walls are already priced as kits per bay in the price book (37 "Walls" items). 2 historical jobs used zones, and their sent PDFs are kept | ~4.9k |
 | Moasure import | used on 6 historical jobs. Measurement entry becomes plain quantities | ~0.6k |

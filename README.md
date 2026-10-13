@@ -73,7 +73,7 @@ it). It does not seed the catalogue.
 For a real installation:
 
 1. Fill in your business profile, payment details and quote rules.
-   `quote-catalogs/embark-default.json5` is a **sample** catalogue for a landscaping
+   `quote-catalogs/default.json5` is a **sample** catalogue for a landscaping
    and earthworks business: its business profile is a placeholder ("Your
    Business", blank ABN, a dummy bank account) and its productivity factors
    are illustrative. Its rules and assemblies name price-catalogue items by
