@@ -9,7 +9,7 @@ external systems, AI agents included, can build and revise quotes. See
 `VISION.md`.
 
 Field was built for Embark Landscaping & Earthworks, which maintains it at
-[embarkearthworks/field](https://github.com/embarkearthworks/field).
+[arcforgelabs/field](https://github.com/arcforgelabs/field).
 
 Licence: MIT (`LICENSE`).
 

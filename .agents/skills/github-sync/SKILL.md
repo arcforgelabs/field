@@ -8,7 +8,7 @@ description: Push work to GitHub, open a pull request, or pull the default branc
 This skill is account-wide and repo-agnostic. Before anything else, work out:
 
 - `<remote>`: the remote whose URL is on github.com (`git remote -v | grep github.com`)
-- `<owner>/<repo>`: from that URL (this repo is `embarkearthworks/field`)
+- `<owner>/<repo>`: from that URL (this repo is `arcforgelabs/field`)
 - `<default>`: the default branch, `git remote show <remote> | sed -n 's/.*HEAD branch: //p'`
   (`master` or `main`; never assume)
 
