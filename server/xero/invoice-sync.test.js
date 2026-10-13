@@ -770,3 +770,23 @@ test("a new organisation: sends wait until its codes are checked, and keep waiti
   await sync.tick();
   assert.equal((await row(result.invoiceUid)).state, "created");
 });
+
+test("the PDF's reference line and the Xero Reference come from one place: the quote row, else the files' number", async () => {
+  await connect();
+  advance(1000);
+  let printed = null;
+  issued += 1;
+  const result = await issuer.issueInvoice({
+    jobId: "job-xero",
+    idempotencyKey: `xero-reference-${issued}`,
+    reference: "2610-07",
+    quoteNumber: "EQ-FROM-FILES",
+    issuedAt: now.toISOString(),
+    invoice: claim(),
+    details: { milestoneIndex: 0, customer: CUSTOMER },
+    render: async (number, options) => { printed = options.referenceLine; return Buffer.from(`%PDF-1.4\n${number}\n%%EOF\n`); },
+  });
+  assert.equal(printed, "Job 2610-07 · Quote EQ-2610-07 v2", "the quote row's number wins");
+  await sync.tick();
+  assert.equal(xero.state.invoices.find((invoice) => invoice.InvoiceNumber === result.number).Reference, printed, "Xero carries what the PDF printed");
+});

@@ -100,7 +100,7 @@ For each invoice, Field creates one Xero sales invoice (`ACCREC`):
 | Xero | From Field |
 | --- | --- |
 | `InvoiceNumber` | Field's number, for example `INV-2026-10-1` |
-| `Reference` | The job and the accepted quote, for example `Job 2610-07 · Quote EQ-2610-07 v2` |
+| `Reference` | The job and the accepted quote, for example `Job 2610-07 · Quote EQ-2610-07 v2`, as Field's invoice prints it |
 | `Status` | `DRAFT`. For Approved invoice, Field approves the draft (`AUTHORISED`) only after its totals match Field's |
 | `Contact` | Found by the customer's email, else by name, else created. Archived contacts are not used |
 | `Date`, `DueDate` | The issue date, and the due date (the issue date when Field has none) |
@@ -296,9 +296,19 @@ an `ACCREC` invoice without an `InvoiceNumber` is numbered from the
 organisation's invoice settings, and the create response carries
 `InvoiceNumber` (links below).
 
-The Reference names the job and the quote in Xero. Field's own PDF keeps the
-reference it prints today, so Field's documents stay byte-identical. The
-issue asks for the same reference on Field's PDF; that is a separate change.
+The Reference names the job and the quote, and Field's own invoice prints the
+same line: `Reference: Job 2610-07 · Quote EQ-2610-07 v2`. The version shows
+from v2 on; no document prints "v1". The format is the same whichever system
+numbers the invoice.
+
+The issue service works the line out once, when the invoice is issued: the
+quote number from the quote row the invoice bills (else the number the job's
+files give), the job number and the version. It renders it into the PDF and
+stores it with the issued document, and the Xero sync sends that stored line.
+So the PDF and Xero never differ. An invoice issued before this release has
+no stored line: it printed "Job reference: 2610-07", and a reconstructed copy
+prints that again. Its Xero Reference is worked out from the quote row the
+same way. Receipts and adjustment notes are unchanged.
 
 ## Tests
 

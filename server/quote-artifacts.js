@@ -1556,8 +1556,13 @@ function renderParties(doc, {
           ? `For invoice: ${milestoneInvoice.issuedReceipt?.invoiceNumber || milestoneInvoice.issuedRevision?.invoiceNumber || milestoneInvoice.invoiceNumber}`
           : null,
         !isReceipt && milestoneInvoice?.dueDate ? `Due: ${formatDate(milestoneInvoice.dueDate)}` : null,
-        // An invoice issued from the sequence (INV-…) carries the job number.
-        !isReceipt && milestoneInvoice?.issuedRevision?.jobReference ? `Job reference: ${milestoneInvoice.issuedRevision.jobReference}` : null,
+        // An issued invoice (INV-…) prints the reference its issue recorded,
+        // "Reference: Job 2610-07 · Quote EQ-2610-07 v2", as its Xero invoice
+        // does (#93). One issued before that was recorded printed "Job
+        // reference", and a reconstructed copy of it prints that again.
+        !isReceipt && milestoneInvoice?.issuedRevision?.referenceLine
+          ? `Reference: ${milestoneInvoice.issuedRevision.referenceLine}`
+          : (!isReceipt && milestoneInvoice?.issuedRevision?.jobReference ? `Job reference: ${milestoneInvoice.issuedRevision.jobReference}` : null),
         // An invoice issued in place of a credited one says which.
         !isReceipt && milestoneInvoice?.issuedRevision?.creditNoteNumber && milestoneInvoice.issuedRevision.supersedesInvoiceNumber
           ? `Replaces: ${milestoneInvoice.issuedRevision.supersedesInvoiceNumber}`

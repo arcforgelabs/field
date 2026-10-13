@@ -58,7 +58,7 @@ test("issued invoices go to Xero without holding up issuing or email; owners alo
   assert.equal(xero.state.invoices.length, 1);
   assert.equal(xero.state.invoices[0].InvoiceNumber, number);
   assert.equal(xero.state.invoices[0].Status, "DRAFT");
-  assert.match(xero.state.invoices[0].Reference, /^Job .+ · Quote .+ v\d+$/);
+  assert.match(xero.state.invoices[0].Reference, /^Job \S+ · Quote \S+( v([2-9]|\d{2,}))?$/, "the job and the quote, never v1");
   assert.equal(xero.state.invoices[0].Total, Number(xero.state.invoices[0].SubTotal) + Number(xero.state.invoices[0].TotalTax));
   const issued = (await api(`/api/jobs/${aid}/documents`)).body.documents.find((document) => document.number === number);
   assert.equal(issued.emailed ? true : Boolean(issued.events.find((event) => event.event === "emailed")), true, "the customer was emailed it");
