@@ -1098,6 +1098,14 @@ export const api = {
   connectXero() {
     return request<{ ok: boolean; url: string }>("/api/integrations/xero/connect", { method: "POST" });
   },
+  /** Owner only: enter or replace the Xero app's credentials. Write-only: nothing comes back but whether they are set. */
+  setXeroCredentials(credentials: { clientId: string; clientSecret: string }) {
+    return request<{ ok: boolean }>("/api/integrations/xero/credentials", { method: "PUT", body: JSON.stringify(credentials) });
+  },
+  /** Owner only: remove the stored credentials (disconnects first). */
+  removeXeroCredentials() {
+    return request<{ ok: boolean; removed: boolean }>("/api/integrations/xero/credentials", { method: "DELETE" });
+  },
   chooseXeroOrganisation(tenantId: string) {
     return request<{ ok: boolean; status: string }>("/api/integrations/xero/organisation", { method: "POST", body: JSON.stringify({ tenantId }) });
   },

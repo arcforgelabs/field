@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { boot, seedJobs, sha } from "../../scripts/quote-invoice-proof/email-test-server.mjs";
 import { startFakeXero } from "./fake-xero.js";
+import { TEST_SECRETS_KEY } from "../secrets/test-keyring.js";
 
 const STAFF = { email: "staff.member@example.invalid", password: "xero-sync-staff-password", role: "user", name: "Staff Member" };
 const sleep = (ms) => new Promise((wake) => setTimeout(wake, ms));
@@ -17,7 +18,8 @@ test("issued invoices go to Xero without holding up issuing or email; owners alo
   const { api, signIn, output, base, mail } = await boot(t, {
     extraUsers: [STAFF],
     config: { publicUrl: "https://field.example.invalid" },
-    env: { XERO_CLIENT_ID: xero.clientId, XERO_CLIENT_SECRET: xero.clientSecret, FIELD_XERO_FAKE_BASE_URL: xero.base, FIELD_XERO_SYNC_INTERVAL_MS: "1000" },
+    // The environment override (#112): XERO_CLIENT_ID and XERO_CLIENT_SECRET win over Settings.
+    env: { FIELD_SECRETS_KEY: TEST_SECRETS_KEY, XERO_CLIENT_ID: xero.clientId, XERO_CLIENT_SECRET: xero.clientSecret, FIELD_XERO_FAKE_BASE_URL: xero.base, FIELD_XERO_SYNC_INTERVAL_MS: "1000" },
   });
   const ok = (result, label) => assert.ok(result.status >= 200 && result.status < 300, `${label}: ${result.status} ${JSON.stringify(result.body)}\n${output.join("").slice(-3000)}`);
   const staff = await signIn(STAFF.email, STAFF.password);
@@ -39,6 +41,9 @@ test("issued invoices go to Xero without holding up issuing or email; owners alo
   const connect = await api("/api/integrations/xero/connect", { method: "POST" });
   const back = await xero.authorize(connect.body.url);
   assert.equal((await fetch(`${base}${back.pathname}${back.search}`, { redirect: "manual" })).headers.get("location"), "/#/settings?section=integrations&xero=connected");
+  const overridden = await api("/api/integrations/xero");
+  assert.equal(overridden.body.credentials.source, "environment");
+  assert.equal(overridden.body.credentials.environmentOverride, true, "the screen says the environment is in use");
   const codes = await api("/api/integrations/xero/codes");
   assert.equal(codes.status, 200);
   assert.equal(codes.body.available, true);

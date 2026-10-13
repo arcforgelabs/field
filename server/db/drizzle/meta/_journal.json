@@ -134,6 +134,13 @@
       "when": 1791868356919,
       "tag": "0018_xero_invoice_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791870921310,
+      "tag": "0019_integration_credentials",
+      "breakpoints": true
     }
   ]
 }

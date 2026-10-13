@@ -18,6 +18,7 @@ import { createXeroHttp } from "./client.js";
 import { readXeroSecrets, xeroEndpoints } from "./config.js";
 import { createXeroConnectionService } from "./connection.js";
 import { startFakeXero } from "./fake-xero.js";
+import { testKeyring } from "../secrets/test-keyring.js";
 import { createXeroInvoiceSync, syncBackoffMs } from "./invoice-sync.js";
 
 const REDIRECT = "https://field.example.invalid/api/integrations/xero/callback";
@@ -63,7 +64,7 @@ beforeEach(async () => {
   const logger = { log, warn: log, error: log, info: log };
   const secrets = readXeroSecrets({ XERO_CLIENT_ID: xero.clientId, XERO_CLIENT_SECRET: xero.clientSecret });
   const http = (s = secrets) => createXeroHttp({ clientId: s.clientId, clientSecret: s.clientSecret, endpoints: xeroEndpoints(xero.base), sleep: async () => {} });
-  connection = createXeroConnectionService({ db: testDb.db, orgUid: DEFAULT_ORG_UID, secrets, http, now: () => now, logger });
+  connection = createXeroConnectionService({ db: testDb.db, orgUid: DEFAULT_ORG_UID, secrets, keyring: testKeyring(), http, now: () => now, logger });
   sync = createXeroInvoiceSync({ db: testDb.db, orgUid: DEFAULT_ORG_UID, connection, http: () => http(), blobs: createPostgresBlobStore(), now: () => now, logger, kickDelayMs: 0 });
   issuer = createInvoiceIssueService({ db: testDb.db, orgUid: DEFAULT_ORG_UID, now: () => now });
   await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`insert into quotes (uid, job_id, number, version, status, subtotal, tax_total, total, created_at, updated_at)
@@ -570,6 +571,7 @@ test("the sales account and GST tax type come from the organisation, and a saved
   const unchecked = await connection.updateSettings({ salesAccountCode: "4000" });
   assert.equal(unchecked.salesAccountCode, "4000");
   assert.match(unchecked.warning, /could not check these codes with Xero/);
+  assert.equal((await connection.state()).codesProblem, "XERO_CODES_UNCHECKED", "sends keep waiting until a real check passes");
   const fallback = await (async () => { xero.failNext({ method: "GET", match: /\/TaxRates$/, status: 503, times: 5 }); return connection.codes(); })();
   assert.deepEqual([fallback.available, fallback.code], [false, "XERO_UNAVAILABLE"]);
 });

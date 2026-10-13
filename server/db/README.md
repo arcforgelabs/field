@@ -377,6 +377,15 @@ issued invoice: an id is replaced only when the earlier one is in
 recorded as voided or deleted in Xero. It also adds
 `xero_connections.codes_checked_at` and `codes_problem`, the saved codes
 checked against the connected organisation.
+
+`0019_integration_credentials` (#112) adds `integration_credentials`, an
+integration's credentials per organisation, encrypted by `server/secrets/`
+under `FIELD_SECRETS_KEY` with the key's id, and `integration_audit_events`,
+append-only, who changed an integration and when, never a value. `field_app`
+may read, insert, update and delete credentials, and read and insert audit
+events. Run `rollback/0019_integration_credentials.down.sql` before 0018's:
+it marks a Xero connection whose tokens this release encrypted as needing
+reconnect.
 Nothing else about an issued invoice may change. Run
 `rollback/0018_xero_invoice_sync.down.sql` before 0017's: it restores 0013's
 function before it drops the columns.

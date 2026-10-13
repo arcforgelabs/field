@@ -1,8 +1,14 @@
-// Settings, Integrations, Xero (#93): the owner routes.
+// Settings, Integrations, Xero (#93, #112).
 //
-//   GET  /api/integrations/xero                 the screen: whether each secret
-//        is set, this installation's redirect address, the connection and the
-//        settings. Never a token or a secret.
+//   GET  /api/integrations/xero                 the screen, for anyone signed in
+//        (read-only unless `canManage`): whether each credential is set, when
+//        and by whom, whether the environment overrides them, whether
+//        FIELD_SECRETS_KEY is usable, this installation's redirect address,
+//        the connection, the settings and the latest audit events. Never a
+//        token, a credential or a key.
+//   PUT  /api/integrations/xero/credentials     { clientId, clientSecret }: enter or
+//        replace the Xero app's credentials (write-only; stored encrypted)
+//   DELETE /api/integrations/xero/credentials   remove them (disconnects first)
 //   POST /api/integrations/xero/connect          { url }: Xero's sign-in address
 //   GET  /api/integrations/xero/callback         Xero sends the owner back here
 //        (a browser redirect, so no Field sign-in header): the state recorded
@@ -23,8 +29,10 @@
 //        job's Invoices tab. Any signed-in person may read it; Retry and Send
 //        are the owner routes above.
 //
-// Every route but the callback needs a signed-in owner (requireOwner: with
-// Clerk, a verified owner sign-in; machine tokens never pass).
+// Every route that changes anything needs a signed-in owner (requireOwner:
+// with Clerk, a verified owner sign-in; machine tokens never pass). The
+// screen and a job's Xero state are read-only for everyone else. The callback
+// needs the state an owner's Connect recorded.
 import { XERO_CALLBACK_PATH, xeroRedirectUri } from "./config.js";
 
 export const XERO_STATUS_PATH = "/api/integrations/xero";
@@ -33,6 +41,7 @@ export const XERO_ORGANISATION_PATH = `${XERO_STATUS_PATH}/organisation`;
 export const XERO_DISCONNECT_PATH = `${XERO_STATUS_PATH}/disconnect`;
 export const XERO_SETTINGS_PATH = `${XERO_STATUS_PATH}/settings`;
 export const XERO_CODES_PATH = `${XERO_STATUS_PATH}/codes`;
+export const XERO_CREDENTIALS_PATH = `${XERO_STATUS_PATH}/credentials`;
 export const XERO_PUSH_PREVIEW_PATH = `${XERO_STATUS_PATH}/push/preview`;
 export const XERO_PUSH_PATH = `${XERO_STATUS_PATH}/push`;
 export const XERO_RETRY_PATH = `${XERO_STATUS_PATH}/invoices/:uid/retry`;
@@ -40,6 +49,44 @@ export const XERO_JOB_STATUS_PATH = "/api/jobs/:id/xero";
 export { XERO_CALLBACK_PATH };
 
 const SCREEN = "/#/settings?section=integrations";
+
+/** The permission that lets an API or MCP token read the Xero status (never change it). */
+export const INTEGRATIONS_READ_PERMISSION = "integrations:read";
+
+// An API or MCP token (a service account, or a person's token with Clerk
+// sign-in), not a person in the browser. The break-glass key is the owner's.
+function isMachine(caller) {
+  if (!caller) return false;
+  if (caller.via === "break-glass") return false;
+  return caller.kind === "service" || caller.via === "token";
+}
+
+// Integration settings are not for machine tokens: never their changes, and
+// their status only with the integrations:read permission.
+function machineGate({ read = false } = {}) {
+  return (req, res, next) => {
+    const caller = req.caller;
+    if (!isMachine(caller)) return next();
+    if (read && Array.isArray(caller.permissions) && caller.permissions.includes(INTEGRATIONS_READ_PERMISSION)) return next();
+    return res.status(403).json({ error: "API and MCP tokens cannot use integration settings.", code: "INTEGRATIONS_FORBIDDEN" });
+  };
+}
+
+// What someone who is not an owner may see: the status, never who changed
+// what, when, or the audit history.
+function forReader(status) {
+  const fieldState = (state) => ({ set: Boolean(state?.set) });
+  return {
+    ...status,
+    secretsKey: { configured: Boolean(status.secretsKey?.configured), problem: status.secretsKey?.problem || null },
+    credentials: {
+      ...status.credentials,
+      settings: { clientId: fieldState(status.credentials?.settings?.clientId), clientSecret: fieldState(status.credentials?.settings?.clientSecret) },
+    },
+    history: [],
+    connection: { ...status.connection, connectedBy: null },
+  };
+}
 
 function codeOf(error, fallback) {
   const code = String(error?.code || "");
@@ -50,7 +97,7 @@ function codeOf(error, fallback) {
  * `connection()` returns the connection service (connection.js) or null when
  * the server has no database. `publicUrl()` the configured public address.
  */
-export function registerXeroRoutes(app, { requireAuth, requireOwner, connection, sync = () => null, publicUrl = () => null, actorOf = () => null, logger = console }) {
+export function registerXeroRoutes(app, { requireAuth, requireOwner, isOwner = async () => false, connection, sync = () => null, publicUrl = () => null, actorOf = () => null, logger = console }) {
   const service = (res) => {
     const found = connection();
     if (!found) res.status(503).json({ error: "Xero needs the database, which this server does not have.", code: "XERO_NO_DATABASE" });
@@ -63,19 +110,21 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
     res.status(statusCode).json({ error: error?.reason || (statusCode >= 500 && error?.name !== "XeroError" ? "Xero could not be reached from Field. Try again shortly." : error?.message), code: codeOf(error, "XERO_ERROR") });
   };
 
-  app.get(XERO_STATUS_PATH, requireAuth, requireOwner, async (req, res) => {
+  app.get(XERO_STATUS_PATH, requireAuth, machineGate({ read: true }), async (req, res) => {
     const xero = service(res);
     if (!xero) return;
     try {
       const { redirectUri, configured } = redirect();
+      const owner = !isMachine(req.caller) && Boolean(await isOwner(req));
+      const status = await xero.status();
       res.setHeader("Cache-Control", "no-store");
-      res.json({ ok: true, redirectUri, publicUrlConfigured: configured, ...(await xero.status()) });
+      res.json({ ok: true, canManage: owner, redirectUri, publicUrlConfigured: configured, ...(owner ? status : forReader(status)) });
     } catch (error) {
       fail(res, error, "status");
     }
   });
 
-  app.post(XERO_CONNECT_PATH, requireAuth, requireOwner, async (req, res) => {
+  app.post(XERO_CONNECT_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
     const xero = service(res);
     if (!xero) return;
     try {
@@ -107,7 +156,7 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
     }
   });
 
-  app.post(XERO_ORGANISATION_PATH, requireAuth, requireOwner, async (req, res) => {
+  app.post(XERO_ORGANISATION_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
     const xero = service(res);
     if (!xero) return;
     try {
@@ -117,7 +166,7 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
     }
   });
 
-  app.post(XERO_DISCONNECT_PATH, requireAuth, requireOwner, async (req, res) => {
+  app.post(XERO_DISCONNECT_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
     const xero = service(res);
     if (!xero) return;
     try {
@@ -127,14 +176,35 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
     }
   });
 
-  app.get(XERO_CODES_PATH, requireAuth, requireOwner, async (_req, res) => {
+  app.put(XERO_CREDENTIALS_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
+    const xero = service(res);
+    if (!xero) return;
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      res.json({ ok: true, ...(await xero.setCredentials({ clientId: req.body?.clientId, clientSecret: req.body?.clientSecret }, { actor: actorOf(req) })) });
+    } catch (error) {
+      fail(res, error, "saving the credentials");
+    }
+  });
+
+  app.delete(XERO_CREDENTIALS_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
+    const xero = service(res);
+    if (!xero) return;
+    try {
+      res.json({ ok: true, ...(await xero.removeCredentials({ actor: actorOf(req) })) });
+    } catch (error) {
+      fail(res, error, "removing the credentials");
+    }
+  });
+
+  app.get(XERO_CODES_PATH, requireAuth, machineGate(), requireOwner, async (_req, res) => {
     const xero = service(res);
     if (!xero) return;
     res.setHeader("Cache-Control", "no-store");
     res.json({ ok: true, ...(await xero.codes()) });
   });
 
-  app.put(XERO_SETTINGS_PATH, requireAuth, requireOwner, async (req, res) => {
+  app.put(XERO_SETTINGS_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
     const xero = service(res);
     if (!xero) return;
     try {
@@ -153,7 +223,7 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
   };
   const uids = (value) => (Array.isArray(value) ? value.filter((uid) => typeof uid === "string" && /^inv_[0-9A-HJKMNP-TV-Z]{26}$/.test(uid)).slice(0, 200) : null);
 
-  app.post(XERO_PUSH_PREVIEW_PATH, requireAuth, requireOwner, async (req, res) => {
+  app.post(XERO_PUSH_PREVIEW_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
     const xero = syncService(res);
     if (!xero) return;
     try {
@@ -168,7 +238,7 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
     }
   });
 
-  app.post(XERO_PUSH_PATH, requireAuth, requireOwner, async (req, res) => {
+  app.post(XERO_PUSH_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
     const xero = syncService(res);
     if (!xero) return;
     try {
@@ -180,7 +250,7 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
     }
   });
 
-  app.post(XERO_RETRY_PATH, requireAuth, requireOwner, async (req, res) => {
+  app.post(XERO_RETRY_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
     const xero = syncService(res);
     if (!xero) return;
     try {

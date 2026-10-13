@@ -59,10 +59,13 @@ credential value anywhere public.
   never in the repository, a log, an issue or a pull request. Name the
   variable, never its value.
 - Credentials Field stores at runtime stay inside the installation. Gmail OAuth
-  refresh tokens are in its data directory, written with mode `0600`. Xero
-  OAuth tokens are in its PostgreSQL, encrypted with AES-256-GCM under a key
-  derived from `XERO_CLIENT_SECRET` (`docs/XERO.md`). Neither is ever sent to
-  the browser or written to a log.
+  refresh tokens are in its data directory, written with mode `0600`.
+  Integration credentials and tokens (Xero) are in its PostgreSQL, per
+  organisation, encrypted with AES-256-GCM under `FIELD_SECRETS_KEY`, a
+  deployment secret of its own; a missing or wrong key fails closed
+  (`docs/INTEGRATIONS.md`). They are write-only in Settings: never sent to
+  the browser, a log, Sentry or MCP output. Every change is an audit event
+  without the value.
 - Surveyor artifacts (`.artifacts/`) are customer data. Never commit them, and
   never attach raw evidence to an issue.
 - Errors, traces and logs sent to Sentry pass through `shared/sentry-scrub.js`
