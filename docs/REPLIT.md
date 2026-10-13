@@ -30,7 +30,7 @@ Secrets, which reach the app as environment variables:
 | `FIELD_CONFIG_JSON` | The whole config object as one JSON value, shaped like `config.json.example`: `authToken`, `publicUrl`, `mail` (sender and `deliveryPolicy`), `googleOAuth` (`clientId`, `clientSecret`), `googleDriveFolderId`, `bootstrapUsers`, `mcp`, and `businessProfile` (your trading name, ABN, address, contact details and bank account; README "Business profile"). Leave out `port` and `dataDir`. When it is set, `FIELD_CONFIG` and `config.json` are ignored, and invalid JSON stops Field at boot. |
 | `FIELD_TOKEN` | Optional. Overrides `authToken`. |
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | Optional. The service account key JSON itself (paste the whole file). A file path still works elsewhere, and `googleServiceAccountKey` in config can hold either. |
-| `FIELD_SECRETS_KEY` | The key that encrypts integration credentials and tokens (Xero), 32 random bytes in base64. Without it, integrations stay off. `FIELD_SECRETS_KEY_PREVIOUS` holds the earlier key while rotating (`docs/INTEGRATIONS.md`). |
+| `FIELD_SECRETS_KEY` | The key that encrypts integration credentials and tokens (Xero): a random password of at least 40 characters from Bitwarden's generator (or 32 random bytes in base64). Without it, integrations stay off. `FIELD_SECRETS_KEY_PREVIOUS` holds the earlier key while rotating (`docs/INTEGRATIONS.md`). |
 | `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET` | Optional override. The Xero app's credentials are entered in Settings, Integrations, Xero; when both of these are set they win, and the screen says so (`docs/XERO.md`). |
 
 Every value in `FIELD_CONFIG_JSON` is treated as secret, so keep it a Secret,

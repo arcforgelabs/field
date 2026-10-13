@@ -2,7 +2,9 @@
 // integration credentials (an app's client id and client secret) and OAuth
 // tokens, per organisation, in PostgreSQL.
 //
-//   FIELD_SECRETS_KEY           the current key: 32 random bytes, base64 or hex
+//   FIELD_SECRETS_KEY           the current key: a random string of at least
+//                               40 characters (a password manager's generator),
+//                               or 32 random bytes in base64 or hex
 //                               (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`)
 //   FIELD_SECRETS_KEY_PREVIOUS  earlier keys, comma-separated: read with them,
 //                               write with the current one (rotation, docs/INTEGRATIONS.md)
@@ -15,7 +17,7 @@
 // Fails closed: without a usable FIELD_SECRETS_KEY nothing can be stored or
 // read, and the integration shows that it needs setting up. Errors name the
 // variable and a code, never a key or a value.
-import { createHash } from "node:crypto";
+import { createHash, hkdfSync } from "node:crypto";
 
 export class SecretsKeyError extends Error {
   constructor(code, message) {
@@ -25,13 +27,28 @@ export class SecretsKeyError extends Error {
   }
 }
 
+// A generated password (Bitwarden's generator, at least 40 characters) is
+// accepted as well as raw key bytes: HKDF-SHA256 turns it into the 32-byte
+// key. It must be random, not a memorable phrase: HKDF does not slow down
+// guessing the way a password hash does, so the strength is the string's own.
+export const MIN_KEY_STRING_LENGTH = 40;
+const KEY_DERIVATION_LABEL = "field-secrets-v1";
+
 function decodeKey(raw) {
   const text = String(raw || "").trim();
   if (!text) return null;
+  // 32 bytes in hex or base64 are used as they are, so keys made that way
+  // keep their ids and every value they stored stays readable.
   if (/^[0-9a-fA-F]{64}$/.test(text)) return Buffer.from(text, "hex");
   if (/^[A-Za-z0-9+/_-]{42,44}={0,2}$/.test(text)) {
     const bytes = Buffer.from(text.replace(/-/g, "+").replace(/_/g, "/"), "base64");
     if (bytes.length === 32) return bytes;
+    // Padding marks a base64 key (a password generator does not end in
+    // "="): one that is not 32 bytes is a mistyped key, not a password.
+    if (text.endsWith("=")) return false;
+  }
+  if (text.length >= MIN_KEY_STRING_LENGTH) {
+    return Buffer.from(hkdfSync("sha256", Buffer.from(text, "utf8"), KEY_DERIVATION_LABEL, KEY_DERIVATION_LABEL, 32));
   }
   return false;
 }
@@ -85,8 +102,8 @@ export function loadSecretsKeyring(env = process.env) {
 
 export const MESSAGES = Object.freeze({
   SECRETS_KEY_MISSING: "FIELD_SECRETS_KEY is not set, so Field cannot store or read integration credentials (docs/INTEGRATIONS.md).",
-  SECRETS_KEY_INVALID: "FIELD_SECRETS_KEY is not 32 bytes in base64 or hex, so Field cannot store or read integration credentials (docs/INTEGRATIONS.md).",
-  SECRETS_KEY_PREVIOUS_INVALID: "FIELD_SECRETS_KEY_PREVIOUS holds a value that is not a 32-byte key in base64 or hex (docs/INTEGRATIONS.md).",
+  SECRETS_KEY_INVALID: "FIELD_SECRETS_KEY is too short. Use a random string of at least 40 characters from a password generator, or 32 bytes in base64 or hex. Until then Field cannot store or read integration credentials (docs/INTEGRATIONS.md).",
+  SECRETS_KEY_PREVIOUS_INVALID: "FIELD_SECRETS_KEY_PREVIOUS holds a value that is too short to be a key: each must be a random string of at least 40 characters, or 32 bytes in base64 or hex (docs/INTEGRATIONS.md).",
   SECRETS_KEY_UNKNOWN: "A stored secret was written with a key Field does not have now. Put the earlier key in FIELD_SECRETS_KEY_PREVIOUS, or enter the credentials and connect again.",
   SECRET_UNREADABLE: "A stored secret could not be decrypted with its key.",
 });
