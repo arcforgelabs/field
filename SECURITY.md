@@ -58,8 +58,11 @@ credential value anywhere public.
   `FIELD_CONFIG_JSON`, `DATABASE_URL`, and the others in `docs/REPLIT.md`),
   never in the repository, a log, an issue or a pull request. Name the
   variable, never its value.
-- Credentials Field stores at runtime, such as Gmail OAuth refresh tokens, stay
-  inside the installation's data directory, written with mode `0600`.
+- Credentials Field stores at runtime stay inside the installation. Gmail OAuth
+  refresh tokens are in its data directory, written with mode `0600`. Xero
+  OAuth tokens are in its PostgreSQL, encrypted with AES-256-GCM under a key
+  derived from `XERO_CLIENT_SECRET` (`docs/XERO.md`). Neither is ever sent to
+  the browser or written to a log.
 - Surveyor artifacts (`.artifacts/`) are customer data. Never commit them, and
   never attach raw evidence to an issue.
 - Errors, traces and logs sent to Sentry pass through `shared/sentry-scrub.js`

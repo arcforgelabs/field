@@ -60,6 +60,20 @@ test("job segments are kept when they are UUIDs and redacted when they could be 
   assert.equal(scrubText(`/app/data/2026-10-12/${JOB_UUID}/job.json`), `/app/data/2026-10-12/${JOB_UUID}/job.json`);
 });
 
+test("free text loses credentials: bearer tokens, JSON web tokens and OAuth values (#93)", () => {
+  // A fake JSON web token, joined here so secret scanners do not take the test for a leak.
+  const jwt = ["eyJhbGciOiJSUzI1NiJ9", "eyJzdWIiOiJmYWtlIn0", "c2lnbmF0dXJlLWZha2U"].join(".");
+  assert.equal(scrubText(`fetch failed: Authorization: Bearer ${jwt}`), "fetch failed: Authorization: Bearer [token]");
+  assert.equal(scrubText(`token ${jwt} expired`), "token [token] expired");
+  assert.equal(scrubText("grant_type=refresh_token&refresh_token=fake-refresh-0123456789abcdef"), "grant_type=refresh_token&refresh_token=[token]");
+  assert.equal(scrubText('{"access_token": "fake-access-0123456789", "expires_in": 1800}'), '{"access_token": "[token]", "expires_in": 1800}');
+  assert.equal(scrubText("client_secret=fake-secret-value-123 code=fake-code-abcdef"), "client_secret=[token] code=[token]");
+  assert.equal(scrubText("Basic ZmFrZS1jbGllbnQ6ZmFrZS1zZWNyZXQ="), "Basic [token]");
+  // Codes and ordinary words stay.
+  assert.equal(scrubText("[xero] refresh failed (XERO_REFRESH_REJECTED)"), "[xero] refresh failed (XERO_REFRESH_REJECTED)");
+  assert.equal(scrubText("status code 429"), "status code 429");
+});
+
 test("long text is cut short", () => {
   const text = scrubText("x".repeat(5000));
   assert.ok(text.length < 1100);

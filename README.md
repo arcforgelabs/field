@@ -31,6 +31,7 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `docs/PRICING_ENGINE.md` | Target data model for the price book, quotes and invoices |
 | `docs/CLERK_SIGN_IN.md` | Clerk sign-in runbook and cutover |
 | `docs/GMAIL_SENDING.md` | How quote and invoice email is sent, and how to restore sending |
+| `docs/XERO.md` | Connecting your own Xero app, and how Field creates its invoices in Xero |
 | `docs/CATALOG_BACKUP_RESTORE.md` | Backing up and restoring the price catalogue |
 | `docs/REMOTE_MCP.md` | The OAuth MCP surface AI agents and other systems connect through |
 | `docs/concepts/surveyor.md` | Surveyor, Field's before/after proof lane |

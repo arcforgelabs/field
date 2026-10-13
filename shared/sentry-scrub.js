@@ -9,7 +9,9 @@
 // key names customer, contact, address, money or credential details. What is
 // rewritten in free text (error messages, URLs, paths, breadcrumbs, log
 // lines): email addresses, document numbers, money amounts, Australian phone
-// numbers, BSBs, query strings, and job folder or job route segments that are
+// numbers, BSBs, query strings, credentials (a bearer token, a JSON web token,
+// an OAuth token or code after its name, as Xero's are), and job folder or
+// job route segments that are
 // not UUIDs, route parameters or single words (older job folders were named
 // after the site address). Long strings are cut short.
 
@@ -39,6 +41,12 @@ const JOB_SEGMENT = /(\/\d{4}-\d{2}-\d{2}\/|\/jobs\/)([^/\s?#"'<>]+)/gi;
 const ROUTE_WORD = /^[a-z]+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UI_ATTRIBUTE = /(\[[\w-]+=)"[^"]*"\]/g;
+// Credentials in free text (#93): "Bearer <token>", a JSON web token (Xero's
+// access tokens are), and an OAuth value after its name (refresh_token=...,
+// "access_token": "...", client_secret, code).
+const BEARER = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi;
+const JWT = /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/g;
+const OAUTH_VALUE = /\b(access_token|refresh_token|id_token|client_secret|code_verifier|code)("?\s*[:=]\s*"?)[^\s"&,;}]{6,}/gi;
 
 const MAX_TEXT = 1000;
 const MAX_VALUE = 400;
@@ -46,6 +54,9 @@ const MAX_VALUE = 400;
 export function scrubText(value, max = MAX_TEXT) {
   if (typeof value !== "string" || !value) return value;
   let text = value
+    .replace(BEARER, "$1 [token]")
+    .replace(JWT, "[token]")
+    .replace(OAUTH_VALUE, "$1$2[token]")
     .replace(EMAIL, "[email]")
     .replace(QUERY, "$1?[query]")
     .replace(JOB_SEGMENT, (match, prefix, segment) => (UUID.test(segment) || segment.startsWith(":") || ROUTE_WORD.test(segment) ? match : `${prefix}[job]`))
