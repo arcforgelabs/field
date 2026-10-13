@@ -175,11 +175,13 @@ Client development lives in `client/`.
 
 ## Deploying
 
-- **Replit:** `.replit`, `scripts/replit-build.sh` and
-  `scripts/replit-start.sh` run Field as a published app on a Reserved VM;
-  `docs/REPLIT.md` is the runbook (secrets, PostgreSQL, durable storage, Clerk,
-  publishing). `scripts/github-sync.sh` keeps a Replit workspace in step with
-  GitHub.
+- **Replit:** `.replit` and `scripts/replit-deploy.sh` run Field as a
+  published app on a Reserved VM, built from a commit fetched from GitHub
+  (`main`, or a pinned ref), not from the workspace's files;
+  `scripts/replit-build.sh` and `scripts/replit-start.sh` build and start a
+  tree. `docs/REPLIT.md` is the runbook (secrets, PostgreSQL, durable storage,
+  Clerk, publishing, rollback). `scripts/github-sync.sh` keeps a Replit
+  workspace in step with GitHub.
 - **Docker:** `docker build .` produces a self-contained image that listens on
   19200 as an unprivileged user. Give it `DATABASE_URL`, a config
   (`FIELD_CONFIG_JSON`, or a mounted `config.json` named by `FIELD_CONFIG`),

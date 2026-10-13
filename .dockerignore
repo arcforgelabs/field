@@ -15,3 +15,4 @@ config.local.json
 service-account.json
 *.log
 *.example
+.field-deploy

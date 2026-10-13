@@ -9,7 +9,9 @@ installation on Replit, for people and agents alike. Replit's Agent reads
 Field is a quoting and invoicing app: catalogue, quote builder, quote and
 invoice PDFs, and sending them by email. It does no AI work of its own.
 
-- Run and deploy with `scripts/replit-start.sh` (build: `scripts/replit-build.sh`).
+- Run with `scripts/replit-start.sh` (build: `scripts/replit-build.sh`). The
+  published app is built and started by `scripts/replit-deploy.sh` from a
+  commit fetched from GitHub ("Publishing").
 - Runtime: Node 24 (`.replit` module `nodejs-24`), matching CI and the Dockerfile.
 - Field keeps its state under its data directory (`FIELD_DATA`, default
   `data/`). A published Replit app does not keep files between publishes, so
@@ -695,10 +697,11 @@ request traces still arrive, without route names. Profiling
 (`@sentry/profiling-node`) is not included: it needs a native binary in every
 build, and tracing already shows which routes are slow.
 
-Releases: `scripts/replit-build.sh` writes the build's commit to
-`.field-revision` (the last commit that changed files, so Replit's empty
-"Published your App" commits are skipped), and `scripts/replit-start.sh`
-exports it as `FIELD_REVISION`. Server and browser events carry it as their
+Releases: the deployment build (`scripts/replit-deploy.sh`) writes the
+commit it fetched from GitHub to `.field-revision`, and its start exports it
+as `FIELD_REVISION`. (`scripts/replit-build.sh` run in the workspace writes
+the last commit that changed files, so Replit's empty "Published your App"
+commits are skipped.) Server and browser events carry it as their
 release. The client bundle ships public source maps, so Sentry reads browser
 stack traces against the real source with no upload token.
 
@@ -724,40 +727,82 @@ issues automatically; see issue #46 for how maintainers triage Sentry issues.
 Publish as a Reserved VM (Field sends scheduled emails in-process, so it must
 stay up), with sharing set to Public (Field does its own sign-in).
 
-To deploy a change merged on GitHub:
+A publish deploys GitHub, not the workspace's files. Replit publishes a
+snapshot of the workspace, so the deployment's build command
+(`scripts/replit-deploy.sh build`, `.replit` `[deployment]`) fetches the
+deploy ref from the public repository into `.field-deploy/`, builds it there
+and records its commit. The run command (`scripts/replit-deploy.sh start`)
+starts Field from `.field-deploy/`. The default ref is the tip of `main`.
 
-1. In the workspace shell, bring it to `main`. Every publish leaves an
-   empty "Published your App" commit on the workspace's `main`; never push
-   those commits.
-   - `scripts/github-sync.sh pull` does this in one command, with no token
-     ("GitHub"). If it stops on a local commit that changes files, check that
-     commit by hand as below.
-   - `git fetch origin && git status --short` must list nothing.
-   - `git cherry -v origin/main HEAD` lists each commit only the workspace
-     has. `-` means its change is already on GitHub. `+` needs a look unless
-     it is a "Published your App" commit; stop and open a PR for anything
-     else.
-   - Keep the current state, then move `main`:
-     `git branch replit-pre-deploy-$(date +%Y%m%d-%H%M) HEAD && git switch -C main origin/main`.
-     `switch -C` refuses rather than overwrite uncommitted files, and the
-     backup branch keeps the old commits; delete it once the publish is
-     verified.
-2. `bash scripts/replit-build.sh` must exit 0.
-3. Publishing > Republish. When Replit says it is done, Field still needs about
-   a minute to rebuild its data directory from PostgreSQL; until then requests
-   get "Internal Server Error". `GET /health` answers once it is up.
+- The fetch needs no token. If it fails, the build fails and the publish
+  stops; it never deploys the workspace copy instead.
+- It only writes `.field-deploy/` (gitignored). It never resets or deletes
+  the workspace's own files, wherever it runs.
+- `.field-deploy/` holds no `data/`, so the published app rebuilds its data
+  directory from PostgreSQL alone. The workspace's own `data/` is still in
+  Replit's snapshot, but nothing reads it, so boot quarantines nothing from it
+  (#87).
+- The build log names what it deployed: `[deploy] fetched main at <commit>`,
+  then `[deploy] built github main at <commit>`. The start log repeats it.
+
+To deploy what is merged on `main`:
+
+1. Publishing > Republish. Nothing needs pulling first.
    - **If the publish stops at "Development database changes detected", press
      Cancel.** Never pick an option there. The workspace and the published app
      have separate databases, and Replit offers to make production's tables
      match the workspace's; when the workspace is behind, every option drops
      or renames production tables. Field migrates production itself at boot.
-4. Once `/health` answers, bring the workspace database to the same level:
+2. When Replit says it is done, Field still needs about a minute to rebuild
+   its data directory from PostgreSQL; until then requests get "Internal
+   Server Error". `GET /health` answers once it is up. Its `build` shows what
+   is live: `revision` (the commit), `ref` (`main`, or the pinned ref) and
+   `source` (`github`, or `workspace` for an emergency build). Check that
+   `revision` is the commit you meant to deploy (the tip of `main` on
+   GitHub).
+3. Bring the workspace to the same level, so the next publish does not stop
+   at the prompt above: `scripts/github-sync.sh pull`, then
    `npm run db:apply`, then `npm run db:smoke` must report `"pending":0`. Do
-   this after each publish, not before: the workspace database has to match
-   production at the next publish, and production only gains a release's
-   migrations when that release boots. If a publish was cancelled at the
-   prompt above, apply only production's migrations instead, from a checkout
-   of the release production runs.
+   this after each publish, not before: production only gains a release's
+   migrations when that release boots. If production runs a pinned ref
+   instead of `main`, apply only that ref's migrations, from a checkout of
+   it.
+
+`.replit` and `scripts/replit-deploy.sh` are the only files a publish takes
+from the workspace. Before the first publish with them, pull the workspace
+once so its `.replit` has the deploy commands. When a commit changes them, the build log says
+`note: ... differs from main`; pull the workspace before the next publish so
+the new ones take effect.
+
+### Pinning a release and rolling back
+
+Set the deployment secret `FIELD_DEPLOY_REF` (Publishing > Adjust settings)
+to a branch, a tag or a full 40-character commit hash, then publish. To roll
+back, set it to the older commit or tag and publish; to follow `main` again,
+remove it and publish. Use a secret, not a deployment Configuration value: a
+Configuration value is written into `.replit`.
+
+Field's database migrations only move forward. An older release runs against
+the newer schema, which works while the migrations are additive (so far they
+are); check what the skipped commits migrated before you roll back.
+
+Replit's documentation does not say whether deployment secrets reach the build
+command. The start log checks it: `WARNING: FIELD_DEPLOY_REF is '<ref>' now,
+but this build fetched 'main'` means the build did not see the secret. Then
+put the ref in the build command itself, in `.replit`:
+`build = ["env", "FIELD_DEPLOY_REF=<ref>", "bash", "scripts/replit-deploy.sh", "build"]`.
+
+A fork sets `FIELD_DEPLOY_REPO` to its own repository's `https://` URL; the
+fetch is anonymous, so the repository must be public.
+
+### Emergency: publish the workspace files
+
+`FIELD_DEPLOY_FROM_WORKSPACE=1` (deployment secret, or in the build command as
+above) builds the workspace's files as they are, uncommitted edits included,
+with no fetch. Files `.gitignore` excludes (`data/`, `node_modules/`, config)
+are left out. `/health` then shows `source: "workspace"`. Use it only when
+GitHub cannot be reached or a fix cannot wait for a merge, and remove it at
+the next publish.
 
 Production secrets (Publishing > Adjust settings) are separate from the
 workspace's: `FIELD_STORAGE=postgres`, `FIELD_CONFIG_JSON`, the Clerk keys,
@@ -782,7 +827,8 @@ The workspace tracks `main` on the GitHub repository
 upstream project; your fork otherwise).
 
 - Nothing commits to `main` directly, here or on GitHub. Work on a branch,
-  open a PR, merge on GitHub, then pull.
+  open a PR, merge on GitHub, then pull. Publishing does not need the pull
+  ("Publishing"); the workspace's database and its `.replit` do.
 - `scripts/github-sync.sh status`: remote, ahead/behind, and whether
   `GITHUB_TOKEN` works.
 - `scripts/github-sync.sh pull`: fast-forward `main` from GitHub. It needs no

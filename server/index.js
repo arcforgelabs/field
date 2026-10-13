@@ -61,6 +61,7 @@ import { resolveTrustProxy } from "./auth/trust-proxy.js";
 import multer from "multer";
 import { assertNoRemovedIntegrationConfig } from "./config-guard.js";
 import { loadFieldConfig, resolveFieldPort } from "./runtime-config.js";
+import { deployedBuildStatus } from "./deployed-build.js";
 import { applyStoredGmailOAuthUsers, saveGmailOAuthUser } from "./gmail-oauth-store.js";
 import { hasGoogleServiceAccountKey } from "./google-service-account.js";
 import {
@@ -635,6 +636,8 @@ if (durableStorage) app.use(durableStorage.middleware());
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
+    // The running commit, so an operator can confirm what a publish deployed.
+    build: deployedBuildStatus(),
     sentry: sentryPublicStatus(),
     // Public: storage state only. Counts, timestamps and the last error are
     // admin-only (GET /api/storage/status). The R2 replica (#12) reports its

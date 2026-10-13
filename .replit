@@ -19,10 +19,13 @@ externalPort = 80
 
 # Reserved VM: Field sends scheduled quote and invoice emails in-process, so it
 # must stay up (an autoscale deployment would sleep and miss them).
+# The deployment builds and runs a commit fetched from GitHub (main, or
+# FIELD_DEPLOY_REF) in .field-deploy/, not the workspace files
+# (scripts/replit-deploy.sh, docs/REPLIT.md "Publishing").
 [deployment]
 deploymentTarget = "vm"
-build = ["bash", "scripts/replit-build.sh"]
-run = ["bash", "scripts/replit-start.sh"]
+build = ["bash", "scripts/replit-deploy.sh", "build"]
+run = ["bash", "scripts/replit-deploy.sh", "start"]
 ignorePorts = false
 
 [userenv]
