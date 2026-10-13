@@ -8,7 +8,7 @@ import {
   renderImportSql,
   resolveFieldDataRoot,
   summarizeBundle,
-} from "../server/db/recording-backfill.js";
+} from "../server/db/job-backfill.js";
 
 const execFileAsync = promisify(execFile);
 const DB_ROOT = resolve(import.meta.dirname, "../server/db");
@@ -79,10 +79,10 @@ function parseArgs(args) {
 function printHelp() {
   console.log(`
 Usage:
-  node apps/field/scripts/backfill-db.js [options]
+  node scripts/backfill-db.js [options]
 
 Options:
-  --source-root <path>       Recording data root. Defaults to FIELD_DATA, config.dataDir, or apps/field/data.
+  --source-root <path>       Recording data root. Defaults to config.json dataDir, FIELD_DATA, or data/.
   --recording <id>           Limit import to one recording directory or legacy recording ID.
   --limit <n>                Limit the number of recording directories scanned.
   --emit-sql <path|->        Write SQL to a file or stdout.
@@ -95,9 +95,9 @@ Options:
   --help                     Show this message.
 
 Examples:
-  node apps/field/scripts/backfill-db.js --source-root docs/reference-recordings/processed
-  node apps/field/scripts/backfill-db.js --source-root /opt/apps/field/data --emit-sql /tmp/field-backfill.sql
-  node apps/field/scripts/backfill-db.js --source-root /opt/apps/field/data --include-schema --apply --seed-backup-jobs
+  node scripts/backfill-db.js --source-root docs/reference-recordings/processed
+  node scripts/backfill-db.js --source-root /path/to/field/data --emit-sql /tmp/field-backfill.sql
+  node scripts/backfill-db.js --source-root /path/to/field/data --include-schema --apply --seed-backup-jobs
 `.trim());
 }
 

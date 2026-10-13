@@ -37,10 +37,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<{ message: string; undo?: () => void } | null>(null);
   const toastTimer = useRef<number | null>(null);
 
-  const showToast = useCallback((message: string, undo?: () => void) => {
+  const showToast = useCallback((message: string, undo?: () => void, options?: { durationMs?: number }) => {
     setToast({ message, undo });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), undo ? 6000 : 3200);
+    toastTimer.current = window.setTimeout(() => setToast(null), options?.durationMs ?? (undo ? 6000 : 3200));
   }, []);
   const api = useMemo<ShellApi>(() => ({ newQuote: () => setNewQuoteOpen(true), toast: showToast }), [showToast]);
 

@@ -2,7 +2,8 @@
 // invoice its state and the one thing to do next (send it, record the
 // payment, or send the receipt).
 import { useState } from "react";
-import { Check, Eye, FileMinus, MoreHorizontal, Send, Undo2, Wallet } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Check, Eye, FileMinus, Mail, MoreHorizontal, Send, Undo2, Wallet } from "lucide-react";
 import type { MilestoneInvoice, RecordingDetail } from "@/lib/types";
 import { api } from "@/lib/api";
 import { openDocumentPdf } from "@/lib/open-document";
@@ -27,6 +28,13 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
   const [crediting, setCrediting] = useState<MilestoneInvoice | null>(null);
   const pdf = (invoice: MilestoneInvoice, type: "invoice" | "receipt") => void openDocumentPdf(api.quotePdfUrl(meta.id, undefined, invoice.milestoneIndex, type), shell.toast);
   const credit = (invoice: MilestoneInvoice): MenuItem => ({ label: "Credit and reissue", icon: <FileMinus />, onSelect: () => setCrediting(invoice) });
+  const navigate = useNavigate();
+  // An invoice issued in place of a credited one: its adjustment note can
+  // also go on its own, in the credited invoice's conversation.
+  const emailNote = (invoice: MilestoneInvoice): MenuItem[] => {
+    const number = invoice.issuedRevision?.creditNoteNumber;
+    return number ? [{ label: `Email adjustment note ${number}`, icon: <Mail />, onSelect: () => navigate(`/jobs/${meta.id}/email-editor?purpose=adjustment-note&creditNote=${encodeURIComponent(number)}`) }] : [];
+  };
 
   if (!invoices.length) {
     const schedule = buildVisiblePaymentSchedule(meta.paymentSchedule || null, [], null);
@@ -70,11 +78,13 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
           ...(invoice.status === "authorised" ? [
             { label: "Resend invoice", icon: <Send />, onSelect: () => onSend(invoice.milestoneIndex, "invoice") } as MenuItem,
             credit(invoice),
+            ...emailNote(invoice),
             { label: "Mark as not sent", icon: <Undo2 />, onSelect: () => run("unsent", () => api.markMilestoneUnsent(meta.id, invoice.milestoneIndex), `${invoice.invoiceNumber} back to not sent`) } as MenuItem,
           ] : []),
           ...(invoice.status === "paid" ? [
             { label: "Preview receipt", icon: <Eye />, onSelect: () => pdf(invoice, "receipt") } as MenuItem,
             credit(invoice),
+            ...emailNote(invoice),
             { label: "Mark as unpaid", icon: <Undo2 />, onSelect: () => run("unpaid", () => api.markMilestoneUnpaid(meta.id, invoice.milestoneIndex), `${invoice.invoiceNumber} marked unpaid`) } as MenuItem,
           ] : []),
         ];

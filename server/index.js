@@ -29,8 +29,9 @@ import {
 } from "./documents/email-attachments.js";
 import { recordAttachedDocumentsEmailed } from "./documents/delivery.js";
 import { applyMergeFields, applyMergeFieldsToText } from "../shared/email-templates.js";
-import { buildEmailMergeValues } from "./email-merge-fields.js";
-import { jobQuoteForEmail, registerEmailComposeRoutes } from "./email-compose-routes.js";
+import { adjustmentNoteValues, buildEmailMergeValues } from "./email-merge-fields.js";
+import { PENDING_NUMBER_TEXT, isDraftInvoice, jobQuoteForEmail, readEmailDocumentView, registerEmailComposeRoutes, withPendingNumber } from "./email-compose-routes.js";
+import { resolveReplyThread } from "./email-threads.js";
 import { CREDIT_NOTE_ON_REISSUE_CHOICES, createBusinessSettingsService } from "./invoices/business-settings.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
@@ -148,14 +149,19 @@ import {
   updateJobQuote,
   voidJobMilestonePayment,
 } from "./job-actions.js";
-import { GMAIL_SEND_SCOPES, assertAllowedQuoteRecipients, hasServiceAccountGmail, resetGmailClient, resolveGmailDelegatedUser, resolveGmailLoginHint, sendJobEmail } from "./send-quote-email.js";
+import { GMAIL_SEND_SCOPES, assertAllowedQuoteRecipients, composeDocumentEmail, composeJobEmail, findSentMessageInMailbox, formatDeliveryMessageId, hasServiceAccountGmail, resetGmailClient, resolveGmailDelegatedUser, resolveGmailLoginHint, resolveMailSender, resolveMessageIdHost, sendJobEmail, sendTestEmail } from "./send-quote-email.js";
 import { GOOGLE_CONTACTS_READONLY_SCOPE, googleContactsHttpError, listGoogleContacts, resetGoogleContactsCache } from "./google-contacts.js";
 import { appendSentEmailArchive, readSentEmailArchive } from "./sent-email-archive.js";
 import { apiCachePolicy } from "./api-cache-policy.js";
 import {
+  RESEND_SETTLE_MS,
+  classifyDeliveryFailure,
   createScheduledEmail,
   listScheduledEmails,
   rescheduleEmailDraft,
+  saveEmailDraft,
+  discardEmailDraft,
+  normalizeHoldSeconds,
   returnScheduledEmailToDraft,
   sendEmailDraftNow,
   startScheduledEmailScheduler,
@@ -1411,6 +1417,64 @@ function emailAttachmentErrorBody(error) {
   return { error: error.message, code: error.code, ...(error.details || {}) };
 }
 
+// A held send (Undo send) is due in seconds; the scheduler is woken for it
+// rather than waiting for its next poll.
+function wakeSchedulerAfter(holdSeconds) {
+  const timer = setTimeout(() => { void scheduledEmailScheduler?.runNow?.(); }, Math.max(0, Number(holdSeconds) || 0) * 1000 + 300);
+  timer.unref?.();
+}
+
+// Send a test to me: the email as it would go, to the signed-in person only,
+// "[Test]" in the subject. The document this email is for attaches as it is
+// stored when it is issued, else as a preview copy (PREVIEW-…pdf). Nothing
+// is issued, queued, archived or recorded as an event.
+async function sendTestCopy({ req, job, payload, documentType = null, loadedDocuments = [], uploads = [] }) {
+  const meta = normalizeJobMeta(job.meta);
+  const attachments = [];
+  let view = { documentType: null, meta, quote: null, milestoneInvoice: null };
+  if (documentType) {
+    const read = await readEmailDocumentView({ job, meta, documentType, milestoneIndex: payload?.milestoneIndex ?? null, version: payload?.version ?? null });
+    view = withPendingNumber(read, PENDING_NUMBER_TEXT);
+    const pdf = await readJobDocumentPdf({ job, documentType, version: payload?.version ?? null, milestoneIndex: payload?.milestoneIndex ?? null });
+    if (pdf.status) {
+      const error = new Error(pdf.error);
+      error.statusCode = pdf.status;
+      throw error;
+    }
+    const filename = pdf.issued && !isDraftInvoice(read) ? pdf.filename : `PREVIEW-${pdf.filename}`;
+    attachments.push({ filename, contentType: "application/pdf", buffer: pdf.bytes });
+  }
+  attachments.push(...documentMimeAttachments(loadedDocuments), ...uploads);
+  const values = buildEmailMergeValues({
+    meta: view.meta,
+    quote: view.quote,
+    documentType: view.documentType,
+    milestoneInvoice: view.milestoneInvoice,
+    config,
+    user: req.caller,
+    attachmentNames: attachments.map((attachment) => attachment.filename),
+    adjustmentNote: payload?.adjustmentNote ? await adjustmentNoteValues(emailDocumentService(req), payload.adjustmentNote) : null,
+  });
+  if (isDraftInvoice(view)) values.documentNumber = PENDING_NUMBER_TEXT;
+  const customBody = payload?.customBody ? applyMergeFields(String(payload.customBody), values, { final: true }) : null;
+  const subject = payload?.subject ? applyMergeFieldsToText(String(payload.subject), values, { final: true }) : null;
+  const fromName = (() => { try { return resolveMailSender({ config, user: req.caller }).fromName; } catch { return null; } })();
+  const built = view.documentType
+    ? await composeDocumentEmail({ meta: view.meta, quote: view.quote, documentType: view.documentType, customBody, subjectOverride: subject, fromName })
+    : composeJobEmail({ meta, subject, customBody, fromName });
+  return sendTestEmail({ config, user: req.caller, subject: built.subject, body: built.body, htmlBody: built.htmlBody, attachments });
+}
+
+function sendErrorBody(err, isAuthExpired) {
+  return {
+    error: err.message,
+    ...(isAuthExpired ? { code: "gmail_auth_expired" } : err.code ? { code: err.code } : {}),
+    // "unknown": Gmail may have sent it (a time-out, a reset, a 5xx), so the
+    // composer says Not confirmed and does not offer to send it again.
+    deliveryOutcome: classifyDeliveryFailure(err),
+  };
+}
+
 app.post("/api/jobs/manual", requireAuth, async (req, res) => {
   try {
     const created = await createManualJob({
@@ -2264,123 +2328,119 @@ app.get("/api/jobs/:id/quote", requireAuth, async (req, res) => {
   }
 });
 
+// The PDF of a job's quote, invoice or receipt as GET /api/jobs/:id/quote-pdf
+// serves it: a sent quote or an issued invoice from the bytes it was issued
+// with, anything else rendered now. { bytes, filename, headers } or
+// { status, error }. Also the preview copy a test email attaches.
+async function readJobDocumentPdf({ job, documentType = null, version = null, milestoneIndex = null, revision = null }) {
+  const resolved = await readPreparedJobDocument({
+    jobDir: job.dir,
+    meta: job.meta,
+    documentType: documentType ?? null,
+    requestedVersion: parseRequestedQuoteVersion(version),
+    milestoneIndex,
+  });
+  const artifacts = resolved.selectedQuoteArtifacts;
+  const isQuoteDocument = resolved.preparedDocumentType === "quote";
+  const issuanceLedger = await readQuoteIssuanceLedger(job.dir);
+  // The quote issuance ledger contains quote bytes only. Invoice and
+  // receipt requests resolve their own milestone artifact below; consulting
+  // the quote ledger here could return a quote PDF for a payment document.
+  const issuanceRecord = isQuoteDocument
+    ? findIssuedQuoteVersion(
+        issuanceLedger,
+        resolved.selectedVersion || artifacts?.version || parseRequestedQuoteVersion(version),
+        "quote",
+      )
+    : null;
+  const historical = Boolean(
+    resolved.selectedVersion
+    && resolved.latestVersion
+    && Number(resolved.selectedVersion) !== Number(resolved.latestVersion),
+  );
+  const issuedVersion = isIssuedQuoteVersion({
+    quote: resolved.preparedQuote,
+    quoteLifecycle: resolved.quoteLifecycle,
+    version: resolved.selectedVersion,
+    meta: resolved.meta,
+    issuanceRecord,
+  });
+  // A sent quote is served from its issued copy, never re-rendered. Only a
+  // quote request asks: an invoice on a job whose quote was sent renders.
+  const issuedQuote = await resolveIssuedQuotePdf({
+    jobDir: job.dir,
+    documentType: resolved.preparedDocumentType,
+    issuanceRecord,
+    issuedVersion,
+    selectedVersion: resolved.selectedVersion,
+    storedPdfPath: artifacts?.quotePdfPath,
+  });
+  if (issuedQuote.gone) return { status: 410, error: "the exact issued quote PDF bytes are unavailable" };
+  if (issuedQuote.bytes) {
+    return issuedQuote.source === "issuance-ledger"
+      ? { bytes: issuedQuote.bytes, filename: "issued-quote.pdf", issued: true, resolved }
+      : { bytes: issuedQuote.bytes, filename: buildQuotePdfFilename(job.meta, resolved.preparedQuote, "", "quote"), headers: { "X-Field-Issued-Copy": issuedQuote.source }, issued: true, resolved };
+  }
+  if (isQuoteDocument && !artifacts?.quote) return { status: 404, error: "quote PDF not generated" };
+  // A sent invoice is served from the bytes it was issued with, never
+  // re-rendered from the current (possibly since-changed) quote. `?revision=`
+  // addresses a superseded revision; without it the current issued revision
+  // is returned when one exists.
+  const issued = await resolveIssuedMilestoneInvoiceArtifact({
+    jobDir: job.dir,
+    documentType: resolved.preparedDocumentType,
+    milestoneInvoice: resolved.preparedMilestoneInvoice,
+    requestedRevision: revision ?? null,
+  });
+  if (issued.notFound) return { status: 404, error: "invoice revision not found" };
+  if (issued.storedArtifact) {
+    // The invoice number is customer-editable free text and can contain
+    // characters (an em dash, a curly quote) above Latin-1, which Node
+    // rejects in a raw header value. Slugify it the same way
+    // `buildQuotePdfFilename` slugifies the quote reference.
+    return { bytes: issued.storedArtifact.pdfBuffer, filename: buildIssuedInvoicePdfFilename(issued.revision.invoiceNumber), issued: true, resolved };
+  }
+  if (issued.gone) return { status: 410, error: "the stored PDF for this superseded invoice revision is unavailable" };
+
+  assertQuotePricingDisplayable(resolved.preparedQuote, "previewed", {
+    pipelineStage: job.meta?.pipelineStage,
+    historical,
+    issuedVersion,
+    current: !historical,
+  });
+
+  const versionSuffix = artifacts.version ? `-${artifacts.label}` : "";
+  const pdfName = buildQuotePdfFilename(job.meta, resolved.preparedQuote, versionSuffix, resolved.preparedDocumentType);
+  if (resolved.preparedDocumentType === "invoice" || resolved.preparedDocumentType === "receipt") {
+    const pdfBuffer = await generateQuotePdfBuffer({
+      meta: resolved.preparedMeta,
+      quote: resolved.preparedQuote,
+      documentType: resolved.preparedDocumentType,
+      invoicePaidAmount: resolved.preparedMeta?.invoicePaidAmount,
+      jobDir: job.dir,
+    });
+    return { bytes: pdfBuffer, filename: pdfName, rendered: true, resolved };
+  }
+  if (!artifacts.quotePdfPath) return { status: 404, error: "quote PDF not generated" };
+  return { bytes: await readFile(artifacts.quotePdfPath), filename: pdfName, resolved };
+}
+
 app.get("/api/jobs/:id/quote-pdf", requireAuth, async (req, res) => {
   const job = await findJob(req.params.id);
   if (!job) return res.status(404).json({ error: "not found" });
   try {
-    const resolved = await readPreparedJobDocument({
-      jobDir: job.dir,
-      meta: job.meta,
+    const pdf = await readJobDocumentPdf({
+      job,
       documentType: req.query?.documentType ?? null,
-      requestedVersion: parseRequestedQuoteVersion(req.query?.version),
+      version: req.query?.version,
       milestoneIndex: req.query?.milestoneIndex,
+      revision: req.query?.revision ?? null,
     });
-    const artifacts = resolved.selectedQuoteArtifacts;
-    const isQuoteDocument = resolved.preparedDocumentType === "quote";
-    const issuanceLedger = await readQuoteIssuanceLedger(job.dir);
-    // The quote issuance ledger contains quote bytes only. Invoice and
-    // receipt requests resolve their own milestone artifact below; consulting
-    // the quote ledger here could return a quote PDF for a payment document.
-    const issuanceRecord = isQuoteDocument
-      ? findIssuedQuoteVersion(
-          issuanceLedger,
-          resolved.selectedVersion || artifacts?.version || parseRequestedQuoteVersion(req.query?.version),
-          "quote",
-        )
-      : null;
-    const historical = Boolean(
-      resolved.selectedVersion
-      && resolved.latestVersion
-      && Number(resolved.selectedVersion) !== Number(resolved.latestVersion),
-    );
-    const issuedVersion = isIssuedQuoteVersion({
-      quote: resolved.preparedQuote,
-      quoteLifecycle: resolved.quoteLifecycle,
-      version: resolved.selectedVersion,
-      meta: resolved.meta,
-      issuanceRecord,
-    });
-    // A sent quote is served from its issued copy, never re-rendered. Only a
-    // quote request asks: an invoice on a job whose quote was sent renders.
-    const issuedQuote = await resolveIssuedQuotePdf({
-      jobDir: job.dir,
-      documentType: resolved.preparedDocumentType,
-      issuanceRecord,
-      issuedVersion,
-      selectedVersion: resolved.selectedVersion,
-      storedPdfPath: artifacts?.quotePdfPath,
-    });
-    if (issuedQuote.gone) {
-      return res.status(410).json({ error: "the exact issued quote PDF bytes are unavailable" });
-    }
-    if (issuedQuote.bytes) {
-      res.setHeader("Content-Type", "application/pdf");
-      if (issuedQuote.source === "issuance-ledger") {
-        res.setHeader("Content-Disposition", "inline; filename=issued-quote.pdf");
-      } else {
-        res.setHeader("X-Field-Issued-Copy", issuedQuote.source);
-        res.setHeader("Content-Disposition", `inline; filename="${buildQuotePdfFilename(job.meta, resolved.preparedQuote, "", "quote")}"`);
-      }
-      return res.end(issuedQuote.bytes);
-    }
-    if (isQuoteDocument && !artifacts?.quote) {
-      return res.status(404).json({ error: "quote PDF not generated" });
-    }
-    // A sent invoice is served from the bytes it was issued with, never
-    // re-rendered from the current (possibly since-changed) quote. `?revision=`
-    // addresses a superseded revision; without it the current issued revision
-    // is returned when one exists.
-    const issued = await resolveIssuedMilestoneInvoiceArtifact({
-      jobDir: job.dir,
-      documentType: resolved.preparedDocumentType,
-      milestoneInvoice: resolved.preparedMilestoneInvoice,
-      requestedRevision: req.query?.revision ?? null,
-    });
-    if (issued.notFound) {
-      return res.status(404).json({ error: "invoice revision not found" });
-    }
-    if (issued.storedArtifact) {
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader(
-        "Content-Disposition",
-        // The invoice number is customer-editable free text and can contain
-        // characters (an em dash, a curly quote) above Latin-1, which Node
-        // rejects in a raw header value. Slugify it the same way
-        // `buildQuotePdfFilename` slugifies the quote reference.
-        `inline; filename="${buildIssuedInvoicePdfFilename(issued.revision.invoiceNumber)}"`,
-      );
-      return res.end(issued.storedArtifact.pdfBuffer);
-    }
-    if (issued.gone) {
-      return res.status(410).json({ error: "the stored PDF for this superseded invoice revision is unavailable" });
-    }
-
-    assertQuotePricingDisplayable(resolved.preparedQuote, "previewed", {
-      pipelineStage: job.meta?.pipelineStage,
-      historical,
-      issuedVersion,
-      current: !historical,
-    });
-
-    const versionSuffix = artifacts.version ? `-${artifacts.label}` : "";
-    const pdfName = buildQuotePdfFilename(job.meta, resolved.preparedQuote, versionSuffix, resolved.preparedDocumentType);
+    if (pdf.status) return res.status(pdf.status).json({ error: pdf.error });
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${pdfName}"`);
-    if (resolved.preparedDocumentType === "invoice" || resolved.preparedDocumentType === "receipt") {
-      const pdfBuffer = await generateQuotePdfBuffer({
-        meta: resolved.preparedMeta,
-        quote: resolved.preparedQuote,
-        documentType: resolved.preparedDocumentType,
-        invoicePaidAmount: resolved.preparedMeta?.invoicePaidAmount,
-        jobDir: job.dir,
-      });
-      res.end(pdfBuffer);
-      return;
-    }
-    if (!artifacts.quotePdfPath) {
-      return res.status(404).json({ error: "quote PDF not generated" });
-    }
-    createReadStream(artifacts.quotePdfPath).pipe(res);
+    for (const [name, value] of Object.entries(pdf.headers || {})) res.setHeader(name, value);
+    res.setHeader("Content-Disposition", pdf.filename === "issued-quote.pdf" ? "inline; filename=issued-quote.pdf" : `inline; filename="${pdf.filename}"`);
+    res.end(pdf.bytes);
   } catch (err) {
     res.status(err.statusCode || 400).json({ error: err.message });
   }
@@ -2975,7 +3035,10 @@ async function processScheduledEmail(record) {
   const job = await findJob(record.jobId);
   if (!job) throw new Error("job no longer exists");
   const payload = record.payload || {};
-  const user = record.sender || null;
+  // The person the attempt goes as: whoever sent it, kept while an earlier
+  // attempt is unknown even when someone else edits it (its mailbox is the
+  // one searched and sent from).
+  const user = record.deliverySender || record.sender || null;
 
   if (payload.kind === "document") {
     const currentSnapshot = await buildScheduledDocumentSnapshot({
@@ -2990,7 +3053,9 @@ async function processScheduledEmail(record) {
       record.snapshot?.milestoneSignature
       && currentSnapshot.milestoneSignature !== record.snapshot.milestoneSignature
     ) {
-      throw new Error("the selected invoice or receipt changed after this email was scheduled; review it and schedule a new send");
+      const changed = new Error("the selected invoice or receipt changed after this email was scheduled; review it and schedule a new send");
+      changed.deliveryOutcome = "rejected_before_dispatch";
+      throw changed;
     }
     return await runExclusiveJobMutation(job.meta.id, "send scheduled quote/invoice", async () => {
       return await sendJobQuote({
@@ -3016,6 +3081,7 @@ async function processScheduledEmail(record) {
         // The recorded references: read again, and refused for review if
         // their bytes changed or they were credited or voided since.
         documents: payload.documents || [],
+        thread: await resolveReplyThread({ jobDir: job.dir, inReplyTo: payload.inReplyTo }),
       });
     });
   }
@@ -3033,18 +3099,94 @@ async function processScheduledEmail(record) {
     config,
     user,
     attachmentNames: [...loadedDocuments.map((document) => document.filename), ...(record.loadedAttachments || []).map((file) => file.filename)],
+    adjustmentNote: payload.adjustmentNote ? await adjustmentNoteValues(issuedDocumentRecorder.service || null, payload.adjustmentNote) : null,
   });
-  const result = await sendJobEmail({
+  // A job email carries a Message-ID made from the queue record's delivery
+  // attempt id. The first attempt stores the full Message-ID, the mailbox and
+  // what it sent before Gmail is called; after an unknown outcome, that
+  // mailbox's Sent Mail is searched for that Message-ID first.
+  const reconciling = record.reconcileBeforeSend === true;
+  if (reconciling && record.unknownFailureAt && Date.now() - Date.parse(record.unknownFailureAt) < RESEND_SETTLE_MS) {
+    const settling = new Error("Gmail may still be delivering this email. Try again in a few minutes.");
+    settling.statusCode = 409;
+    settling.code = "DELIVERY_STILL_SETTLING";
+    settling.deliveryOutcome = "rejected_before_dispatch";
+    throw settling;
+  }
+  const deliveryMessageId = record.deliveryMessageId || (record.deliveryAttemptId
+    ? formatDeliveryMessageId(record.deliveryAttemptId, resolveMessageIdHost({ config, user }))
+    : null);
+  const subject = applyMergeFieldsToText(payload.subject, merge, { final: true });
+  const customBody = payload.customBody ? applyMergeFields(payload.customBody, merge, { final: true }) : null;
+  const thread = await resolveReplyThread({ jobDir: job.dir, inReplyTo: payload.inReplyTo });
+  let result = null;
+  if (reconciling && deliveryMessageId) {
+    const found = await findSentMessageInMailbox({ config, user, mailbox: record.deliveryMailbox || null, messageId: deliveryMessageId });
+    if (found) {
+      // It went the first time: record what went then (not a later edit),
+      // and send nothing.
+      const archived = (await readSentEmailArchive(job.dir).catch(() => [])).some((entry) => entry.scheduledEmailId === record.id);
+      const first = record.firstSent || composeFirstSentFallback({ job, payload, subject, customBody });
+      result = {
+        ...first,
+        id: found.id,
+        threadId: found.threadId,
+        reconciled: true,
+        attachments: first.attachments || [],
+      };
+      // The documents the first attempt carried, not the edit's.
+      const firstUids = new Set((first.attachments || []).map((entry) => entry.uid).filter(Boolean));
+      await recordAttachedDocumentsEmailed({ jobId: job.meta.id, attachments: loadedDocuments.filter((document) => firstUids.has(document.uid)), result, user });
+      if (!archived) {
+        await appendSentEmailArchive({
+          jobDir: job.dir,
+          record: {
+            kind: "email.sent",
+            documentType: "email",
+            scheduledEmailId: record.id,
+            scheduledAt: record.scheduledAt,
+            messageId: found.id,
+            threadId: found.threadId,
+            rfcMessageId: deliveryMessageId,
+            // The chain the first attempt went with, not the edit's.
+            references: first.references !== undefined ? first.references : thread?.references || null,
+            reconciled: true,
+            authMode: result.authMode || null,
+            gmailUser: result.gmailUser || record.deliveryMailbox || null,
+            from: result.from || null,
+            fromName: result.fromName || null,
+            replyTo: result.replyTo || null,
+            to: result.to,
+            cc: result.cc,
+            bcc: result.bcc,
+            subject: result.subject,
+            bodyText: result.bodyText,
+            htmlBody: result.htmlBody,
+            attachments: result.attachments,
+            sentBy: scheduledEmailActor(user),
+          },
+        });
+      }
+      return result;
+    }
+  }
+  result = await sendJobEmail({
     config,
     user,
     meta: normalizeJobMeta(job.meta),
     to: payload.to,
     cc: payload.cc || [],
     bcc: payload.bcc || [],
-    subject: applyMergeFieldsToText(payload.subject, merge, { final: true }),
-    customBody: payload.customBody ? applyMergeFields(payload.customBody, merge, { final: true }) : null,
+    subject,
+    customBody,
     themeFontFamily: payload.themeFontFamily || null,
     additionalAttachments: [...documentMimeAttachments(loadedDocuments), ...(record.loadedAttachments || [])],
+    deliveryAttemptId: record.deliveryAttemptId || null,
+    messageId: deliveryMessageId,
+    // A resend after an unknown attempt goes only from that attempt's mailbox.
+    mailbox: reconciling ? record.deliveryMailbox || null : null,
+    onBeforeDispatch: record.stampDelivery || null,
+    thread,
   });
   await recordAttachedDocumentsEmailed({ jobId: job.meta.id, attachments: loadedDocuments, result, user });
   await appendSentEmailArchive({
@@ -3055,6 +3197,8 @@ async function processScheduledEmail(record) {
       scheduledEmailId: record.id,
       scheduledAt: record.scheduledAt,
       messageId: result.id,
+      rfcMessageId: deliveryMessageId,
+      references: thread?.references || null,
       threadId: result.threadId,
       authMode: result.authMode,
       gmailUser: result.gmailUser,
@@ -3072,6 +3216,12 @@ async function processScheduledEmail(record) {
     },
   });
   return result;
+}
+
+/** What an older record (stored before Field kept the first attempt's content) went with, as best known. */
+function composeFirstSentFallback({ job, payload, subject, customBody }) {
+  const composed = composeJobEmail({ meta: normalizeJobMeta(job.meta), subject, customBody, themeFontFamily: payload.themeFontFamily || null });
+  return { to: payload.to, cc: payload.cc || [], bcc: payload.bcc || [], subject: composed.subject, bodyText: composed.body, htmlBody: composed.htmlBody, attachments: [] };
 }
 
 app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res) => {
@@ -3124,7 +3274,12 @@ app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res
     });
     assertEmailAttachmentLimits({ documents: loadedDocuments, uploads: additionalAttachments });
     const documentRecords = loadedDocuments.map(documentAttachmentRecord);
-    if (payload?.scheduledAt) {
+    if (payload?.test === true) {
+      const result = await sendTestCopy({ req, job, payload, documentType: documentType || "quote", loadedDocuments, uploads: additionalAttachments });
+      return res.json({ ok: true, test: true, result });
+    }
+    const holdSeconds = normalizeHoldSeconds(payload?.holdSeconds);
+    if (payload?.scheduledAt || holdSeconds != null) {
       assertAllowedQuoteRecipients({ config, emails: to, label: "recipient" });
       assertAllowedQuoteRecipients({ config, emails: cc, label: "cc", required: false });
       assertAllowedQuoteRecipients({ config, emails: bcc, label: "bcc", required: false });
@@ -3143,6 +3298,7 @@ app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res
         subject: payload?.subject ?? null,
         attachmentFilename: payload?.attachmentFilename ?? null,
         documents: documentRecords,
+        inReplyTo: payload?.inReplyTo ?? null,
       };
       const scheduledEmail = payload?.draftId
         ? await rescheduleEmailDraft({
@@ -3150,6 +3306,8 @@ app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res
           jobId: job.meta.id,
           id: payload.draftId,
           scheduledAt: payload.scheduledAt,
+          holdSeconds,
+          keepAttachments: Array.isArray(payload?.keepAttachments) ? payload.keepAttachments : null,
           payload: scheduledPayload,
           snapshot,
           attachments: additionalAttachments,
@@ -3160,13 +3318,15 @@ app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res
         dataDir: DATA_DIR,
         jobId: job.meta.id,
         scheduledAt: payload.scheduledAt,
+        holdSeconds,
         payload: scheduledPayload,
         snapshot,
         attachments: additionalAttachments,
         createdBy: scheduledEmailActor(req.caller),
         sender: scheduledEmailSender(req.caller),
       });
-      return res.status(202).json({ ok: true, scheduled: true, scheduledEmail });
+      if (holdSeconds != null) wakeSchedulerAfter(holdSeconds);
+      return res.status(202).json({ ok: true, scheduled: true, held: holdSeconds != null, scheduledEmail });
     }
     if (payload?.draftId) {
       const snapshot = await buildScheduledDocumentSnapshot({ job, payload });
@@ -3188,6 +3348,7 @@ app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res
           subject: payload?.subject ?? null,
           attachmentFilename: payload?.attachmentFilename ?? null,
           documents: documentRecords,
+          inReplyTo: payload?.inReplyTo ?? null,
         },
         snapshot,
         attachments: additionalAttachments,
@@ -3222,6 +3383,7 @@ app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res
         attachmentFilename: payload?.attachmentFilename ?? null,
         additionalAttachments,
         documents: documentRefs,
+        thread: await resolveReplyThread({ jobDir: job.dir, inReplyTo: payload?.inReplyTo }),
         documentService,
       });
     });
@@ -3232,11 +3394,8 @@ app.post("/api/jobs/:id/email-quote", requireAuth, emailUploads, async (req, res
     }
     console.error(`[email-quote] ${job.meta.id} failed: ${err.message}`);
     const isAuthExpired = !hasServiceAccountGmail(config, { user: req.caller })
-      && (/invalid_grant/i.test(err.message) || /not configured for quote sending/i.test(err.message));
-    res.status(isAuthExpired ? 401 : (err.statusCode || 500)).json({
-      error: err.message,
-      ...(isAuthExpired ? { code: "gmail_auth_expired" } : {}),
-    });
+      && (/invalid_grant/i.test(err.message) || /not configured for (quote|job email) sending/i.test(err.message));
+    res.status(isAuthExpired ? 401 : (err.statusCode || 500)).json(sendErrorBody(err, isAuthExpired));
   }
 });
 
@@ -3272,7 +3431,12 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
     });
     assertEmailAttachmentLimits({ documents: loadedDocuments, uploads: additionalAttachments });
     const documentRecords = loadedDocuments.map(documentAttachmentRecord);
-    if (payload?.scheduledAt) {
+    if (payload?.test === true) {
+      const result = await sendTestCopy({ req, job, payload, loadedDocuments, uploads: additionalAttachments });
+      return res.json({ ok: true, test: true, result });
+    }
+    const holdSeconds = normalizeHoldSeconds(payload?.holdSeconds);
+    if (payload?.scheduledAt || holdSeconds != null) {
       assertAllowedQuoteRecipients({ config, emails: to, label: "recipient" });
       assertAllowedQuoteRecipients({ config, emails: cc, label: "cc", required: false });
       assertAllowedQuoteRecipients({ config, emails: bcc, label: "bcc", required: false });
@@ -3286,6 +3450,8 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
         themeFontFamily: payload?.themeFontFamily ?? null,
         documentType: "email",
         documents: documentRecords,
+        inReplyTo: payload?.inReplyTo ?? null,
+        adjustmentNote: payload?.adjustmentNote ?? null,
       };
       const scheduledEmail = payload?.draftId
         ? await rescheduleEmailDraft({
@@ -3293,6 +3459,8 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
           jobId: job.meta.id,
           id: payload.draftId,
           scheduledAt: payload.scheduledAt,
+          holdSeconds,
+          keepAttachments: Array.isArray(payload?.keepAttachments) ? payload.keepAttachments : null,
           payload: scheduledPayload,
           attachments: additionalAttachments,
           updatedBy: scheduledEmailActor(req.caller),
@@ -3302,12 +3470,14 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
         dataDir: DATA_DIR,
         jobId: job.meta.id,
         scheduledAt: payload.scheduledAt,
+        holdSeconds,
         payload: scheduledPayload,
         attachments: additionalAttachments,
         createdBy: scheduledEmailActor(req.caller),
         sender: scheduledEmailSender(req.caller),
       });
-      return res.status(202).json({ ok: true, scheduled: true, scheduledEmail });
+      if (holdSeconds != null) wakeSchedulerAfter(holdSeconds);
+      return res.status(202).json({ ok: true, scheduled: true, held: holdSeconds != null, scheduledEmail });
     }
     if (payload?.draftId) {
       const sent = await sendEmailDraftNow({
@@ -3324,6 +3494,8 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
           themeFontFamily: payload?.themeFontFamily ?? null,
           documentType: "email",
           documents: documentRecords,
+          inReplyTo: payload?.inReplyTo ?? null,
+          adjustmentNote: payload?.adjustmentNote ?? null,
         },
         attachments: additionalAttachments,
         updatedBy: scheduledEmailActor(req.caller),
@@ -3338,6 +3510,7 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
       config,
       user: req.caller,
       attachmentNames: [...loadedDocuments.map((document) => document.filename), ...additionalAttachments.map((file) => file.filename)],
+      adjustmentNote: payload?.adjustmentNote ? await adjustmentNoteValues(documentService, payload.adjustmentNote) : null,
     });
     const result = await sendJobEmail({
       config,
@@ -3350,6 +3523,7 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
       customBody: customBody ? applyMergeFields(customBody, merge, { final: true }) : customBody,
       themeFontFamily: payload?.themeFontFamily ?? null,
       additionalAttachments: [...documentMimeAttachments(loadedDocuments), ...additionalAttachments],
+      thread: await resolveReplyThread({ jobDir: job.dir, inReplyTo: payload?.inReplyTo }),
     });
     await recordAttachedDocumentsEmailed({ jobId: job.meta.id, attachments: loadedDocuments, result, user: req.caller });
     await appendSentEmailArchive({
@@ -3382,10 +3556,75 @@ app.post("/api/jobs/:id/email", requireAuth, emailUploads, async (req, res) => {
     console.error(`[job-email] ${job.meta.id} failed: ${err.message}`);
     const isAuthExpired = !hasServiceAccountGmail(config, { user: req.caller })
       && (/invalid_grant/i.test(err.message) || /not configured for job email sending/i.test(err.message));
-    res.status(isAuthExpired ? 401 : (err.statusCode || 500)).json({
-      error: err.message,
-      ...(isAuthExpired ? { code: "gmail_auth_expired" } : {}),
+    res.status(isAuthExpired ? 401 : (err.statusCode || 500)).json(sendErrorBody(err, isAuthExpired));
+  }
+});
+
+// Drafts on the server: the composer saves as the operator writes, uploads
+// included, so leaving the page or a Gmail sign-in redirect loses nothing.
+app.post("/api/jobs/:id/email-drafts", requireAuth, emailUploads, async (req, res) => {
+  const job = await findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "not found" });
+  let payload = req.body || {};
+  if (payload.payload) {
+    try {
+      payload = JSON.parse(payload.payload);
+    } catch {
+      return res.status(400).json({ error: "invalid email payload" });
+    }
+  }
+  try {
+    const uploads = uploadedEmailAttachments(req.files);
+    const documentRecords = (await loadDocumentAttachments({
+      service: emailDocumentService(req),
+      jobId: job.meta.id,
+      refs: parseDocumentRefs(payload?.documents),
+      meta: normalizeJobMeta(job.meta),
+    })).map(documentAttachmentRecord);
+    const documentType = ["quote", "invoice", "receipt"].includes(payload?.documentType) ? payload.documentType : null;
+    const snapshot = documentType ? await buildScheduledDocumentSnapshot({ job, payload }).catch(() => null) : null;
+    const draftPayload = {
+      kind: documentType ? "document" : "email",
+      to: payload?.to || [],
+      cc: payload?.cc || [],
+      bcc: payload?.bcc || [],
+      subject: payload?.subject ?? null,
+      customBody: payload?.customBody ?? null,
+      documentType: documentType || "email",
+      invoicePaidAmount: payload?.invoicePaidAmount ?? null,
+      milestoneIndex: snapshot?.milestoneIndex ?? payload?.milestoneIndex ?? null,
+      version: snapshot?.quoteVersion ?? payload?.version ?? null,
+      attachmentFilename: payload?.attachmentFilename ?? null,
+      attachCreditNote: payload?.attachCreditNote === true,
+      documents: documentRecords,
+      inReplyTo: payload?.inReplyTo ?? null,
+      adjustmentNote: payload?.adjustmentNote ?? null,
+    };
+    const scheduledEmail = await saveEmailDraft({
+      dataDir: DATA_DIR,
+      jobId: job.meta.id,
+      id: payload?.draftId || null,
+      payload: draftPayload,
+      snapshot,
+      attachments: uploads,
+      keepAttachments: Array.isArray(payload?.keepAttachments) ? payload.keepAttachments : null,
+      updatedBy: scheduledEmailActor(req.caller),
+      sender: scheduledEmailSender(req.caller),
     });
+    res.json({ ok: true, scheduledEmail });
+  } catch (err) {
+    if (err instanceof EmailAttachmentError) return res.status(err.statusCode).json(emailAttachmentErrorBody(err));
+    res.status(err.statusCode || (err.code === "ENOENT" ? 404 : 500)).json({ error: err.message });
+  }
+});
+
+app.delete("/api/jobs/:id/email-drafts/:draftId", requireAuth, async (req, res) => {
+  const job = await findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "not found" });
+  try {
+    res.json({ ok: true, scheduledEmail: await discardEmailDraft({ dataDir: DATA_DIR, jobId: job.meta.id, id: req.params.draftId, updatedBy: scheduledEmailActor(req.caller) }) });
+  } catch (err) {
+    res.status(err.statusCode || (err.code === "ENOENT" ? 404 : 500)).json({ error: err.message });
   }
 });
 

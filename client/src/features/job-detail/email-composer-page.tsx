@@ -10,9 +10,9 @@
 // defaults of its own.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { AlertCircle, ArrowLeft, CalendarClock, ChevronDown, ChevronUp, Clock3, Eye, MoreVertical, Paperclip, Send, Trash2 } from "lucide-react";
-import { renderComposerTemplate, renderSignature } from "../../../../shared/email-templates.js";
-import { api, type EmailContext, type EmailPreview, type GoogleContact, type JobDocument, type NotIssuedDocument, type ScheduledEmail } from "@/lib/api";
+import { AlertCircle, ArrowLeft, CalendarClock, ChevronDown, ChevronUp, Clock3, Eye, FlaskConical, MoreVertical, Paperclip, Send, Trash2 } from "lucide-react";
+import { EMAIL_MERGE_FIELDS, renderComposerTemplate, renderSignature } from "../../../../shared/email-templates.js";
+import { api, type EmailContext, type EmailDraftInput, type EmailPreview, type GoogleContact, type JobDocument, type NotIssuedDocument, type ScheduledEmail, type SentEmail } from "@/lib/api";
 import type { JobDocumentType, MilestoneInvoice, RecordingDetail } from "@/lib/types";
 import { jobRef, jobTitle } from "@/lib/job-status";
 import { Menu, type MenuItem } from "@/components/shell/menu";
@@ -20,6 +20,74 @@ import { useShell } from "@/components/shell/shell-context";
 import { AttachmentPicker, AttachmentTray, attachmentTotals, type MainAttachment } from "./email-attachments";
 import { EmailBodyEditor, type EmailBodyEditorHandle } from "./email-body-editor";
 import { RecipientField, recipientProblem, type ContactSuggestion, type Recipient } from "./recipient-field";
+import { EmailRows, SentEmailSheet, emailRows, whenLabel } from "./email-record";
+
+// Undo send (owner's decision 3): the server holds a send this long, and
+// Undo is Cancel send.
+export const UNDO_SECONDS = 10;
+
+/** A send that failed, in words the operator can act on. */
+export function plainSendError(err: unknown) {
+  const error = err as Error & { code?: unknown; status?: number; deliveryOutcome?: unknown };
+  const message = error instanceof Error ? error.message : "The email could not be sent.";
+  if (error?.code === "DELIVERY_OUTCOME_UNKNOWN") {
+    return "Not confirmed: Field lost contact with Gmail during an earlier send, and checks Sent Mail for it before it allows another. Look in Sent Mail before you send it again.";
+  }
+  if (error?.code === "FIELD_STORAGE_UNAVAILABLE" || error?.status === 503) return `Field could not record the send first, so nothing was sent. Try again. (${message})`;
+  if (error?.status === 413 || error?.status === 409 || error?.status === 410 || error?.status === 404 || error?.status === 400) return message;
+  if (error?.status === 403) return `This installation does not send to these addresses. ${message}`;
+  // Only a failure known to be before Gmail took it is "not sent"; a
+  // time-out, a reset or a 5xx may have sent it.
+  if (error?.deliveryOutcome === "rejected") return `Gmail did not accept the email: ${message}`;
+  return `Not confirmed: Field could not tell whether Gmail sent it (${message}). Check Sent Mail before you send it again.`;
+}
+
+const MERGE_TOKEN = /(\{\{\s*[A-Za-z]+\s*\}\})/;
+
+/**
+ * The subject: a plain input while it is edited. Away from it, a merge field
+ * such as {{documentNumber}} reads as a chip with its value (or its name
+ * while it has none), as the body shows them. The send fills it.
+ */
+export function SubjectField({ value, onChange, values }: { value: string; onChange: (next: string) => void; values: Record<string, string | null> | undefined }) {
+  const [focused, setFocused] = useState(false);
+  const parts = value.split(MERGE_TOKEN).filter(Boolean);
+  const hasFields = parts.some((part) => MERGE_TOKEN.test(part));
+  const masked = hasFields && !focused;
+  return (
+    <span className="fx-subject">
+      <input
+        id="composer-subject"
+        className={`fx-composer__subject${masked ? " fx-composer__subject--masked" : ""}`}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder="Subject"
+        aria-describedby={hasFields ? "composer-subject-fields" : undefined}
+      />
+      {masked ? (
+        <span className="fx-subject__mirror" aria-hidden="true">
+          {parts.map((part, index) => {
+            const key = part.match(/^\{\{\s*([A-Za-z]+)\s*\}\}$/)?.[1];
+            if (!key) return <span key={index}>{part}</span>;
+            const label = EMAIL_MERGE_FIELDS.find((field) => field.key === key)?.label || key;
+            return <span key={index} className="fx-subject__field" data-merge={key}>{values?.[key] || label}</span>;
+          })}
+        </span>
+      ) : null}
+      {hasFields ? <span id="composer-subject-fields" className="fx-sr">Fields in double braces are filled in when the email is sent.</span> : null}
+    </span>
+  );
+}
+
+/** How long Undo stays: until the server's hold ends, never longer than the hold. */
+export function undoWindowMs(scheduledAt: string | null | undefined, requestedAt: number, now = Date.now()) {
+  const byRequest = UNDO_SECONDS * 1000 - (now - requestedAt);
+  const due = Date.parse(String(scheduledAt || ""));
+  const byServer = Number.isFinite(due) ? due - now : byRequest;
+  return Math.max(0, Math.min(byRequest, byServer, UNDO_SECONDS * 1000));
+}
 
 type Phase = "compose" | "sending" | "error" | "auth_expired";
 
@@ -92,6 +160,8 @@ export function EmailComposerPage() {
 
   // Opening a draft replaces what the URL asked for.
   const [draft, setDraft] = useState<ScheduledEmail | null>(null);
+  // Opened from a saved draft (not one autosave just made): say so.
+  const [openedDraft, setOpenedDraft] = useState(false);
   const documentType = draft
     ? documentTypeParam(draft.documentType)
     : documentTypeParam(params.get("documentType"));
@@ -120,6 +190,18 @@ export function EmailComposerPage() {
   const [preview, setPreview] = useState<EmailPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [initialised, setInitialised] = useState(false);
+  // Drafts are kept on the server as the operator writes (uploads included).
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [retained, setRetained] = useState<string[]>([]);
+  const lastSaved = useRef<string | null>(null);
+  const saving = useRef<Promise<ScheduledEmail | null> | null>(null);
+  const [sentEmails, setSentEmails] = useState<SentEmail[]>([]);
+  const [openSent, setOpenSent] = useState<SentEmail | null>(null);
+  const [testing, setTesting] = useState(false);
+  // The latest draft id, kept uploads and new uploads, for a send that waits
+  // for an autosave in flight (its render's values are stale by then).
+  const latest = useRef<{ draftId: string | null; retained: string[]; uploads: File[] }>({ draftId: null, retained: [], uploads: [] });
 
   useEffect(() => {
     if (!id) return;
@@ -133,12 +215,31 @@ export function EmailComposerPage() {
   const refreshScheduled = useCallback(async () => {
     if (!id) return;
     try {
-      setScheduledEmails((await api.scheduledEmails(id)).scheduledEmails);
+      const [queued, sent] = await Promise.all([api.scheduledEmails(id), api.sentEmails(id).catch(() => ({ ok: false, sentEmails: [] as SentEmail[] }))]);
+      setScheduledEmails(queued.scheduledEmails);
+      setSentEmails(sent.sentEmails);
+      return queued.scheduledEmails;
     } catch {
       // Sending stays usable if the list cannot refresh.
+      return null;
     }
   }, [id]);
-  useEffect(() => { void refreshScheduled(); }, [refreshScheduled]);
+  useEffect(() => {
+    void refreshScheduled().then(async (queued) => {
+      // ?draft=<id>: open that draft (Undo, Edit, or back from Gmail sign-in).
+      const wanted = params.get("draft");
+      const item = wanted ? (queued || []).find((entry) => entry.id === wanted) : null;
+      if (!item) return;
+      if (item.status === "pending") {
+        const back = await api.unscheduleEmail(id, item.id).catch(() => null);
+        if (back) openDraft(back.scheduledEmail);
+      } else if (item.status === "draft" || item.status === "failed") {
+        openDraft(item);
+      }
+    });
+    // Opening a draft once, when the page loads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshScheduled]);
 
   const milestoneInvoice = useMemo(() => {
     const invoices = detail?.meta.milestoneInvoices || [];
@@ -151,15 +252,30 @@ export function EmailComposerPage() {
     return defaultMilestone(invoices);
   }, [detail, documentType, draft, params]);
   const version = draft?.quoteVersion ? String(draft.quoteVersion) : params.get("version");
+  // An adjustment note on its own (from the invoice's menu).
+  const adjustmentNote = draft?.draftContent?.adjustmentNote
+    || (!documentType && params.get("purpose") === "adjustment-note" ? params.get("creditNote") : null)
+    || null;
 
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    api.emailContext(id, { documentType, milestoneIndex: milestoneInvoice?.milestoneIndex ?? null, version })
+    api.emailContext(id, {
+      documentType,
+      milestoneIndex: milestoneInvoice?.milestoneIndex ?? null,
+      version,
+      ...(adjustmentNote ? { purpose: "adjustment-note", creditNote: adjustmentNote } : {}),
+    })
       .then((next) => { if (!cancelled) setContext(next); })
       .catch((err) => { if (!cancelled) setLoadError(err instanceof Error ? err.message : "The composer could not load."); });
     return () => { cancelled = true; };
-  }, [id, documentType, milestoneInvoice?.milestoneIndex, version]);
+  }, [id, documentType, milestoneInvoice?.milestoneIndex, version, adjustmentNote]);
+
+  // Into the earlier Gmail conversation for this document line (decision 5):
+  // on by default; the subject then follows that conversation's.
+  const [threadOn, setThreadOn] = useState(false);
+  const [templateSubject, setTemplateSubject] = useState("");
+  const thread = context?.thread || null;
 
   // A new message: the job's contact, the first template and the signature.
   useEffect(() => {
@@ -167,14 +283,18 @@ export function EmailComposerPage() {
     const template = context.templates[0];
     const contact = context.jobContacts.find((entry) => entry.source === "job");
     if (contact) setTo([{ email: contact.email, name: contact.name || null }]);
+    const fresh = template ? renderComposerTemplate(template, context.mergeValues).subject || context.defaultSubject : context.defaultSubject;
+    setTemplateSubject(fresh);
     if (template) {
       setTemplateId(template.id);
-      setSubject(renderComposerTemplate(template, context.mergeValues).subject || context.defaultSubject);
       setBody(composeTemplateBody(template, context));
     } else {
-      setSubject(context.defaultSubject);
       setBody(renderSignature(context.signature?.html || null, context.mergeValues));
     }
+    setThreadOn(Boolean(context.thread));
+    setSubject(context.thread ? context.thread.replySubject : fresh);
+    // The send type's default attachments: ticked ones attached, the others offered.
+    setSelectedUids((context.suggestions || []).filter((entry) => entry.ticked).map((entry) => entry.uid));
     setInitialised(true);
   }, [context, initialised, draft]);
 
@@ -212,6 +332,11 @@ export function EmailComposerPage() {
     && !(attachCreditNote && creditNoteDocument?.uid === entry.uid)
   ));
   const trayDocuments = [...attachedDocuments, ...(attachCreditNote && creditNoteDocument ? [creditNoteDocument] : [])];
+  // Offered by the send type, not attached until ticked.
+  const suggestedDocuments = (context?.suggestions || [])
+    .filter((entry) => !selectedUids.includes(entry.uid) && entry.number !== mainNumber)
+    .map((entry) => ({ document: (jobDocuments || []).find((candidate) => candidate.uid === entry.uid) || null, reason: entry.reason }))
+    .filter((entry): entry is { document: JobDocument; reason: string } => Boolean(entry.document));
   const totals = attachmentTotals({ main: mainAttachment, documents: trayDocuments, uploads });
   const recipientIssues = [...to, ...cc, ...bcc].filter((entry) => recipientProblem(entry.email, context?.deliveryPolicy));
   const blockers = [
@@ -224,7 +349,7 @@ export function EmailComposerPage() {
 
   // The preview: what the server would send now. Debounced; cancelled when
   // the message changes again.
-  const previewKey = JSON.stringify({ subject, body, to: to.map((entry) => entry.email), cc: cc.map((entry) => entry.email), bcc: bcc.map((entry) => entry.email), docs: trayDocuments.map((entry) => entry.uid), uploads: uploads.map((file) => [file.name, file.size]), documentType, m: milestoneInvoice?.milestoneIndex ?? null, version });
+  const previewKey = JSON.stringify({ subject, body, to: to.map((entry) => entry.email), cc: cc.map((entry) => entry.email), bcc: bcc.map((entry) => entry.email), docs: trayDocuments.map((entry) => entry.uid), uploads: uploads.map((file) => [file.name, file.size]), documentType, m: milestoneInvoice?.milestoneIndex ?? null, version, adjustmentNote });
   useEffect(() => {
     if (!id || !context || !initialised) return;
     const controller = new AbortController();
@@ -241,6 +366,7 @@ export function EmailComposerPage() {
         documents: trayDocuments.map(({ uid }) => ({ uid })),
         uploads: uploads.map((file) => ({ filename: file.name, byteLength: file.size })),
         attachmentFilename: draft?.draftContent?.attachmentFilename || null,
+        adjustmentNote,
       }, { signal: controller.signal })
         .then((next) => { setPreview(next); setPreviewError(null); })
         .catch((err) => { if (!controller.signal.aborted) setPreviewError(err instanceof Error ? err.message : "Preview unavailable"); });
@@ -260,18 +386,115 @@ export function EmailComposerPage() {
     setPendingTemplate(null);
   }
 
+  // The draft id, kept uploads and new uploads as of now: a save updates
+  // this at once, before React renders, so a send or another save that
+  // waited for it uses the saved draft and never makes a second one.
+  latest.current = { draftId: draft?.id || null, retained, uploads };
+
+  function draftInput(): EmailDraftInput {
+    return {
+      draftId: latest.current.draftId,
+      to: to.map((entry) => entry.email),
+      cc: cc.map((entry) => entry.email),
+      bcc: bcc.map((entry) => entry.email),
+      subject,
+      customBody: body,
+      documentType,
+      milestoneIndex: documentType && documentType !== "quote" ? milestoneInvoice?.milestoneIndex ?? null : null,
+      version: version || null,
+      invoicePaidAmount: documentType === "invoice" ? draft?.draftContent?.invoicePaidAmount ?? milestoneInvoice?.amountPaid ?? 0 : null,
+      attachmentFilename: draft?.draftContent?.attachmentFilename || null,
+      attachCreditNote: Boolean(creditNoteNumber && attachCreditNote),
+      documents: attachedDocuments.map(({ uid }) => ({ uid })),
+      keepAttachments: latest.current.retained,
+      inReplyTo: threadOn && thread ? thread.id : null,
+      adjustmentNote,
+    };
+  }
+  const draftSignature = JSON.stringify({ ...draftInput(), draftId: null, uploads: uploads.map((file) => [file.name, file.size]) });
+
+  /** Save the email as a draft on the server now; new uploads go with it. */
+  async function saveDraftNow(): Promise<ScheduledEmail | null> {
+    if (saving.current) await saving.current;
+    const signature = draftSignature;
+    const files = latest.current.uploads;
+    const run = (async () => {
+      try {
+        const result = await api.saveEmailDraft(id, draftInput(), files);
+        const kept = (result.scheduledEmail.attachments || []).map((entry) => entry.filename);
+        latest.current = {
+          draftId: result.scheduledEmail.id,
+          retained: kept,
+          uploads: latest.current.uploads.filter((file) => !files.includes(file)),
+        };
+        setDraft(result.scheduledEmail);
+        setRetained(kept);
+        setUploads((current) => current.filter((file) => !files.includes(file)));
+        lastSaved.current = signature;
+        setSavedAt(new Date().toISOString());
+        setSaveError(null);
+        return result.scheduledEmail;
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : "The draft could not be saved.");
+        return null;
+      }
+    })();
+    saving.current = run;
+    try {
+      return await run;
+    } finally {
+      saving.current = null;
+    }
+  }
+
+  // Autosave: a second and a half after the last change.
+  useEffect(() => {
+    if (!initialised || !context || phase === "sending") return;
+    if (lastSaved.current === null) { lastSaved.current = draftSignature; return; }
+    if (lastSaved.current === draftSignature) return;
+    const timer = window.setTimeout(() => { void saveDraftNow(); }, 1500);
+    return () => window.clearTimeout(timer);
+    // draftSignature carries every input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftSignature, initialised, context, phase]);
+
+  /** After a held send: Sent, or Not sent with why, once the hold is over. */
+  function followHeldSend(scheduledId: string, names: string, checks = [UNDO_SECONDS * 1000 + 2500, 15_000, 30_000]) {
+    const [wait, ...rest] = checks;
+    if (wait == null) return;
+    window.setTimeout(async () => {
+      const queued = await api.scheduledEmails(id).catch(() => null);
+      const record = queued?.scheduledEmails.find((entry) => entry.id === scheduledId);
+      if (record?.status === "sent" && record.reconciled) toast(`Already sent: Field found the first send to ${names} in Sent Mail, so it did not send it again. Your edits were not sent.`);
+      else if (record?.status === "sent") toast(`Sent to ${names}.`);
+      else if (record?.status === "failed" && record.deliveryOutcome === "rejected") toast(`Not sent: ${record.lastError || "Gmail did not accept it"}. It is in the job's email list.`);
+      else if (record?.status === "failed") toast(`Not confirmed: Field could not tell whether Gmail sent it to ${names}. ${/cannot reach|still be delivering/i.test(record.lastError || "") ? record.lastError : "Check Sent Mail before sending it again."} It is in the job's email list.`);
+      else if (record?.status === "pending" || record?.status === "sending") followHeldSend(scheduledId, names, rest);
+    }, wait);
+  }
+
   async function send(scheduledAt: string | null = null) {
     if (!canSend || !detail) return;
     setPhase("sending");
     setError("");
+    // An autosave in flight finishes first, so its uploads go once and the
+    // send uses the draft it saved (latest is updated by the save itself).
+    if (saving.current) await saving.current;
+    const { draftId, retained: keep, uploads: files } = latest.current;
+    const requestedAt = Date.now();
     try {
       const recipients = to.map((entry) => entry.email);
       const options = {
         cc: cc.map((entry) => entry.email),
         bcc: bcc.map((entry) => entry.email),
-        attachments: uploads,
+        attachments: files,
         scheduledAt,
-        draftId: draft?.id || null,
+        // Send now is held, so it can be undone; a schedule is not.
+        holdSeconds: scheduledAt ? null : UNDO_SECONDS,
+        draftId,
+        keepAttachments: draftId ? keep : null,
+        inReplyTo: threadOn && thread ? thread.id : null,
+        adjustmentNote,
         documents: attachedDocuments.map(({ uid }) => ({ uid })),
       };
       const result = documentType
@@ -287,20 +510,81 @@ export function EmailComposerPage() {
         })
         : await api.emailJob(id, recipients, subject.trim(), body, options);
       const what = documentType ? `${documentType[0].toUpperCase()}${documentType.slice(1)}` : "Email";
-      toast(result.scheduled && scheduledAt
-        ? `${what} scheduled for ${scheduleLabel(new Date(scheduledAt))}`
-        : `${what} sent to ${namesOf(to)}`);
-      navigate(`/jobs/${id}`);
+      const names = namesOf(to);
+      const queuedId = result.scheduledEmail?.id || null;
+      // Back to the job's email list, where a held send shows as Sending.
+      navigate(result.scheduled ? `/jobs/${id}?tab=email` : `/jobs/${id}`);
+      if (result.held && queuedId) {
+        // Undo lasts until the server's hold ends, counted from the request.
+        const undoMs = undoWindowMs(result.scheduledEmail?.scheduledAt, requestedAt);
+        toast(`Sending ${label} to ${names}…`, () => {
+          void api.unscheduleEmail(id, queuedId)
+            .then(() => {
+              navigate(`/jobs/${id}/email-editor?draft=${queuedId}`);
+              toast("Send undone. Your email is a draft again.");
+            })
+            .catch((err) => toast(`Too late to undo: ${err instanceof Error ? err.message : "it is already sending"}.`));
+        }, { durationMs: undoMs });
+        followHeldSend(queuedId, names, [undoMs + 2500, 15_000, 30_000]);
+      } else {
+        toast(result.scheduled && scheduledAt ? `${what} scheduled for ${scheduleLabel(new Date(scheduledAt))}` : `${what} sent to ${names}`);
+      }
     } catch (err) {
       const code = (err as Error & { code?: unknown })?.code;
-      setError(err instanceof Error ? err.message : "The email could not be sent.");
+      setError(plainSendError(err));
       setPhase(code === "gmail_auth_expired" ? "auth_expired" : "error");
+      void refreshScheduled();
     }
+  }
+
+  // Send a test to me: to the signed-in person only, "[Test]" in the subject.
+  // Nothing is issued and nothing is recorded.
+  async function sendTest() {
+    if (!detail || testing) return;
+    setTesting(true);
+    try {
+      const recipients = to.length ? to.map((entry) => entry.email) : [context?.from.email || ""];
+      const options = {
+        cc: [],
+        bcc: [],
+        attachments: uploads,
+        test: true,
+        documents: attachedDocuments.map(({ uid }) => ({ uid })),
+        adjustmentNote,
+      };
+      const result = documentType
+        ? await api.emailQuote(id, recipients, body, {
+          ...options,
+          subject: subject.trim(),
+          documentType,
+          milestoneIndex: documentType !== "quote" ? milestoneInvoice?.milestoneIndex ?? null : null,
+          version: version || null,
+          attachCreditNote: Boolean(creditNoteNumber && attachCreditNote),
+        })
+        : await api.emailJob(id, recipients, subject.trim(), body, options);
+      toast(`Test sent to ${(result.result?.to || []).join(", ") || "you"}. Nothing was issued or recorded.`);
+    } catch (err) {
+      setError(`The test was not sent. ${plainSendError(err)}`);
+      setPhase("error");
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function discard() {
+    if (draft?.id) await api.discardEmailDraft(id, draft.id).catch(() => null);
+    toast(draft?.id ? "Draft discarded." : "Email discarded.");
+    navigate(`/jobs/${id}`);
   }
 
   async function reconnectGmail() {
     try {
-      const suffix = params.toString() ? `?${params.toString()}` : "";
+      // The draft, uploads included, is kept on the server through the
+      // sign-in redirect, and opened again when Gmail sends the operator back.
+      const saved = await saveDraftNow();
+      const next = new URLSearchParams(params);
+      if (saved?.id) next.set("draft", saved.id);
+      const suffix = next.toString() ? `?${next.toString()}` : "";
       const { url } = await api.gmailAuthUrl(`/jobs/${id}/email-editor${suffix}`);
       window.location.href = url;
     } catch (err) {
@@ -310,6 +594,10 @@ export function EmailComposerPage() {
 
   function openDraft(item: ScheduledEmail) {
     setDraft(item);
+    setOpenedDraft(true);
+    setRetained((item.attachments || []).map((entry) => entry.filename));
+    setAttachCreditNote(item.draftContent?.attachCreditNote === true);
+    lastSaved.current = null;
     setTo(item.to.map((email) => ({ email, name: contacts.find((entry) => entry.email === email)?.name || null })));
     setCc((item.cc || []).map((email) => ({ email, name: null })));
     setBcc((item.bcc || []).map((email) => ({ email, name: null })));
@@ -371,13 +659,20 @@ export function EmailComposerPage() {
 
   const meta = detail.meta;
   const label = documentType ? DOCUMENT_LABEL[documentType] : "email";
-  const title = documentType ? `Send ${label}${mainNumber && mainIssued ? ` ${mainNumber}` : ""}` : "Send email";
+  const title = adjustmentNote
+    ? `Send adjustment note ${adjustmentNote}`
+    : documentType ? `Send ${label}${mainNumber && mainIssued ? ` ${mainNumber}` : ""}` : "Send email";
+  const replacement = context.replacement || null;
+  const money = (value: number | null | undefined) => (value == null ? null : Number(value).toLocaleString("en-AU", { style: "currency", currency: "AUD" }));
   const presets = schedulePresets();
   const sendMenu: MenuItem[] = [
     ...presets.map((preset) => ({ label: `${preset.label} · ${scheduleLabel(preset.at)}`, icon: <Clock3 aria-hidden />, onSelect: () => void send(preset.at.toISOString()) })),
     { label: "Pick date and time…", icon: <CalendarClock aria-hidden />, onSelect: () => setScheduleOpen(true) },
+    { kind: "separator" },
+    { label: `Send a test to me · ${context.from.email || "your address"}`, icon: <FlaskConical aria-hidden />, onSelect: () => void sendTest() },
   ];
-  const activity = scheduledEmails.filter((item) => item.status !== "sent" && item.status !== "cancelled");
+  const activity = emailRows(sentEmails, scheduledEmails.filter((item) => item.id !== draft?.id));
+  const saveLabel = saveError ? "Draft not saved" : savedAt ? `Draft saved ${whenLabel(savedAt).split(", ").pop()}` : null;
   const shortcut = IS_MAC ? "⌘ Enter" : "Ctrl Enter";
   const contactSubline = [meta.contactName, jobTitle(meta)].filter(Boolean).join(" · ");
 
@@ -405,9 +700,28 @@ export function EmailComposerPage() {
       />
       {showCc ? <div className="fx-composer__fold" data-open={phoneCcOpen ? "true" : undefined}><RecipientField label="Cc" recipients={cc} onChange={setCc} contacts={contacts} policy={context.deliveryPolicy} inputRef={ccInput} /></div> : null}
       {showBcc ? <div className="fx-composer__fold" data-open={phoneCcOpen ? "true" : undefined}><RecipientField label="Bcc" recipients={bcc} onChange={setBcc} contacts={contacts} policy={context.deliveryPolicy} inputRef={bccInput} /></div> : null}
+      {thread ? (
+        <label className="fx-composer__thread">
+          <input
+            type="checkbox"
+            className="fx-checkbox"
+            checked={threadOn}
+            onChange={(event) => {
+              setThreadOn(event.target.checked);
+              setSubject(event.target.checked ? thread.replySubject : templateSubject);
+            }}
+          />
+          <span>
+            Send in the conversation of &ldquo;{thread.subject}&rdquo;{thread.sentAt ? `, sent ${whenLabel(thread.sentAt)}` : ""}
+            <small>{threadOn
+              ? `Gmail keeps it in that conversation while the subject stays "${thread.replySubject}".${thread.headers ? "" : " That email was sent before Field kept its Message-ID, so the customer's mail may show it apart."}`
+              : "Off: this email starts a new conversation."}</small>
+          </span>
+        </label>
+      ) : null}
       <div className="fx-composer__field">
         <label className="fx-rcpt__label" htmlFor="composer-subject">Subject</label>
-        <input id="composer-subject" className="fx-composer__subject" value={subject} onChange={(event) => { setSubject(event.target.value); setTouched(true); }} placeholder="Subject" />
+        <SubjectField value={subject} onChange={(next) => { setSubject(next); setTouched(true); }} values={context?.mergeValues} />
       </div>
     </>
   );
@@ -426,7 +740,7 @@ export function EmailComposerPage() {
             ...sendMenu,
             { kind: "separator" },
             { label: "Preview", icon: <Eye aria-hidden />, onSelect: () => setPhonePreview(true) },
-            { label: "Discard", icon: <Trash2 aria-hidden />, tone: "danger", onSelect: () => navigate(`/jobs/${id}`) },
+            { label: "Discard", icon: <Trash2 aria-hidden />, tone: "danger", onSelect: () => void discard() },
           ]}
           trigger={(props) => <button type="button" className="fx-btn fx-btn--ghost fx-btn--icon" aria-label="More send options" {...props}><MoreVertical aria-hidden /></button>}
         />
@@ -441,21 +755,35 @@ export function EmailComposerPage() {
           </nav>
           <div className="fx-ph__line">
             <h1 className="fx-ph__title">{title}</h1>
+            {replacement?.replacesNumber && context.sendType === "replacement-invoice" ? <span className="fx-mute fx-composer__ref">Replaces {replacement.replacesNumber}</span> : null}
             <span className="fx-mute fx-composer__ref">{jobRef(meta)}</span>
+            {saveLabel ? <span className="fx-save-state" data-state={saveError ? "error" : "saved"} title={saveError || undefined}>{saveLabel}</span> : null}
           </div>
         </div>
       </header>
 
-      {draft ? (
-        <div className="fx-notice"><span>Editing a draft. Sending or scheduling uses this draft, so no copy is left behind.</span></div>
+      {replacement?.replacesNumber && context.sendType === "replacement-invoice" ? (
+        <div className="fx-notice">
+          <span>
+            {mainNumber}{money(replacement.total) ? ` (${money(replacement.total)})` : ""} replaces {replacement.replacesNumber}{money(replacement.replacesTotal) ? ` (${money(replacement.replacesTotal)})` : ""}, which adjustment note {replacement.creditNoteNumber} credits in full. Both are issued and attach as stored. Nothing is rendered again.
+          </span>
+        </div>
+      ) : null}
+      {replacement && context.sendType === "adjustment-note" ? (
+        <div className="fx-notice">
+          <span>Adjustment note {replacement.creditNoteNumber} cancels {replacement.replacesNumber || "the credited invoice"}{replacement.replacementNumber ? `, replaced by ${replacement.replacementNumber}` : ""}. It attaches as stored.</span>
+        </div>
+      ) : null}
+      {openedDraft ? (
+        <div className="fx-notice"><span>Editing a draft. Sending or scheduling uses this draft, so no copy is left behind.{draft?.checksSentMail ? " An earlier send of it was not confirmed: Field looks for it in Sent Mail first, and does not send it twice." : ""}</span></div>
       ) : null}
       {phase === "error" ? (
-        <div className="fx-notice fx-notice--bad" role="alert"><AlertCircle aria-hidden /><span>Not sent. {error}</span></div>
+        <div className="fx-notice fx-notice--bad" role="alert"><AlertCircle aria-hidden /><span>{error.startsWith("Not confirmed") ? "" : "Not sent. "}{error} Your message, recipients and attachments are kept{draft?.id ? " in this draft" : ""}.</span></div>
       ) : null}
       {phase === "auth_expired" ? (
         <div className="fx-notice fx-notice--warn" role="alert">
           <AlertCircle aria-hidden />
-          <span>Not sent. The Gmail sign-in for {context.from.email || "this account"} has expired. Reconnect Gmail, then send again.</span>
+          <span>Not sent. The Gmail sign-in for {context.from.email || "this account"} has expired. Reconnect Gmail, then send again. Your message, recipients and attachments are kept: Field saves them as a draft before you go to Gmail.</span>
           <button type="button" className="fx-btn fx-btn--sm" onClick={() => void reconnectGmail()}>Reconnect Gmail</button>
         </div>
       ) : null}
@@ -473,7 +801,7 @@ export function EmailComposerPage() {
             mergeFields={context.mergeFields}
             onInsertSignature={() => editorRef.current?.insertHtml(renderSignature(context.signature?.html || null, context.mergeValues))}
           />
-          {creditNoteNumber ? (
+          {creditNoteNumber && jobDocuments === null ? (
             <label className="fx-check fx-composer__check">
               <input type="checkbox" className="fx-checkbox" checked={attachCreditNote} onChange={(event) => setAttachCreditNote(event.target.checked)} />
               Also attach the adjustment note ({creditNoteNumber})
@@ -482,8 +810,11 @@ export function EmailComposerPage() {
           <AttachmentTray
             main={mainAttachment}
             documents={trayDocuments}
+            suggested={suggestedDocuments}
+            onAddSuggested={(uid: string) => setSelectedUids((current) => [...current, uid])}
             uploads={uploads}
-            retainedNames={draft?.attachmentNames || []}
+            retainedNames={retained}
+            onRemoveRetained={(name: string) => setRetained((current) => current.filter((entry) => entry !== name))}
             pickerAvailable
             onAdd={() => setPickerOpen(true)}
             onRemoveDocument={(uid) => {
@@ -518,7 +849,7 @@ export function EmailComposerPage() {
           {rail === "preview" ? (
             <EmailPreviewPanel preview={preview} error={previewError} recipients={to} cc={cc} />
           ) : (
-            <EmailActivityList items={activity} onEdit={(item) => (item.status === "draft" ? openDraft(item) : void unschedule(item, true))} onCancel={(item) => void unschedule(item, false)} />
+            <EmailRows rows={activity} onOpen={setOpenSent} onEdit={(item) => (item.status === "pending" ? void unschedule(item, true) : openDraft(item))} onCancel={(item) => void unschedule(item, false)} />
           )}
         </aside>
       </div>
@@ -573,6 +904,7 @@ export function EmailComposerPage() {
           </div>
         </div>
       ) : null}
+      {openSent ? <SentEmailSheet record={openSent} documents={jobDocuments} onClose={() => setOpenSent(null)} /> : null}
       <p className="fx-sr">{contactSubline}</p>
     </div>
   );
@@ -601,30 +933,5 @@ export function EmailPreviewPanel({ preview, error, recipients, cc }: { preview:
       {preview.pending.map((note) => <p key={note} className="fx-mute fx-composer__preview-note">{note}</p>)}
       <p className="fx-mute fx-composer__preview-note">Field builds this preview with the same code that builds the sent email.</p>
     </div>
-  );
-}
-
-const STATUS_TEXT: Record<string, string> = { draft: "Draft", pending: "Scheduled", sending: "Sending", failed: "Not sent" };
-
-export function EmailActivityList({ items, onEdit, onCancel }: { items: ScheduledEmail[]; onEdit: (item: ScheduledEmail) => void; onCancel: (item: ScheduledEmail) => void }) {
-  if (!items.length) return <p className="fx-mute fx-composer__empty">No scheduled emails or drafts on this job.</p>;
-  return (
-    <ul className="fx-composer__activity">
-      {items.map((item) => (
-        <li key={item.id}>
-          <div className="fx-composer__activity-h">
-            <span className={`fx-status fx-status--${item.status === "failed" ? "lost" : item.status === "draft" ? "draft" : "quoted"}`}>{STATUS_TEXT[item.status] || item.status}</span>
-            {item.scheduledAt ? <span className="fx-mute">{scheduleLabel(new Date(item.scheduledAt))}</span> : null}
-          </div>
-          <strong>{item.subject || "(no subject)"}</strong>
-          <span className="fx-mute">To {item.to.join(", ")}{(item.attachmentNames.length + (item.documents?.length || 0)) ? ` · ${item.attachmentNames.length + (item.documents?.length || 0) + 1} attachments` : ""}</span>
-          {item.lastError ? <span className="fx-composer__activity-error">{item.lastError}</span> : null}
-          <div className="fx-composer__activity-actions">
-            {item.status === "pending" ? <button type="button" className="fx-btn fx-btn--sm" onClick={() => onCancel(item)}>Cancel send</button> : null}
-            {item.status === "pending" || item.status === "draft" ? <button type="button" className="fx-btn fx-btn--ghost fx-btn--sm" onClick={() => onEdit(item)}>Edit</button> : null}
-          </div>
-        </li>
-      ))}
-    </ul>
   );
 }

@@ -76,9 +76,12 @@ const GMAIL_SEND_REQUEST_OPTIONS = { timeout: GMAIL_SEND_TIMEOUT_MS, retry: fals
 // mechanism itself at unit-test speed via a small `ms` override, without
 // standing up a real hung Gmail/OAuth client — `ms` defaults to
 // GMAIL_SEND_TIMEOUT_MS for the real call sites below.
-export function withGmailSendCeiling(work, label, ms = GMAIL_SEND_TIMEOUT_MS) {
+// `controller`, when given, is aborted when the ceiling gives up, so work
+// that checks its signal (sendJobEmail) stops instead of sending late.
+export function withGmailSendCeiling(work, label, ms = GMAIL_SEND_TIMEOUT_MS, controller = null) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      controller?.abort();
       reject(new Error(
         `${label} exceeded the ${ms}ms send ceiling: a Gmail API call `
         + "— profile lookup, OAuth token refresh, or the send itself — did not complete in time",
@@ -124,6 +127,40 @@ export async function findSentMessageByDeliveryAttempt({ config, user = null, me
     },
     GMAIL_SEND_REQUEST_OPTIONS),
     "reconcileQuoteDelivery",
+  );
+  const match = response?.data?.messages?.[0];
+  return match ? { id: match.id || null, threadId: match.threadId || null, messageId: normalized } : null;
+}
+
+function mailboxUnavailableError(mailbox) {
+  const error = new Error(`Field cannot reach ${mailbox}, the Gmail mailbox this email first went from, so it cannot check that mailbox's Sent Mail. Connect Gmail for ${mailbox} (or ask its owner to send it), then send it again.`);
+  error.statusCode = 409;
+  error.code = "DELIVERY_MAILBOX_UNAVAILABLE";
+  return error;
+}
+
+/**
+ * Search one mailbox's Sent Mail for a delivery attempt's Message-ID: the
+ * mailbox the attempt went from (`mailbox`), reached as the person who sent
+ * it (`user`). Refuses, rather than answering "not found", when that mailbox
+ * cannot be searched, so a resend never follows a search of the wrong one.
+ */
+export async function findSentMessageInMailbox({ config, user = null, mailbox = null, messageId }) {
+  const normalized = String(messageId || "").trim();
+  if (!normalized) return null;
+  let transport = null;
+  try {
+    transport = resolveGmailTransport({ config, user, purpose: "reconcile" });
+  } catch {
+    transport = null;
+  }
+  const reached = normalizeEmail(transport?.gmailUser || "");
+  if (!transport?.gmail?.users?.messages?.list || (mailbox && reached && reached !== normalizeEmail(mailbox))) {
+    throw mailboxUnavailableError(mailbox || "the sender's mailbox");
+  }
+  const response = await withGmailSendCeiling(
+    transport.gmail.users.messages.list({ userId: "me", q: `in:sent rfc822msgid:${normalized}`, maxResults: 5 }, GMAIL_SEND_REQUEST_OPTIONS),
+    "reconcileJobEmail",
   );
   const match = response?.data?.messages?.[0];
   return match ? { id: match.id || null, threadId: match.threadId || null, messageId: normalized } : null;
@@ -269,16 +306,33 @@ export function formatDeliveryMessageId(attemptId, host = NEUTRAL_MESSAGE_ID_HOS
 // Small messages keep the JSON form they always used.
 export const GMAIL_RAW_JSON_MAX_CHARS = 4 * 1024 * 1024;
 
-export async function sendGmailMessage(gmail, raw, { threadId = null } = {}) {
+/** The earlier conversation's Gmail thread id, only when it is this mailbox's. */
+export function threadIdForMailbox(thread, mailbox) {
+  const earlier = normalizeEmail(thread?.gmailUser || "");
+  const sending = normalizeEmail(mailbox || "");
+  return thread?.threadId && earlier && sending && earlier === sending ? thread.threadId : null;
+}
+
+export async function sendGmailMessage(gmail, raw, { threadId = null, signal = null } = {}) {
   const thread = threadId ? { threadId } : {};
+  const options = signal ? { ...GMAIL_SEND_REQUEST_OPTIONS, signal } : GMAIL_SEND_REQUEST_OPTIONS;
   if (raw.length <= GMAIL_RAW_JSON_MAX_CHARS) {
-    return gmail.users.messages.send({ userId: "me", requestBody: { raw, ...thread } }, GMAIL_SEND_REQUEST_OPTIONS);
+    return gmail.users.messages.send({ userId: "me", requestBody: { raw, ...thread } }, options);
   }
   return gmail.users.messages.send({
     userId: "me",
     requestBody: { ...thread },
     media: { mimeType: "message/rfc822", body: Buffer.from(raw, "base64url") },
-  }, GMAIL_SEND_REQUEST_OPTIONS);
+  }, options);
+}
+
+/** A send the ceiling gave up on stops before Gmail rather than going late. */
+function assertNotAbandoned(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error("email not sent: the Gmail send ceiling passed before it reached Gmail");
+  error.code = "DELIVERY_ATTEMPT_STALE";
+  error.deliveryOutcome = "rejected_before_dispatch";
+  throw error;
 }
 
 // What the result (and the sent-email archive) says about each extra
@@ -328,6 +382,8 @@ async function performSendQuoteEmail({
   additionalAttachments = [],
   deliveryAttemptId = null,
   deliveryMessageId = null,
+  // Into the earlier Gmail conversation: { threadId, inReplyTo, references }.
+  thread = null,
 }) {
   const recipients = assertAllowedQuoteRecipients({ config, emails: to, label: "recipient" });
   const ccRecipients = assertAllowedQuoteRecipients({ config, emails: cc, label: "cc", required: false });
@@ -378,9 +434,13 @@ async function performSendQuoteEmail({
     messageId: deliveryAttemptId
       ? deliveryMessageId || formatDeliveryMessageId(deliveryAttemptId, resolveMessageIdHost({ config, user, fromEmail: sender.fromEmail }))
       : null,
+    inReplyTo: thread?.inReplyTo || null,
+    references: thread?.references || null,
   });
 
-  const result = await sendGmailMessage(gmail, raw);
+  // Gmail's thread id belongs to one mailbox: another mailbox's would be
+  // refused or misfiled, so it threads by its headers and "Re:" alone.
+  const result = await sendGmailMessage(gmail, raw, { threadId: threadIdForMailbox(thread, transport.gmailUser || sender.fromEmail) });
 
   return {
     id: result.data.id,
@@ -481,7 +541,8 @@ export function defaultJobEmailSubject(meta) {
 }
 
 export async function sendJobEmail(args) {
-  return withGmailSendCeiling(performSendJobEmail(args), "sendJobEmail");
+  const controller = new AbortController();
+  return withGmailSendCeiling(performSendJobEmail({ ...args, signal: controller.signal }), "sendJobEmail", GMAIL_SEND_TIMEOUT_MS, controller);
 }
 
 async function performSendJobEmail({
@@ -495,13 +556,36 @@ async function performSendJobEmail({
   customBody = null,
   themeFontFamily = null,
   additionalAttachments = [],
+  // A queued job email's stable delivery attempt (scheduled-email-queue.js),
+  // so Sent Mail can be searched for it after a send of unknown outcome.
+  deliveryAttemptId = null,
+  messageId = null,
+  // While an earlier attempt is unknown, the mailbox it went from: this one
+  // goes only from there.
+  mailbox = null,
+  // Called with { mailbox, messageId, sent } just before Gmail, so the queue
+  // stores them durably first (scheduled-email-queue.js).
+  onBeforeDispatch = null,
+  // Aborted when the send ceiling gives up (sendJobEmail).
+  signal = null,
+  thread = null,
 }) {
   const recipients = assertAllowedQuoteRecipients({ config, emails: to, label: "recipient" });
   const ccRecipients = assertAllowedQuoteRecipients({ config, emails: cc, label: "cc", required: false });
   const bccRecipients = assertAllowedQuoteRecipients({ config, emails: bcc, label: "bcc", required: false });
-  const transport = resolveGmailTransport({ config, user });
+  let transport;
+  try {
+    transport = resolveGmailTransport({ config, user });
+  } catch (error) {
+    error.deliveryOutcome = "rejected_before_dispatch";
+    throw error;
+  }
   if (!transport?.gmail) {
-    throw new Error("Gmail OAuth is not configured for job email sending.");
+    const error = mailbox
+      ? mailboxUnavailableError(mailbox)
+      : new Error("Gmail OAuth is not configured for job email sending.");
+    error.deliveryOutcome = "rejected_before_dispatch";
+    throw error;
   }
   const gmail = transport.gmail;
 
@@ -512,8 +596,20 @@ async function performSendJobEmail({
     gmailUser: transport.gmailUser || senderProfile,
   });
   if (!sender.fromEmail) {
-    throw new Error("mail.fromEmail or FIELD_MAIL_FROM is required for email sending.");
+    const error = new Error("mail.fromEmail or FIELD_MAIL_FROM is required for email sending.");
+    error.deliveryOutcome = "rejected_before_dispatch";
+    throw error;
   }
+
+  const sendingMailbox = normalizeEmail(transport.gmailUser || sender.fromEmail);
+  if (mailbox && normalizeEmail(mailbox) !== sendingMailbox) {
+    const error = mailboxUnavailableError(mailbox);
+    error.deliveryOutcome = "rejected_before_dispatch";
+    throw error;
+  }
+  const deliveryMessageId = deliveryAttemptId
+    ? messageId || formatDeliveryMessageId(deliveryAttemptId, resolveMessageIdHost({ config, user, fromEmail: sender.fromEmail }))
+    : null;
 
   const { subject: resolvedSubject, htmlBody, body } = composeJobEmail({
     meta,
@@ -534,9 +630,40 @@ async function performSendJobEmail({
     body,
     htmlBody,
     additionalAttachments,
+    deliveryAttemptId,
+    messageId: deliveryMessageId,
+    inReplyTo: thread?.inReplyTo || null,
+    references: thread?.references || null,
   });
 
-  const result = await sendGmailMessage(gmail, raw);
+  assertNotAbandoned(signal);
+  if (onBeforeDispatch) {
+    await onBeforeDispatch({
+      mailbox: sendingMailbox,
+      messageId: deliveryMessageId,
+      sent: {
+        from: sender.fromEmail,
+        fromName: sender.fromName,
+        replyTo: sender.replyTo,
+        gmailUser: sendingMailbox,
+        authMode: transport.authMode,
+        to: recipients,
+        cc: ccRecipients,
+        bcc: bccRecipients,
+        subject: resolvedSubject,
+        bodyText: body,
+        htmlBody,
+        attachments: additionalAttachments.map(describeExtraAttachment),
+        rfcMessageId: deliveryMessageId,
+        references: thread?.references || null,
+      },
+    });
+  }
+
+  assertNotAbandoned(signal);
+  // Gmail's thread id belongs to one mailbox: another mailbox's would be
+  // refused or misfiled, so it threads by its headers and "Re:" alone.
+  const result = await sendGmailMessage(gmail, raw, { threadId: threadIdForMailbox(thread, sendingMailbox), signal });
 
   return {
     id: result.data.id,
@@ -553,6 +680,48 @@ async function performSendJobEmail({
     bodyText: body,
     htmlBody,
     attachments: additionalAttachments.map(describeExtraAttachment),
+  };
+}
+
+/**
+ * Send a test copy of an email (Send a test to me): to the signed-in
+ * person's own address only, "[Test]" in front of the subject. No delivery
+ * attempt, no Message-ID of Field's, nothing recorded.
+ */
+export async function sendTestEmail(args) {
+  return withGmailSendCeiling(performSendTestEmail(args), "sendTestEmail");
+}
+
+async function performSendTestEmail({ config, user, subject, body, htmlBody, attachments = [] }) {
+  const own = normalizeEmail(user?.email || "");
+  if (!own) {
+    const error = new Error("a test email goes to your own address, and this sign-in has none");
+    error.statusCode = 400;
+    throw error;
+  }
+  const recipients = assertAllowedQuoteRecipients({ config, emails: [own], label: "recipient" });
+  const transport = resolveGmailTransport({ config, user });
+  if (!transport?.gmail) throw new Error("Gmail OAuth is not configured for job email sending.");
+  const senderProfile = await getAuthenticatedSender(transport);
+  const sender = resolveMailSender({ config, user, gmailUser: transport.gmailUser || senderProfile });
+  const testSubject = `[Test] ${cleanHeaderText(subject)}`.trim();
+  const raw = buildMimeMessage({
+    fromName: sender.fromName,
+    fromEmail: sender.fromEmail,
+    replyTo: sender.replyTo,
+    to: recipients,
+    subject: testSubject,
+    body,
+    htmlBody,
+    additionalAttachments: attachments,
+  });
+  const result = await sendGmailMessage(transport.gmail, raw);
+  return {
+    id: result.data.id,
+    threadId: result.data.threadId,
+    subject: testSubject,
+    to: recipients,
+    attachments: attachments.map(describeExtraAttachment),
   };
 }
 
@@ -806,6 +975,9 @@ export function buildMimeMessage({
   additionalAttachments = [],
   deliveryAttemptId = null,
   messageId = null,
+  // RFC 5322 threading: the Message-ID this replies to, and the chain.
+  inReplyTo = null,
+  references = null,
 }) {
   const mixedBoundary = `field-mixed-${Date.now()}`;
   const altBoundary = `field-alt-${Date.now()}`;
@@ -833,6 +1005,8 @@ export function buildMimeMessage({
           `X-Field-Delivery-Attempt: ${cleanHeaderText(deliveryAttemptId)}`,
         ]
       : []),
+    ...(cleanHeaderText(inReplyTo) ? [`In-Reply-To: ${cleanHeaderText(inReplyTo)}`] : []),
+    ...(cleanHeaderText(references) ? [`References: ${cleanHeaderText(references)}`] : []),
     "MIME-Version: 1.0",
     `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
   ].filter(Boolean);

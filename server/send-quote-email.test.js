@@ -20,6 +20,7 @@ import {
   NEUTRAL_MESSAGE_ID_HOST,
   resolveMessageIdHost,
   sendGmailMessage,
+  findSentMessageInMailbox,
 } from "./send-quote-email.js";
 import { renderQuoteEmailHtml } from "./quote-email-template.js";
 
@@ -459,4 +460,18 @@ test("messages over Gmail's JSON size go through the media upload form", async (
   assert.equal(calls[1].params.media.mimeType, "message/rfc822");
   assert.ok(Buffer.from(calls[1].params.media.body).equals(bytes), "the media body is the message itself");
   assert.equal(calls[1].options.timeout, calls[0].options.timeout, "both forms keep the send timeout");
+});
+
+test("the send ceiling aborts the work it gives up on, so it cannot send late", async () => {
+  const controller = new AbortController();
+  await assert.rejects(withGmailSendCeiling(new Promise(() => {}), "sendJobEmail", 5, controller), /send ceiling/);
+  assert.equal(controller.signal.aborted, true);
+});
+
+test("a Sent Mail check refuses, rather than answering not found, when the first mailbox cannot be searched", async () => {
+  resetGmailClient();
+  await assert.rejects(
+    findSentMessageInMailbox({ config: {}, user: { email: "alice@example.invalid", kind: "human" }, mailbox: "alice@example.invalid", messageId: "<field-1@example.invalid>" }),
+    (error) => error.code === "DELIVERY_MAILBOX_UNAVAILABLE" && error.statusCode === 409 && /cannot reach alice@example\.invalid/.test(error.message),
+  );
 });

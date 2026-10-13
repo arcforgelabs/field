@@ -14,11 +14,12 @@ import { JOB_STATUS_LABEL, jobInvoices, jobPaid, jobRef, jobStatus, jobTitle, ne
 import { QuoteEditor, type QuoteTotals, type SaveState } from "./quote-editor";
 import { JobInvoices, RecordPaymentDialog } from "./job-invoices";
 import { JobActivity, JobNotes } from "./job-activity";
+import { JobEmails } from "@/features/job-detail/email-record";
 import { openDocumentPdf } from "@/lib/open-document";
 import { JobRail } from "./job-rail";
 import { describeVersions } from "./quote-versions";
 
-type Tab = "quote" | "invoices" | "notes" | "activity";
+type Tab = "quote" | "invoices" | "email" | "notes" | "activity";
 
 export function JobPage() {
   const { id = "" } = useParams();
@@ -67,7 +68,9 @@ export function JobPage() {
   const status = meta ? jobStatus(meta) : "draft";
   const invoices = meta ? jobInvoices(meta) : [];
   const landed = status === "invoicing" || status === "paid";
-  const activeTab: Tab = tab ?? (landed ? "invoices" : "quote");
+  // ?tab=email (and the others) opens a tab from a link, such as "Sent. View".
+  const linkedTab = params.get("tab");
+  const activeTab: Tab = tab ?? (linkedTab === "email" || linkedTab === "notes" || linkedTab === "activity" ? linkedTab : landed ? "invoices" : "quote");
   const policy = detail?.quoteEditPolicy || null;
   const editable = Boolean(detail?.quote) && (policy ? policy.canEditSelectedVersion : status === "draft");
   const selectedVersion = detail?.versionView?.selectedVersion ?? meta?.quoteVersion ?? null;
@@ -229,6 +232,7 @@ export function JobPage() {
             <button type="button" role="tab" aria-selected={activeTab === "invoices"} disabled={!landed && invoices.length === 0} title={!landed ? "Invoices open once the customer accepts" : undefined} onClick={() => setTab("invoices")}>
               Invoices{invoices.length ? <span className="fx-tabs__badge">{invoices.filter((invoice) => invoice.status === "paid").length}/{invoices.length}</span> : null}
             </button>
+            <button type="button" role="tab" aria-selected={activeTab === "email"} onClick={() => setTab("email")}>Email</button>
             <button type="button" role="tab" aria-selected={activeTab === "notes"} onClick={() => setTab("notes")}>Notes</button>
             <button type="button" role="tab" aria-selected={activeTab === "activity"} onClick={() => setTab("activity")}>Activity</button>
           </div>
@@ -259,6 +263,11 @@ export function JobPage() {
                 onRecordPayment={(index) => setPaying(index)}
                 run={run}
               />
+            </div>
+          )}
+          {activeTab === "email" && (
+            <div role="tabpanel">
+              <JobEmails jobId={detail.meta.id} />
             </div>
           )}
           {activeTab === "notes" && (

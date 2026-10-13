@@ -82,6 +82,9 @@ export function AttachmentTray({
   documents,
   uploads,
   retainedNames = [],
+  onRemoveRetained,
+  suggested = [],
+  onAddSuggested,
   pickerAvailable,
   onAdd,
   onRemoveDocument,
@@ -91,18 +94,24 @@ export function AttachmentTray({
   documents: JobDocument[];
   uploads: File[];
   retainedNames?: string[];
+  /** Uploads kept with a saved draft can be removed too. */
+  onRemoveRetained?: (name: string) => void;
+  /** Documents the send type offers, not attached until ticked. */
+  suggested?: Array<{ document: JobDocument; reason: string }>;
+  onAddSuggested?: (uid: string) => void;
   pickerAvailable: boolean;
   onAdd: () => void;
   onRemoveDocument: (uid: string) => void;
   onRemoveUpload: (index: number) => void;
 }) {
   const totals = attachmentTotals({ main, documents, uploads });
+  const attachedCount = totals.count + retainedNames.length;
   return (
     <section className="fx-att" aria-label="Attachments">
       <div className="fx-att__h">
         <Paperclip aria-hidden />
         <strong>Attachments</strong>
-        <span className="fx-mute">{totals.count + retainedNames.length}</span>
+        <span className="fx-mute">{suggested.length ? `${attachedCount} of ${attachedCount + suggested.length} ticked` : attachedCount}</span>
         <span className={`fx-att__total${totals.problem ? " fx-att__total--over" : ""}`}>
           {formatBytes(totals.bytes)} of 18 MB
         </span>
@@ -137,6 +146,23 @@ export function AttachmentTray({
             </button>
           </li>
         ))}
+        {suggested.map(({ document, reason }) => (
+          <li className="fx-att__row fx-att__row--offered" key={`offered-${document.uid}`}>
+            <input
+              type="checkbox"
+              className="fx-checkbox"
+              checked={false}
+              aria-label={`Attach ${document.number}`}
+              onChange={() => onAddSuggested?.(document.uid)}
+            />
+            <span className="fx-att__name">
+              <span>{document.number}.pdf</span>
+              <small>{reason}</small>
+            </span>
+            <span className="fx-att__size">{formatBytes(document.byteLength)}</span>
+            <span />
+          </li>
+        ))}
         {uploads.map((file, index) => (
           <li className="fx-att__row" key={`${file.name}-${index}`}>
             <Upload aria-hidden className="fx-att__icon" />
@@ -158,6 +184,11 @@ export function AttachmentTray({
               <small>Upload · kept with this draft</small>
             </span>
             <span className="fx-att__size" />
+            {onRemoveRetained ? (
+              <button type="button" className="fx-btn fx-btn--ghost fx-btn--sm fx-btn--icon" aria-label={`Remove ${name}`} onClick={() => onRemoveRetained(name)}>
+                <X aria-hidden />
+              </button>
+            ) : null}
           </li>
         ))}
       </ul>

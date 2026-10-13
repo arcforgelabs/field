@@ -695,6 +695,9 @@ html[data-theme="field"][data-mode] .fx-table th, html[data-theme="field"][data-
 .fx-att__lock { display: inline-grid; place-items: center; width: 26px; color: var(--t-mute); }
 .fx-att__lock svg { width: 14px; height: 14px; }
 .fx-att__problem { margin: 0; padding: 8px 12px 10px; color: var(--t-danger); font-size: 12.5px; }
+.fx-att__row--offered .fx-att__name > span { color: var(--t-dim); font-weight: 500; }
+.fx-composer__thread { display: flex; align-items: flex-start; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--fx-line); font-size: 12.5px; color: var(--t-dim); }
+.fx-composer__thread small { display: block; color: var(--t-mute); }
 .fx-att-picker { width: min(620px, 100%); }
 .fx-att-picker__h { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-bottom: 10px; }
 .fx-att-picker__h > span { flex: 1; }
@@ -731,6 +734,11 @@ html[data-theme="field"][data-mode] .fx-table th, html[data-theme="field"][data-
 .fx-rcpt__label { flex: none; width: 56px; color: var(--t-mute); font-size: 12.5px; }
 .fx-composer__from-value { color: var(--t-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fx-composer__subject { flex: 1; min-width: 0; border: 0; background: none; color: var(--t-text); font: 600 14px var(--t-body); height: 34px; outline: none; }
+/* The subject's merge fields read as chips away from the input (SubjectField). */
+.fx-subject { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+.fx-composer__subject--masked { color: transparent; }
+.fx-subject__mirror { position: absolute; inset: 0; display: flex; align-items: center; gap: 0; pointer-events: none; overflow: hidden; white-space: pre; color: var(--t-text); font: 600 14px var(--t-body); }
+.fx-subject__field { padding: 1px 6px; margin: 0 1px; border-radius: 4px; background: color-mix(in srgb, var(--t-accent) 14%, transparent); text-decoration: underline dotted color-mix(in srgb, var(--t-accent) 70%, transparent); text-underline-offset: 3px; }
 .fx-composer__check { margin: 8px 14px 0; }
 .fx-rcpt { position: relative; }
 .fx-rcpt__chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; align-items: center; }
@@ -848,3 +856,25 @@ html[data-theme="field"][data-mode] .fx-table th, html[data-theme="field"][data-
   .fx-att-picker { width: 100%; max-height: 88vh; display: flex; flex-direction: column; border-radius: calc(var(--t-radius-lg, var(--t-radius)) + 6px) calc(var(--t-radius-lg, var(--t-radius)) + 6px) 0 0; }
   .fx-att-picker .fx-att-picker__b { max-height: none; flex: 1; }
 }
+
+/* ── The job's email list and a sent email as it went out ───────────────── */
+.fx-job-emails { display: flex; flex-direction: column; gap: 12px; }
+.fx-job-emails__h { display: flex; align-items: center; gap: 8px; color: var(--t-dim); font-size: 12.5px; flex-wrap: wrap; }
+.fx-job-emails__h > svg { width: 15px; height: 15px; }
+.fx-email-row { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fx-composer__activity > li:has(> .fx-email-row):hover { background: var(--fx-hover); }
+.fx-email-row:focus-visible { outline: none; box-shadow: var(--fx-focus); border-radius: var(--t-radius); }
+.fx-email-sheet { display: flex; flex-direction: column; min-height: 0; }
+.fx-email-sheet__h { display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px 10px; border-bottom: 1px solid var(--fx-line); }
+.fx-email-sheet__h > div { flex: 1; min-width: 0; }
+.fx-email-sheet__h h2 { margin: 0; font: 650 16px var(--t-display); }
+.fx-email-sheet__h p { margin: 4px 0 0; font-size: 12px; }
+.fx-email-sheet__meta { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 4px 10px; margin: 0; padding: 12px 20px; border-bottom: 1px solid var(--fx-line); font-size: 12.5px; }
+.fx-email-sheet__meta dt { color: var(--t-mute); }
+.fx-email-sheet__meta dd { margin: 0; overflow-wrap: anywhere; }
+.fx-email-sheet__att { list-style: none; margin: 0; padding: 8px 20px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--fx-line); font-size: 12.5px; }
+.fx-email-sheet__att li { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 8px; align-items: center; }
+.fx-email-sheet__att svg { width: 15px; height: 15px; color: var(--t-dim); }
+.fx-email-sheet__att a { color: var(--t-accent); overflow-wrap: anywhere; }
+.fx-email-sheet__att small { grid-column: 2; font-size: 11.5px; }
+.fx-email-sheet__frame { flex: 1; min-height: 420px; width: 100%; border: 0; background: #ffffff; }
