@@ -1,0 +1,17 @@
+{
+  "$comment": "Field overrides on top of arcforgelabs/.github barnacle/config.json. Rules merge by label. A maintainer applies the label after reading the review; Barnacle never applies it.",
+  "rules": [
+    {
+      "label": "r: not-in-vision",
+      "close": true,
+      "stateReason": "not_planned",
+      "message": "Closing this because it doesn't fit Field's vision: https://github.com/arcforgelabs/field/blob/main/VISION.md (see \"Out of scope\" and \"Standing decisions\"). This includes work started before the vision changed.\n\nIf you think it does fit, or the vision should change, comment with the line you think it serves and we'll take another look."
+    },
+    {
+      "label": "r: customer-data",
+      "close": true,
+      "stateReason": "not_planned",
+      "message": "Closing this because it contains, or asks for, one installation's customer data, credentials or private configuration. Field's public repository never holds those (SECURITY.md, \"Rules Held Hard\"). If something sensitive was posted, tell a maintainer privately through the Security tab so it can be removed.\n\nIf the underlying problem is about how Field works, open a new issue that describes it with synthetic data."
+    }
+  ]
+}
