@@ -352,8 +352,8 @@ is set: `startTestPostgres()` returns `{ url, stop }` or `null`.
 
 - `migrations/0001_initial.sql`
   Initial additive schema for jobs, captures, quotes, timeline, gaps, chat, measurements, storage objects, backup outbox, and audit events.
-- `recording-backfill.js`
-  Shared mapper that reads the current recording-folder structure and produces deterministic rows/SQL.
+- `job-backfill.js`
+  Shared mapper that reads the job folders under the data directory and produces deterministic rows/SQL for `0001_initial.sql`. `scripts/backfill-db.js` is its command line.
 - `ARTIFACT-MAP.md`
   Current file/folder artifact to target-table mapping.
 
@@ -365,16 +365,30 @@ is set: `startTestPostgres()` returns `{ url, stop }` or `null`.
 ## Apply Schema
 
 ```bash
-psql "$DATABASE_URL" -f apps/field/server/db/migrations/0001_initial.sql
+psql "$DATABASE_URL" -f server/db/migrations/0001_initial.sql
 ```
 
 ## Backfill CLI
 
+From the repository root:
+
 ```bash
-node apps/field/scripts/backfill-db.js --source-root /opt/apps/field/data --emit-sql /tmp/field-backfill.sql
-node apps/field/scripts/backfill-db.js --source-root /opt/apps/field/data --include-schema --apply
-node apps/field/scripts/backfill-db.js --source-root /opt/apps/field/data --seed-backup-jobs --emit-sql -
+node scripts/backfill-db.js --source-root /path/to/field/data
+node scripts/backfill-db.js --source-root /path/to/field/data --emit-sql /tmp/field-backfill.sql
+node scripts/backfill-db.js --source-root /path/to/field/data --include-schema --apply
+node scripts/backfill-db.js --source-root /path/to/field/data --seed-backup-jobs --emit-sql -
 ```
+
+With no output option it prints a count of rows per table and writes nothing.
+`--emit-sql` writes the SQL; `--apply` pipes it to `psql` (needs `DATABASE_URL`
+or `FIELD_DATABASE_URL`). Every row is an upsert on a stable key, so a second
+import changes no row counts. `scripts/backfill-db.test.js` proves this on
+synthetic job folders and an in-memory PGlite.
+
+This lane writes the `0001_initial.sql` tables, not the Drizzle tables that
+`server/db-runtime/` migrates, and the server never reads them. Both schemas
+have a `quotes` table with different columns, so never apply it to Field's
+own database. Use a dedicated, empty database.
 
 ## Backup Model
 
