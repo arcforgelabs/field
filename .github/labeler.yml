@@ -1,0 +1,96 @@
+# Area labels for pull requests, applied by .github/workflows/labeler.yml
+# (actions/labeler v7 syntax). The workflow reads this file from the base
+# branch only, so a pull request cannot change how it is itself labelled.
+"area: quotes":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/quotes/**
+          - server/assembly-modes.js
+          - client/src/features/job/**
+          - client/src/features/job-detail/**
+          - generate-landscaping-quote.js
+          - scripts/quote-invoice-proof/**
+
+"area: invoices":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/invoices/**
+          - client/src/features/invoices/**
+          - scripts/quote-invoice-proof/**
+
+"area: documents":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/documents/**
+          - server/storage/**
+
+"area: catalogue":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/catalog/**
+          - server/price-catalog/**
+          - quote-catalogs/**
+          - client/src/features/catalogue/**
+          - client/src/features/pricing/**
+
+"area: database":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/db/**
+          - server/db-runtime/**
+          - server/data-migrations/**
+
+"area: auth":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/auth/**
+          - client/src/features/login/**
+
+"area: integrations":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/xero/**
+          - server/mcp/**
+          - docs/XERO.md
+          - docs/REMOTE_MCP.md
+          - docs/GMAIL_SENDING.md
+
+"area: client":
+  - changed-files:
+      - any-glob-to-any-file:
+          - client/**
+
+"area: cli":
+  - changed-files:
+      - any-glob-to-any-file:
+          - scripts/field-cli.js
+          - scripts/install-field-cli.js
+          - skills/**
+
+"area: deploy":
+  - changed-files:
+      - any-glob-to-any-file:
+          - Dockerfile
+          - .dockerignore
+          - .replit
+          - scripts/replit-*
+          - docs/REPLIT.md
+
+"area: ci":
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - "*.md"
+
+"area: dependencies":
+  - changed-files:
+      - any-glob-to-any-file:
+          - package.json
+          - package-lock.json
+          - client/package.json
+          - client/package-lock.json

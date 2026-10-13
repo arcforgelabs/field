@@ -38,6 +38,7 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `docs/concepts/surveyor.md` | Surveyor, Field's before/after proof lane |
 | `docs/lessons-learned.md` | Persistent production bugs and the fixes that resolved them |
 | `docs/CI.md` | CI's test lanes, which checks are required, and how to run each lane locally |
+| `.github/automation/README.md` | Where the review and triage bots (Barnacle, labeler, command reactions, ClawSweeper) come from |
 | `docs/review/` | Before and after renders of customer documents a change alters, from synthetic data, for the owner's review |
 | `server/catalog/README.md` | The PostgreSQL price catalogue |
 | `server/db/README.md` | The database runtime, migrations and tenancy |
