@@ -81,7 +81,7 @@ The human does every step; you never see, print, or store the token value.
    Fine-grained tokens → Generate new token).
 2. **Token name:** `replit-<repo>`. **Expiration:** 90 days.
 3. **Resource owner:** switch from the personal account to `<owner>`
-   (**embarkearthworks** for this repo).
+   (**arcforgelabs** for this repo).
    If this is skipped, the repo will not appear in the list.
 4. **Repository access:** *Only select repositories* → `<repo>`.
 5. **Repository permissions:**
