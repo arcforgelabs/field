@@ -1,11 +1,49 @@
 {
-  "name": "field",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@arcforgelabs/field",
+  "version": "2026.10.13",
+  "description": "Quotes and invoices an earthworks operator can trust: a deterministic, explainable quote engine with an API, CLI and MCP.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arcforgelabs/field.git"
+  },
+  "homepage": "https://github.com/arcforgelabs/field#readme",
+  "bugs": {
+    "url": "https://github.com/arcforgelabs/field/issues"
+  },
+  "engines": {
+    "node": ">=24"
+  },
   "bin": {
-    "field": "./scripts/field-cli.js"
+    "field": "./scripts/field-cli.js",
+    "field-server": "./scripts/field-server.js"
+  },
+  "files": [
+    "server/",
+    "!server/**/*.test.js",
+    "!server/db/src/",
+    "!server/db/tsconfig.json",
+    "shared/",
+    "!shared/**/*.test.js",
+    "client/dist/",
+    "quote-catalogs/",
+    "scripts/field-cli.js",
+    "scripts/field-server.js",
+    "scripts/install-field-cli.js",
+    "scripts/demo-fixtures.js",
+    "scripts/reset-staging-baseline.js",
+    "scripts/export-quote-proof-bundle.js",
+    "scripts/verification/",
+    "!scripts/verification/**/*.test.js",
+    "config.json.example",
+    "SECURITY.md",
+    "VISION.md",
+    "npm-shrinkwrap.json"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "start": "node --import ./server/observability/instrument.js server/index.js",

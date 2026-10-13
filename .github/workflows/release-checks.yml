@@ -1,0 +1,152 @@
+name: Release checks
+
+# Proves a release tag before anything is published (docs/RELEASING.md):
+# the tag is a calendar version that matches package.json, it sits on main,
+# every CI lane passes on its exact commit, and the npm tarball installs and
+# starts. release-publish.yml calls this first; run it on its own to rehearse
+# a release. It never publishes.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag, for example v2026.10.14-beta.1
+        required: true
+        type: string
+    outputs:
+      commit:
+        value: ${{ jobs.resolve.outputs.commit }}
+      version:
+        value: ${{ jobs.resolve.outputs.version }}
+      channel:
+        value: ${{ jobs.resolve.outputs.channel }}
+      npm_dist_tag:
+        value: ${{ jobs.resolve.outputs.npm_dist_tag }}
+      tarball:
+        value: ${{ jobs.package.outputs.tarball }}
+      tarball_sha256:
+        value: ${{ jobs.package.outputs.tarball_sha256 }}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v2026.10.14-beta.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  resolve:
+    name: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.tag.outputs.commit }}
+      version: ${{ steps.tag.outputs.version }}
+      channel: ${{ steps.tag.outputs.channel }}
+      npm_dist_tag: ${{ steps.tag.outputs.npm_dist_tag }}
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Require a reviewed commit and a matching version
+        id: tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
+            echo "::error::${TAG} (${commit}) is not on main. Only reviewed main commits are released." >&2
+            exit 1
+          fi
+          node scripts/release/release.mjs check --tag "$TAG" > "$RUNNER_TEMP/release.json"
+          {
+            echo "commit=${commit}"
+            echo "version=$(jq -r .version "$RUNNER_TEMP/release.json")"
+            echo "channel=$(jq -r .channel "$RUNNER_TEMP/release.json")"
+            echo "npm_dist_tag=$(jq -r .npmDistTag "$RUNNER_TEMP/release.json")"
+          } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+
+  ci:
+    name: ci
+    needs: resolve
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.resolve.outputs.commit }}
+
+  package:
+    name: package
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      tarball: ${{ steps.pack.outputs.tarball }}
+      tarball_sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Build the data layer and the client bundle
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run db:build
+          npm --prefix client ci
+          npm --prefix client run build
+
+      # A beta's version is package.json's version with -beta.N; npm version
+      # writes it to package.json and package-lock.json in this job only.
+      # The shrinkwrap pins every installed dependency to what CI tested.
+      - name: Pack the npm tarball
+        id: pack
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          cp package-lock.json npm-shrinkwrap.json
+          mkdir -p "$RUNNER_TEMP/package"
+          tarball="$(npm pack --pack-destination "$RUNNER_TEMP/package" --json | jq -r '.[0].filename')"
+          (cd "$RUNNER_TEMP/package" && sha256sum "$tarball" > "$tarball.sha256")
+          node scripts/release/release.mjs migrations --output "$RUNNER_TEMP/package/migrations.json"
+          echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(cut -d' ' -f1 "$RUNNER_TEMP/package/$tarball.sha256")" >> "$GITHUB_OUTPUT"
+          echo "Packed ${tarball}: $(cat "$RUNNER_TEMP/package/$tarball.sha256")" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the tarball in an empty directory and start it
+        run: scripts/release/package-smoke.sh "$RUNNER_TEMP/package/${{ steps.pack.outputs.tarball }}"
+
+      - name: Keep the tarball for publishing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/package
+          retention-days: 30
+          if-no-files-found: error

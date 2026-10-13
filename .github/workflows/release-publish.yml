@@ -1,0 +1,407 @@
+name: Release publish
+run-name: Release ${{ inputs.tag }}
+
+# Publishes one release tag (docs/RELEASING.md). release-prepare.yml starts
+# it after it creates the tag; it can also be started by hand for an existing
+# tag, which re-runs the checks and skips what is already published.
+#
+#   checks          release-checks.yml: tag, every CI lane, npm tarball
+#   npm             npm-publish environment (Samuel approves): trusted
+#                   publishing with provenance, no stored token
+#   image           release environment (Samuel approves): GHCR by digest,
+#                   build attestation and SBOM, smoke of the pushed digest
+#   github-release  GitHub Release with notes, manifest and .sha256 files
+#   evidence        verifies what was published and attaches the result
+#
+# A beta goes straight to the beta channel. A stable release publishes to npm
+# `next` and GHCR's version tag only; release-promote.yml makes it `latest`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v2026.10.14-beta.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  # The first npm CLI that can also move dist-tags through trusted publishing.
+  NPM_VERSION: "11.21.0"
+  PACKAGE: "@arcforgelabs/field"
+  IMAGE: ghcr.io/arcforgelabs/field
+
+jobs:
+  guard:
+    name: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require the workflow from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run Release publish from main, not ${GITHUB_REF}." >&2
+          exit 1
+
+  checks:
+    name: checks
+    needs: guard
+    uses: ./.github/workflows/release-checks.yml
+    with:
+      tag: ${{ inputs.tag }}
+
+  npm:
+    name: npm
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: npm-publish
+      url: https://www.npmjs.com/package/@arcforgelabs/field/v/${{ needs.checks.outputs.version }}
+    permissions:
+      contents: read
+      # Trusted publishing: npm exchanges GitHub's OIDC token for a
+      # short-lived publish token and signs SLSA provenance for this run.
+      # Do not set NODE_AUTH_TOKEN or a registry-url: npm would use that
+      # instead of OIDC.
+      id-token: write
+    outputs:
+      integrity: ${{ steps.verify.outputs.integrity }}
+      shasum: ${{ steps.verify.outputs.shasum }}
+    steps:
+      - name: Fetch the tarball release-checks proved
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-package
+          path: package
+
+      - name: Require the same bytes
+        working-directory: package
+        env:
+          TARBALL: ${{ needs.checks.outputs.tarball }}
+          EXPECTED: ${{ needs.checks.outputs.tarball_sha256 }}
+        run: |
+          set -euo pipefail
+          echo "${EXPECTED}  ${TARBALL}" | sha256sum -c -
+
+      - name: Set up Node and npm
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install npm ${{ env.NPM_VERSION }}
+        run: npm install -g "npm@${NPM_VERSION}" && npm --version
+
+      - name: Publish to npm
+        working-directory: package
+        env:
+          TARBALL: ${{ needs.checks.outputs.tarball }}
+          VERSION: ${{ needs.checks.outputs.version }}
+          DIST_TAG: ${{ needs.checks.outputs.npm_dist_tag }}
+        run: |
+          set -euo pipefail
+          local_integrity="sha512-$(openssl dgst -sha512 -binary "$TARBALL" | base64 -w0)"
+          published="$(npm view "${PACKAGE}@${VERSION}" dist.integrity 2>/dev/null || true)"
+          if [[ -n "$published" ]]; then
+            if [[ "$published" != "$local_integrity" ]]; then
+              echo "::error::${PACKAGE}@${VERSION} is already on npm with different bytes (${published}). A version is never republished; cut a new tag." >&2
+              exit 1
+            fi
+            echo "${PACKAGE}@${VERSION} is already on npm with these bytes; not publishing again."
+            exit 0
+          fi
+          npm publish "./${TARBALL}" --access public --tag "$DIST_TAG" --provenance
+
+      - name: Read back what npm serves
+        id: verify
+        working-directory: package
+        env:
+          TARBALL: ${{ needs.checks.outputs.tarball }}
+          VERSION: ${{ needs.checks.outputs.version }}
+        run: |
+          set -euo pipefail
+          local_integrity="sha512-$(openssl dgst -sha512 -binary "$TARBALL" | base64 -w0)"
+          for _ in $(seq 1 30); do
+            integrity="$(npm view "${PACKAGE}@${VERSION}" dist.integrity 2>/dev/null || true)"
+            [[ -n "$integrity" ]] && break
+            sleep 5
+          done
+          if [[ "$integrity" != "$local_integrity" ]]; then
+            echo "::error::npm serves ${integrity:-nothing} for ${PACKAGE}@${VERSION}; expected ${local_integrity}." >&2
+            exit 1
+          fi
+          echo "integrity=${integrity}" >> "$GITHUB_OUTPUT"
+          echo "shasum=$(npm view "${PACKAGE}@${VERSION}" dist.shasum)" >> "$GITHUB_OUTPUT"
+          echo "npm serves ${PACKAGE}@${VERSION} with ${integrity}" >> "$GITHUB_STEP_SUMMARY"
+
+  image:
+    name: image
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: release
+      url: https://github.com/arcforgelabs/field/pkgs/container/field
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.channel.outputs.tags }}
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.checks.outputs.commit }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Sign in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Pushed by digest, with no tag: tags are added only after the
+      # attestation and the smoke pass. BuildKit attaches its own SBOM and
+      # provenance to the image index.
+      - name: Build and push the image by digest
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          build-args: VCS_REF=${{ needs.checks.outputs.commit }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/arcforgelabs/field
+            org.opencontainers.image.version=${{ needs.checks.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.checks.outputs.commit }}
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.title=Field
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=field-image
+
+      - name: Attest the build
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Extract the image SBOM
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ needs.checks.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/image"
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --format '{{ json .SBOM.SPDX }}' > "$RUNNER_TEMP/image/field-image-${VERSION}.spdx.json"
+          jq -e '.packages | length > 0' "$RUNNER_TEMP/image/field-image-${VERSION}.spdx.json" >/dev/null
+
+      - name: Attest the SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/image/field-image-${{ needs.checks.outputs.version }}.spdx.json
+          push-to-registry: true
+
+      - name: Verify the attestation by digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo "$GITHUB_REPOSITORY"
+
+      - name: Set up Node for the smoke
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The same smoke as CI, against the pushed bytes.
+      - name: Smoke the pushed digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          COMMIT: ${{ needs.checks.outputs.commit }}
+        run: |
+          set -euo pipefail
+          docker pull "${IMAGE}@${DIGEST}"
+          npm --prefix e2e ci
+          npx --prefix e2e playwright install --with-deps chromium
+          e2e/run-image-smoke.sh "${IMAGE}@${DIGEST}" "$COMMIT"
+
+      - name: Tag the verified digest
+        id: channel
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ needs.checks.outputs.version }}
+          CHANNEL: ${{ needs.checks.outputs.channel }}
+        run: |
+          set -euo pipefail
+          args=(--tag "${IMAGE}:${VERSION}")
+          tags="[\"${VERSION}\"]"
+          if [[ "$CHANNEL" == "beta" ]]; then
+            args+=(--tag "${IMAGE}:beta")
+            tags="[\"${VERSION}\",\"beta\"]"
+          fi
+          docker buildx imagetools create "${args[@]}" "${IMAGE}@${DIGEST}"
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "${IMAGE}@${DIGEST} tags: ${tags}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the image SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-sbom
+          path: ${{ runner.temp }}/image
+          retention-days: 30
+
+  github-release:
+    name: github-release
+    needs: [checks, npm, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.checks.outputs.commit }}
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Fetch the tarball and SBOMs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: "{npm-package,image-sbom,sbom}"
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Write release-manifest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          COMMIT: ${{ needs.checks.outputs.commit }}
+          TARBALL: ${{ needs.checks.outputs.tarball }}
+          TARBALL_SHA256: ${{ needs.checks.outputs.tarball_sha256 }}
+          INTEGRITY: ${{ needs.npm.outputs.integrity }}
+          SHASUM: ${{ needs.npm.outputs.shasum }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+          IMAGE_TAGS: ${{ needs.image.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # Each lane of release-checks, by name, with its conclusion.
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs" \
+            --jq '.jobs[] | select(.name | startswith("checks / ")) | {(.name | sub("^checks / (ci / )?"; "")): .conclusion}' \
+            | jq -s 'add' > "$RUNNER_TEMP/checks.json"
+          jq -n \
+            --arg tag "$TAG" --arg commit "$COMMIT" --arg repository "$GITHUB_REPOSITORY" \
+            --arg run "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg node "$NODE_VERSION" \
+            --slurpfile checks "$RUNNER_TEMP/checks.json" \
+            --arg package "$PACKAGE" --arg integrity "$INTEGRITY" --arg shasum "$SHASUM" \
+            --arg tarball "$TARBALL" --arg tarballSha256 "$TARBALL_SHA256" \
+            --arg image "$IMAGE" --arg digest "$DIGEST" --argjson imageTags "$IMAGE_TAGS" \
+            '{tag: $tag, commit: $commit, repository: $repository, workflowRun: $run, createdAt: $created, node: $node,
+              checks: $checks[0],
+              npm: {package: $package, integrity: $integrity, shasum: $shasum, tarball: $tarball, tarballSha256: $tarballSha256},
+              image: {ref: $image, digest: $digest, tags: $imageTags}}' > "$RUNNER_TEMP/facts.json"
+          mkdir -p "$RUNNER_TEMP/assets"
+          node scripts/release/release.mjs manifest --input "$RUNNER_TEMP/facts.json" \
+            --migrations "$RUNNER_TEMP/artifacts/npm-package/migrations.json" \
+            --output "$RUNNER_TEMP/assets/release-manifest.json"
+          jq . "$RUNNER_TEMP/assets/release-manifest.json"
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ needs.checks.outputs.version }}
+          CHANNEL: ${{ needs.checks.outputs.channel }}
+          TARBALL: ${{ needs.checks.outputs.tarball }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/assets"
+          cp "$RUNNER_TEMP/artifacts/npm-package/$TARBALL" .
+          cp "$RUNNER_TEMP/artifacts/image-sbom/"*.spdx.json .
+          cp "$RUNNER_TEMP/artifacts/sbom/field-server.cdx.json" "field-server-${VERSION}.cdx.json"
+          cp "$RUNNER_TEMP/artifacts/sbom/field-client.cdx.json" "field-client-${VERSION}.cdx.json"
+          for file in *; do sha256sum "$file" > "$file.sha256"; done
+          flags=(--verify-tag --title "Field ${VERSION}" --generate-notes --latest=false)
+          [[ "$CHANNEL" == "beta" ]] && flags+=(--prerelease)
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber ./*
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${flags[@]}" ./*
+          fi
+          echo "Released ${TAG}: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
+
+  evidence:
+    name: evidence
+    needs: [checks, npm, image, github-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install npm ${{ env.NPM_VERSION }}
+        run: npm install -g "npm@${NPM_VERSION}"
+
+      # What anyone can check from outside: the npm registry signature and
+      # provenance of the published version, and GitHub's attestation of the
+      # image digest.
+      - name: Verify the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ needs.checks.outputs.version }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          (cd "$work" && npm init -y >/dev/null && npm install --omit=dev --ignore-scripts --no-audit --no-fund "${PACKAGE}@${VERSION}" >/dev/null)
+          (cd "$work" && npm audit signatures --json) > "$RUNNER_TEMP/npm-signatures.json" || {
+            cat "$RUNNER_TEMP/npm-signatures.json" >&2; exit 1; }
+          npm view "${PACKAGE}@${VERSION}" dist --json > "$RUNNER_TEMP/npm-dist.json"
+          jq -e '.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1"' "$RUNNER_TEMP/npm-dist.json" >/dev/null
+          gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo "$GITHUB_REPOSITORY" --format json > "$RUNNER_TEMP/image-attestation.json"
+          mkdir -p "$RUNNER_TEMP/evidence"
+          jq -n \
+            --arg tag "$TAG" --arg checkedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --slurpfile signatures "$RUNNER_TEMP/npm-signatures.json" \
+            --slurpfile dist "$RUNNER_TEMP/npm-dist.json" \
+            --slurpfile attestation "$RUNNER_TEMP/image-attestation.json" \
+            --arg image "${IMAGE}@${DIGEST}" \
+            '{tag: $tag, checkedAt: $checkedAt,
+              npm: {integrity: $dist[0].integrity, shasum: $dist[0].shasum, provenance: $dist[0].attestations.provenance.predicateType,
+                    auditSignatures: $signatures[0]},
+              image: {ref: $image, verifiedAttestations: ($attestation[0] | length),
+                      predicateTypes: ([$attestation[0][].verificationResult.statement.predicateType] | unique)}}' \
+            > "$RUNNER_TEMP/evidence/postpublish-evidence.json"
+          cd "$RUNNER_TEMP/evidence"
+          sha256sum postpublish-evidence.json > postpublish-evidence.json.sha256
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber postpublish-evidence.json postpublish-evidence.json.sha256
+          jq . postpublish-evidence.json >> "$GITHUB_STEP_SUMMARY"
