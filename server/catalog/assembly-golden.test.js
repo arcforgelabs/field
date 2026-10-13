@@ -56,7 +56,7 @@ function goldenItems({ units = GOLDEN_UNITS, omit = [] } = {}) {
 }
 
 async function compileWith(catalog, testCase) {
-  const snapshot = buildPriceCatalogSnapshot(await catalog.store.getState(), { quoteCatalogId: "embark-default" });
+  const snapshot = buildPriceCatalogSnapshot(await catalog.store.getState(), { quoteCatalogId: "default" });
   const result = compileQuoteCommercialBreakdown({
     quote: { lineItems: [testCase.lineItem], summary: testCase.summary || null },
     quoteCatalog: snapshot.quoteCatalog,

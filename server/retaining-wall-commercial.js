@@ -12,6 +12,7 @@ import {
   selectSteelStockForLength,
 } from "./retaining-wall-steel.js";
 import { requireRate } from "./local-pricing.js";
+import { DEFAULT_QUOTE_CATALOG_ID } from "./quote-catalog-ids.js";
 import { applyBusinessProfileOverride, businessDisplayName } from "./business-profile.js";
 import { WALL_RATE_CARD_ITEMS } from "./retaining-wall-items.js";
 import { formatCatalogUnit, formatCatalogUnitText } from "../shared/catalog-units.js";
@@ -1103,7 +1104,7 @@ export function buildQuoteFromWallModel({ model, design, rateCard, meta, version
       label: "Quote Draft",
     },
     quoteCatalog: {
-      id: "embark-default",
+      id: DEFAULT_QUOTE_CATALOG_ID,
       name: "Sample Catalogue",
       currency: "AUD",
       gstRate: 0.1,

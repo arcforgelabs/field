@@ -147,8 +147,9 @@ them; every storage transaction checks it still holds the lock.
 
 `0005_tenancy` (pricing engine phase 0b; design in `docs/PRICING_ENGINE.md` "Tenancy")
 makes the database multi-organisation. `organizations` is the directory
-(the default organisation, slug `embark`, is `schema.DEFAULT_ORG_UID`, and every
-earlier row was backfilled into it). `users` is the person; their role and
+(the default organisation is `schema.DEFAULT_ORG_UID`, and every earlier row
+was backfilled into it; its name and slug are in "Default organisation"
+below). `users` is the person; their role and
 status in an organisation are `org_memberships`. Every other table except
 `units`, `unit_aliases`, durable storage and `organizations` is a tenant
 table:
@@ -173,7 +174,7 @@ table:
 | `withOrg(db, orgUid, fn, config?)` | One transaction: `SET LOCAL ROLE field_app` (when the login role may), `set_config('field.org_uid', orgUid, true)`, then `fn(tx)`. Nested in a caller's transaction it restores the role and setting afterwards. |
 | `orgScope(db, orgUid)` | A handle with only `transaction()` (= `withOrg`) and `orgUid`. Stores take it as their `db`; a stray `scope.select()` is a TypeError, not an empty read. |
 | `withRequestOrg(db, req, fn)` / `requestOrgUid(req)` | `withOrg` for `req.fieldOrg.uid`, which `requireAuth` sets from the signed-in person's membership (machine tokens and break-glass belong to the deployment's organisation). No organisation is a 403. |
-| `resolveDeploymentOrg(db)` | The organisation this deployment serves: `FIELD_ORG` (slug), default `embark`. |
+| `resolveDeploymentOrg(db)` | The organisation this deployment serves: `FIELD_ORG` (slug) when set, otherwise the default organisation by its uid (`DEFAULT_ORG_UID`). |
 | `assertRowSecurity(db)` / `inspectRowSecurity(db)` | Boot refuses a login role on which RLS would not hold, a `field_app` that could bypass RLS itself, and any table with `org_uid` that lacks ENABLE, FORCE or its policy. |
 
 How RLS holds, whatever the login role is:
@@ -391,15 +392,28 @@ Nothing else about an issued invoice may change. Run
 `rollback/0018_xero_invoice_sync.down.sql` before 0017's: it restores 0013's
 function before it drops the columns.
 
+### Default organisation
+
+`0005_tenancy` seeded the default organisation (`DEFAULT_ORG_UID`) with the
+name and slug of the business Field was built for. `0020_neutral_default_org`
+(#122) renames it to "Default organisation", slug `default`, only on a
+database with no people yet, which is a new installation. A database that
+already had people keeps its name and slug. Without `FIELD_ORG` the
+deployment finds the default organisation by uid, so both kinds boot with no
+configuration (`[db] organisation <slug> (<uid>)` names it). Releases
+before it find the default organisation by its 0005 slug:
+`rollback/0020_neutral_default_org.down.sql` gives a renamed organisation
+its 0005 name and slug back. Run it before 0019's.
+
 ### Milestone rules
 
-`0020_milestone_rules` (#29) adds the organisation's milestone rules as
+`0021_milestone_rules` (#29) adds the organisation's milestone rules as
 rows: `milestone_rules` (one band of contract value in one region: every
 region, a country, or a state), `milestone_rule_milestones` (its default
 milestones) and `milestone_rule_caps` (at most one cap per milestone kind,
 `hard` or `soft`), and `business_settings.country` and `.region`. Rules are
 settings, not issued documents: an owner replaces them, so `field_app` may
-delete them. Run `rollback/0020_milestone_rules.down.sql` before 0019's.
+delete them. Run `rollback/0021_milestone_rules.down.sql` before 0020's.
 
 ### Adding tables
 

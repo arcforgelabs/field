@@ -1,0 +1,12 @@
+{
+  "name": "field-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Playwright smoke of a built Field image with synthetic data (run-image-smoke.sh)",
+  "scripts": {
+    "smoke": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

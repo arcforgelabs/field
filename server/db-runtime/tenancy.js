@@ -29,8 +29,6 @@ import { queryRows, schema } from "./index.js";
 
 export const APP_ROLE = "field_app";
 export const { DEFAULT_ORG_UID } = schema;
-/** The organisation a deployment serves when FIELD_ORG is unset. */
-export const DEFAULT_ORG_SLUG = "embark";
 
 const ORG_UID = /^org_[0-9A-Za-z]{1,64}$/;
 
@@ -189,15 +187,20 @@ export function withRequestOrg(db, req, fn, config) {
 }
 
 /**
- * The organisation a deployment serves, by slug (FIELD_ORG, default
- * "embark"). `organizations` is a directory, not a tenant table, so this
- * needs no organisation transaction. Throws when it does not exist or is
- * archived.
+ * The organisation a deployment serves: by slug when FIELD_ORG is set,
+ * otherwise the default organisation (DEFAULT_ORG_UID, seeded by 0005). By
+ * uid, not slug, because its slug depends on when the database was created
+ * (0020_neutral_default_org). `organizations` is a directory, not a tenant
+ * table, so this needs no organisation transaction. Throws when it does not
+ * exist or is archived.
  */
 export async function resolveDeploymentOrg(db, { env = process.env } = {}) {
-  const slug = String(env.FIELD_ORG || DEFAULT_ORG_SLUG).trim().toLowerCase();
-  const [row] = await queryRows(sql`select uid, name, slug, status from organizations where slug = ${slug}`, db);
-  if (!row) throw new Error(`organisation "${slug}" (FIELD_ORG) does not exist`);
-  if (row.status !== "active") throw new Error(`organisation "${slug}" (FIELD_ORG) is ${row.status}`);
+  const slug = String(env.FIELD_ORG || "").trim().toLowerCase();
+  const [row] = slug
+    ? await queryRows(sql`select uid, name, slug, status from organizations where slug = ${slug}`, db)
+    : await queryRows(sql`select uid, name, slug, status from organizations where uid = ${DEFAULT_ORG_UID}`, db);
+  const named = slug ? `organisation "${slug}" (FIELD_ORG)` : `the default organisation (${DEFAULT_ORG_UID})`;
+  if (!row) throw new Error(`${named} does not exist`);
+  if (row.status !== "active") throw new Error(`${named} is ${row.status}`);
   return { uid: row.uid, name: row.name, slug: row.slug };
 }

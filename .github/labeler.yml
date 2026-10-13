@@ -1,0 +1,205 @@
+# Area labels for pull requests, applied by .github/workflows/labeler.yml
+# (actions/labeler v7 syntax). The workflow reads this file from the base
+# branch only, so a pull request cannot change how it is itself labelled.
+"area: quotes":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/quotes/**
+          - server/quote-*.js
+          - server/generate-evidence-quote*.js
+          - server/legacy-sent-quote{,.test}.js
+          - server/job-actions{,.test}.js
+          - server/pipeline{,.test}.js
+          - server/clarification-notes{,.test}.js
+          - server/evidence-index{,.test}.js
+          - server/ingestion-ledger{,.test}.js
+          - server/reconcile-baseline-scope{,.test}.js
+          - shared/money.*
+          - shared/source-label-disambiguation.*
+          - scripts/export-quote-proof-bundle{,.test}.js
+          - server/local-pricing{,.test}.js
+          - server/assembly-modes{,.test}.js
+          - server/retaining-wall-*.js
+          - server/wall-*.js
+          - shared/quote-*
+          - shared/retaining-wall-render.*
+          - client/src/features/job/**
+          - client/src/features/job-detail/**
+          - generate-landscaping-quote.js
+          - scripts/quote-invoice-proof/**
+
+"area: invoices":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/invoices/**
+          - server/invoice-*.js
+          - server/job-actions{,.test}.js
+          - client/src/features/invoices/**
+          - scripts/quote-invoice-proof/**
+
+"area: documents":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/documents/**
+          - server/storage/**
+          - server/job-documents{,.test}.js
+          - server/job-generation{,.test}.js
+          - scripts/documents-verify-r2{,.test}.js
+          - scripts/find-quarantined-generations{,.test}.js
+          - server/job-document-context{,.test}.js
+          - server/sent-email-archive{,.test}.js
+
+"area: catalogue":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/catalog/**
+          - server/price-catalog/**
+          - quote-catalogs/**
+          - client/src/features/catalogue/**
+          - client/src/features/pricing/**
+          - shared/catalog-*
+          - shared/disposal-basis.*
+          - shared/dumping.*
+          - server/dumping.test.js
+          - server/single-price-source.test.js
+          - scripts/catalog-*.js
+          - server/test-price-catalog{,.test}.js
+          - server/test-pricing-fixtures{,.test}.js
+
+"area: database":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/db/**
+          - server/db-runtime/**
+          - server/data-migrations/**
+          - server/field-db{,.test}.js
+          - scripts/backfill-*.js
+          - scripts/migrate-*.js
+          - scripts/data-migrations-cli{,.test}.js
+          - scripts/db-smoke{,.test}.js
+
+"area: auth":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/auth/**
+          - server/users{,.test}.js
+          - client/src/features/login/**
+
+"area: integrations":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/xero/**
+          - server/mcp/**
+          - server/gmail-oauth-store{,.test}.js
+          - server/email-*.js
+          - server/send-quote-email{,.test}.js
+          - server/scheduled-email-queue{,.test}.js
+          - server/google-*.js
+          - server/drive-upload{,.test}.js
+          - shared/email-templates.*
+          - server/secrets/**
+          - server/moasure{,.test}.js
+          - scripts/setup-gmail-oauth{,.test}.js
+          - docs/XERO.md
+          - docs/REMOTE_MCP.md
+          - docs/GMAIL_SENDING.md
+
+"area: jobs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/job-*.js
+          - server/stale-detection{,.test}.js
+          - server/review-state{,.test}.js
+          - client/src/features/jobs/**
+
+"area: observability":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/observability/**
+          - shared/sentry-scrub.*
+          - client/src/instrument.ts
+
+"area: server":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/index{,.test}.js
+          - server/runtime-config{,.test}.js
+          - server/config-guard{,.test}.js
+          - server/api-cache-policy{,.test}.js
+          - server/business-profile{,.test}.js
+          - dev.sh
+          - config.json.example
+          - config.local.example.json
+          - .gitignore
+
+"area: client":
+  - changed-files:
+      - any-glob-to-any-file:
+          - client/**
+          - shared/themes.*
+          - shared/theme-palettes.*
+          - shared/color-contrast.*
+          - scripts/port-openclaw-themes{,.test}.mjs
+
+"area: cli":
+  - changed-files:
+      - any-glob-to-any-file:
+          - scripts/field-cli{,.test}.js
+          - scripts/field-server.js
+          - scripts/install-field-cli{,.test}.js
+          - skills/**
+
+"area: deploy":
+  - changed-files:
+      - any-glob-to-any-file:
+          - Dockerfile
+          - .dockerignore
+          - .replit
+          - scripts/replit-*
+          - docs/REPLIT.md
+          - scripts/deploy-checks{,.test}.js
+          - server/deployed-build{,.test}.js
+          - scripts/demo-fixtures{,.test}.js
+          - scripts/staging-fixtures{,.test}.js
+          - scripts/reset-staging-baseline{,.test}.js
+          - scripts/verify-local-image.sh
+          - scripts/github-sync.sh
+          - scripts/git-credential-github.sh
+          - .agents/**
+          - deploy/**
+          - docs/SELF_HOSTING.md
+          - docs/RELEASING.md
+
+# CI and the test tooling it runs.
+"area: ci":
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+          - e2e/**
+          - scripts/surveyor/**
+          - scripts/verification/**
+          - server/verification-runtime.test.js
+          - scripts/undefined-names.test.js
+          - scripts/quote-invoice-proof/**
+          - scripts/dependency-audit.*
+          - scripts/release/**
+          - scripts/self-hosting/**
+
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - "*.md"
+          - LICENSE
+          - scripts/generate-manual-pdf{,.test}.js
+
+"area: dependencies":
+  - changed-files:
+      - any-glob-to-any-file:
+          - package.json
+          - package-lock.json
+          - client/package.json
+          - client/package-lock.json
+          - e2e/package.json
+          - e2e/package-lock.json
+          - .npmrc

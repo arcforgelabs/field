@@ -221,8 +221,9 @@ describe("two organisations, one database", () => {
     await assert.rejects(withOrg(t.db, "org_x'; drop table items; --", async () => {}), /not an organisation uid/);
   });
 
-  test("the deployment organisation resolves by slug", async () => {
-    assert.deepEqual(await resolveDeploymentOrg(t.db, { env: {} }), { uid: ORG_A, name: "Embark Earthworks", slug: "embark" });
+  test("the deployment organisation is the default one, or FIELD_ORG's by slug", async () => {
+    assert.deepEqual(await resolveDeploymentOrg(t.db, { env: {} }), { uid: ORG_A, name: "Default organisation", slug: "default" });
+    assert.equal((await resolveDeploymentOrg(t.db, { env: { FIELD_ORG: "default" } })).uid, ORG_A);
     assert.equal((await resolveDeploymentOrg(t.db, { env: { FIELD_ORG: "second" } })).uid, ORG_B);
     await assert.rejects(resolveDeploymentOrg(t.db, { env: { FIELD_ORG: "nobody" } }), /does not exist/);
   });
@@ -409,6 +410,12 @@ describe("migration 0005 on a populated database", () => {
     await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
     const seen = await withOrg(db, DEFAULT_ORG_UID, (tx) => queryRows(sql`select code from items order by code`, tx));
     assert.deepEqual(seen.map((row) => row.code), ["GRAVEL", "SAND"]);
+    // A database with people keeps its organisation's name and slug through
+    // 0020_neutral_default_org, and still boots without FIELD_ORG.
+    const [org] = await queryRows(sql`select name, slug from organizations where uid = ${DEFAULT_ORG_UID}`, db);
+    assert.deepEqual(org, { name: "Embark Earthworks", slug: "embark" });
+    assert.deepEqual(await resolveDeploymentOrg(db, { env: {} }), { uid: DEFAULT_ORG_UID, name: "Embark Earthworks", slug: "embark" });
+    assert.equal((await resolveDeploymentOrg(db, { env: { FIELD_ORG: "embark" } })).uid, DEFAULT_ORG_UID);
   });
 
   test("the rollback script refuses when a second organisation exists", async () => {

@@ -1,5 +1,5 @@
 // Test fixture: a price catalogue in its own in-memory PostgreSQL (PGlite),
-// priced from fixture rates for the embark-default quote rules plus the
+// priced from fixture rates for the default quote rules plus the
 // internal rates the drainage recipe needs (server/test-pricing-fixtures.js;
 // the quote catalog itself carries no prices). Close it when done.
 import { createTestDb } from "./db-runtime/index.js";
@@ -8,7 +8,7 @@ import { serializeQuoteCatalog } from "./quote-catalogs.js";
 import { TEST_ITEM_PRICES, TEST_ITEM_UNITS, TEST_QUOTE_RULE_SELL_RATES } from "./test-pricing-fixtures.js";
 
 export function defaultTestPriceMaps() {
-  const catalog = serializeQuoteCatalog("embark-default");
+  const catalog = serializeQuoteCatalog("default");
   const buyMap = Object.fromEntries(
     (catalog?.lineItems || []).map((item) => [item.code, 1]),
   );

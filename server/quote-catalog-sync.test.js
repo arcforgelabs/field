@@ -359,7 +359,7 @@ function quoteRowsTotal(line) {
 
 test("a recipe kit with a materials allowance goes on a quote as one row at the kit's own price", async (t) => {
   const store = await freshStore(t);
-  // tree-supply-install's recipe (quote-catalogs/embark-default.json5) is
+  // tree-supply-install's recipe (quote-catalogs/default.json5) is
   // labour, vehicle time and a balance "materials allowance" remainder.
   await item(store, { code: "LABOURER-HOUR", unit: "hour", buy: 40, sell: 80 });
   await item(store, { code: "VEHICLE-HOUR", unit: "hour", buy: 20, sell: 40 });

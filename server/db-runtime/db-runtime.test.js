@@ -257,17 +257,27 @@ function runChild(source, env) {
   let output = "";
   child.stdout.on("data", (chunk) => (output += chunk));
   child.stderr.on("data", (chunk) => (output += chunk));
-  const exited = new Promise((resolve) => child.on("exit", (code) => resolve({ code, output })));
+  const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal, output })));
   return { child, exited, output: () => output };
+}
+
+// The child ran its SIGTERM handler and exited by itself. Node kills a process
+// that has no SIGTERM listener yet (code null, signal "SIGTERM"), so children
+// the tests stop this way listen before they print anything: the test may
+// signal the moment it reads their output.
+async function assertExitedCleanly(child) {
+  const { code, signal } = await child.exited;
+  assert.deepEqual({ code, signal }, { code: 0, signal: null }, child.output());
 }
 
 test("a PGlite directory open in another process is refused, and freed when that process exits, even if killed", async () => {
   const dir = join(tempDir(), "pglite");
   const moduleUrl = new URL("./index.js", import.meta.url).href;
-  const holderSource = `const rt = await import(${JSON.stringify(moduleUrl)});
+  const holderSource = `const stopped = new Promise((resolve) => process.once("SIGTERM", resolve));
+     const rt = await import(${JSON.stringify(moduleUrl)});
      await rt.runMigrations();
      console.log("ready");
-     await new Promise((resolve) => process.once("SIGTERM", resolve));
+     await stopped;
      await rt.closeDb();`;
   const startHolder = async () => {
     const holder = runChild(holderSource, { FIELD_PGLITE_DIR: dir });
@@ -283,7 +293,7 @@ test("a PGlite directory open in another process is refused, and freed when that
   } finally {
     holder.child.kill("SIGTERM");
   }
-  assert.equal((await holder.exited).code, 0, holder.output());
+  await assertExitedCleanly(holder);
   assert.equal(existsSync(`${dir}.lock`), true);
   assert.equal(existsSync(`${dir}.holder.lock`), false);
 
@@ -347,7 +357,8 @@ test("a lock file in an old format is reported with how to clear it, not taken o
 
 // A process that takes the PGlite lock, prints "won" (or "busy") and holds it
 // until SIGTERM.
-const LOCK_RACER_SOURCE = `const rt = await import(${JSON.stringify(new URL("./index.js", import.meta.url).href)});
+const LOCK_RACER_SOURCE = `const stopped = new Promise((resolve) => process.once("SIGTERM", resolve));
+    const rt = await import(${JSON.stringify(new URL("./index.js", import.meta.url).href)});
     let lock;
     try { lock = rt.acquirePgliteLockForTests(process.env.LOCK_DIR); } catch (error) {
       console.log(/in use by/.test(error.message) ? "busy" : "error " + error.message);
@@ -356,7 +367,7 @@ const LOCK_RACER_SOURCE = `const rt = await import(${JSON.stringify(new URL("./i
     console.log("won");
     // Nothing else keeps this process alive while it holds the lock.
     const keepAlive = setInterval(() => {}, 60_000);
-    await new Promise((resolve) => process.once("SIGTERM", resolve));
+    await stopped;
     clearInterval(keepAlive);
     rt.releasePgliteLockForTests(lock);`;
 
@@ -379,7 +390,7 @@ test("a live PGlite lock holder is never taken over, whatever its lock files con
   } finally {
     holder.child.kill("SIGTERM");
   }
-  assert.equal((await holder.exited).code, 0, holder.output());
+  await assertExitedCleanly(holder);
   releasePgliteLockForTests(acquirePgliteLockForTests(dir));
 });
 
@@ -425,14 +436,13 @@ test("processes racing for one PGlite lock: exactly one wins, from every startin
         assert.deepEqual(readdirSync(parent).sort(), ["pglite.holder.lock", "pglite.lock"], name);
         settled = true;
       } finally {
-        // The losers exit by themselves; signalling one that has printed
-        // "busy" but not yet exited would kill it. Stop only the winner,
-        // unless the round failed.
+        // The losers exit by themselves. Stop only the winner, unless the
+        // round failed.
         for (const racer of racers) {
           if (!settled || racer.output().includes("won")) racer.child.kill("SIGTERM");
         }
       }
-      for (const racer of racers) assert.equal((await racer.exited).code, 0, racer.output());
+      for (const racer of racers) await assertExitedCleanly(racer);
       assert.deepEqual(readdirSync(parent), ["pglite.lock"], `${name}: holder record removed on release`);
     }
   }

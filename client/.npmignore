@@ -1,0 +1,3 @@
+# client/.gitignore leaves dist/ out of git. The root package.json "files" list
+# publishes client/dist/ in @arcforgelabs/field, so npm must not read that
+# .gitignore here. Nothing else under client/ is published.

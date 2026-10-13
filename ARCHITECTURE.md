@@ -139,7 +139,7 @@ The quote pipeline has four distinct compile stages, each with its own authority
 flowchart LR
     QI[("quote-inputs.json<br/>manual or external agent")] -->|"lineItemCandidates[]"| BL["generate-evidence-quote.js<br/>buildLineItems()"]
     OVR(("Manual overrides<br/>from editor")) -->|"lineItemOverrides"| BL
-    CAT[("quote-catalogs/<br/>embark-default.json5")] -->|"rules + assemblies"| BL
+    CAT[("quote-catalogs/<br/>default.json5")] -->|"rules + assemblies"| BL
     BL -->|"raw line items"| CC["quote-commercial-compiler.js<br/>recipes + rate lookup"]
     PC[("price catalogue<br/>PostgreSQL")] -->|"buy + sell rates, units"| CC
     RW["retaining-wall-engine.js<br/>bay model"] -->|"priced resource lines"| CC
@@ -203,8 +203,8 @@ flowchart LR
     LINE["quote.json<br/>lineItems[]<br/>(unitCost + unitPrice)"]
 
     CAT[("price catalogue<br/>PostgreSQL<br/>items + components")] -->|"every rate and unit"| LINE
-    QCR["quote-catalog rules<br/>embark-default.json5<br/>workDomain + quantityRule"] -->|"quantity"| LINE
-    RECIPE["assemblies<br/>embark-default.json5<br/>(lawn, irrigation, drainage)"] -->|"component quantities"| LINE
+    QCR["quote-catalog rules<br/>default.json5<br/>workDomain + quantityRule"] -->|"quantity"| LINE
+    RECIPE["assemblies<br/>default.json5<br/>(lawn, irrigation, drainage)"] -->|"component quantities"| LINE
     RWE["retaining-wall-engine.js<br/>+ retaining-wall-commercial.js<br/>+ retaining-wall-steel.js"] -->|"bay model →<br/>priced resource lines"| LINE
 
     MANUAL(("Quote editor<br/>quote-editor.tsx")) -->|"organizer rows:<br/>quantity, rates, fixed prices"| LINE
@@ -215,8 +215,8 @@ flowchart LR
 | Source | Lives in | Covers | Shape |
 |---|---|---|---|
 | Price catalogue | `server/catalog/` (PostgreSQL) | Any item with a manual, markup or rolled-up buy/sell rate | Recursive item tree |
-| Quote-catalog rules | `quote-catalogs/embark-default.json5` | All 15+ work domains by rule code, with quantity rules | Flat list of rules keyed by `code`, tagged with `workDomain` and the `quantityUnit` it measures in; no prices or sold units |
-| Assemblies | `quote-catalogs/embark-default.json5` `assemblies`, evaluated by `server/catalog/assemblies.js`, priced by `server/price-catalog/recipe-pricing.js` | Lawn bundle (turf, loam, prep, install), irrigation bundle (controller, pipe fixings, conduit, install hours) and drainage buildup (pipe, pits, gravel, spoil, excavator, labour) | Params, vars and per-component quantity expressions (safe evaluator: numbers, params, vars, `+ - * /`, parentheses, `ceil/floor/round/min/max`); golden fixtures prove the quantities match the hardcoded recipes they replaced |
+| Quote-catalog rules | `quote-catalogs/default.json5` | All 15+ work domains by rule code, with quantity rules | Flat list of rules keyed by `code`, tagged with `workDomain` and the `quantityUnit` it measures in; no prices or sold units |
+| Assemblies | `quote-catalogs/default.json5` `assemblies`, evaluated by `server/catalog/assemblies.js`, priced by `server/price-catalog/recipe-pricing.js` | Lawn bundle (turf, loam, prep, install), irrigation bundle (controller, pipe fixings, conduit, install hours) and drainage buildup (pipe, pits, gravel, spoil, excavator, labour) | Params, vars and per-component quantity expressions (safe evaluator: numbers, params, vars, `+ - * /`, parentheses, `ceil/floor/round/min/max`); golden fixtures prove the quantities match the hardcoded recipes they replaced |
 | Retaining wall engine | `server/retaining-wall-engine.js`, `retaining-wall-commercial.js`, `retaining-wall-measurement.js`, `retaining-wall-steel.js`, `wall-zones.js` | Retaining walls only; consumes `bayHeights`, `bayGeometry`, design spec, rate card | Purpose-built pipeline producing priced resource lines; its items are declared once (`server/retaining-wall-items.js`) and its rate card (`server/retaining-wall-rate-card.js`) has no default rates |
 | Quote editor | `client/src/features/job/quote-editor.tsx` → `POST /api/jobs/:id/quote-update` (`presentation.organizer`) | Catalogue items as rows (kits as their component rows), one-off lines, quantity and rate edits, fixed prices on any row or section | Organizer source nodes with `quantity`, `sellRate`, `buyRate`, `priceOverride` and the catalogue link fields |
 | Commercial adjustments | `server/quote-commercial-adjustments.js` (API, CLI, MCP) | Price and cost overrides on existing line items; adding manual lines by catalog-rule reference | `commercialAdjustments[]` with `unitPrice` + `unitCost` |
@@ -386,7 +386,7 @@ An issued invoice is a money document, not a projection of the current quote.
   - The owner screen `/invoices/amounts`
     (`client/src/features/invoices/invoice-amounts-page.tsx`) calls them. It
     sends the chosen set's total from the report; the owner never types it.
-- **Milestone rules (#29).** `server/invoices/milestone-rules.js` reads the organisation's rules (`milestone_rules`, `milestone_rule_milestones`, `milestone_rule_caps`, migration 0020), picks the rule for a job (its region from the site address, else the business region; the band holding its contract value; the most specific region), applies its milestones when a job's milestones are first created (`paymentSchedule.source`: `rule`, or `override` for a schedule set on the job) and checks its caps in `issueNewMilestoneInvoices` before the issue service runs: a hard cap refuses the issue (409 `MILESTONE_CAP_EXCEEDED`), a soft cap is recorded on the revision (`milestoneRule`) and the issued document's `details`. Routes: `GET`/`PUT /api/settings/milestone-rules` (owner writes), `GET /api/jobs/:id/milestone-rules`, `applyAccountRule` on `POST /api/jobs/:id/milestones/generate`; CLI `milestone-rules`; MCP `field_milestone_rules_list`, `field_milestone_check`. Without a database there are no rules.
+- **Milestone rules (#29).** `server/invoices/milestone-rules.js` reads the organisation's rules (`milestone_rules`, `milestone_rule_milestones`, `milestone_rule_caps`, migration 0021), picks the rule for a job (its region from the site address, else the business region; the band holding its contract value; the most specific region), applies its milestones when a job's milestones are first created (`paymentSchedule.source`: `rule`, or `override` for a schedule set on the job) and checks its caps in `issueNewMilestoneInvoices` before the issue service runs: a hard cap refuses the issue (409 `MILESTONE_CAP_EXCEEDED`), a soft cap is recorded on the revision (`milestoneRule`) and the issued document's `details`. Routes: `GET`/`PUT /api/settings/milestone-rules` (owner writes), `GET /api/jobs/:id/milestone-rules`, `applyAccountRule` on `POST /api/jobs/:id/milestones/generate`; CLI `milestone-rules`; MCP `field_milestone_rules_list`, `field_milestone_check`. Without a database there are no rules.
 - `GET /api/jobs/:id/milestones/:index/pdf` serves an issued revision's stored bytes and accepts `?revision=<n>` to address a superseded one. `GET /api/jobs/:id/milestones/:index/revisions` lists the history. The `field` CLI exposes `credit-invoice` (formerly `revise-invoice`) and `list-invoice-revisions`. A credit note's PDF is an issued document: `GET /api/jobs/:id/documents` lists it and `GET /api/documents/:uid/pdf` serves it, and the email editor offers it as an attachment when the replacement invoice is sent. An invoice returned to draft and reissued with different content is credited first according to the account setting `creditNoteOnReissue` in `business_settings` (`when-emailed` by default: only when Field has evidence it was emailed or delivered; `always`; `never`), read by the issue service; "Credit and reissue" always credits.
 
 ## Presentation Organizer
@@ -449,11 +449,14 @@ An issued invoice is a money document, not a projection of the current quote.
 Some names look specific to one business, but stored quotes, jobs and
 database rows refer to them, so they never change:
 
-- The sample quote catalogue keeps the id `embark-default`
-  (`quote-catalogs/embark-default.json5`), because stored quotes and job
-  records name it.
-- Migration `0005_tenancy` seeds the first organisation with the slug `embark`
-  (the `FIELD_ORG` default, `DEFAULT_ORG_UID`). Applied migrations never change.
+- The sample quote catalogue's id before #122, `embark-default`, is an alias
+  of its id now, `default` (`server/quote-catalog-ids.js`), because stored
+  quotes and job records name it.
+- The default organisation's uid, `DEFAULT_ORG_UID`: every tenant row of an
+  installation from before tenancy points at it, and without `FIELD_ORG` the
+  deployment finds its organisation by it. Its slug is `default` on a new
+  database and stays `embark` on an older one (`server/db/README.md`,
+  "Default organisation"). Applied migrations never change.
 - The `EQ`/`EI`/`ER` quote, invoice and receipt number prefixes, theme ids
   (including the legacy `gohub` alias), data-migration ids and storage paths.
 - The fixed domain of outgoing email Message-IDs

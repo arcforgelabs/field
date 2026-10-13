@@ -29,7 +29,7 @@ function buildLegacyQuoteFixture(meta, {
     recordingIntent: "job-scope",
     summary: "Install drainage and retaining works.",
     quoteCatalog: {
-      id: "embark-default",
+      id: "default",
       name: "Sample Catalogue",
       currency: "AUD",
       gstRate: 0.1,

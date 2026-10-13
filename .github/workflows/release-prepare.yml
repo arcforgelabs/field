@@ -1,0 +1,124 @@
+name: Release prepare
+run-name: Prepare a ${{ inputs.channel }} release
+
+# Starts a release (docs/RELEASING.md). It takes a commit on main whose
+# required checks passed, tags it with the next calendar version for the
+# channel (package.json's version, plus -beta.N for a beta), and starts
+# release-publish.yml for that tag. It publishes nothing itself.
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: beta (a pre-release, vYYYY.M.D-beta.N) or stable (vYYYY.M.D)
+        required: true
+        type: choice
+        default: beta
+        options: [beta, stable]
+      commit:
+        description: Commit on main to release (default the head of main)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-prepare
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: write
+      checks: read
+    steps:
+      - name: Require the workflow from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run Release prepare from main, not ${GITHUB_REF}." >&2
+          exit 1
+
+      - name: Check out main with its tags
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Resolve the commit
+        id: commit
+        env:
+          REQUESTED: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse --verify "${REQUESTED:-HEAD}^{commit}")"
+          if ! git merge-base --is-ancestor "$commit" HEAD; then
+            echo "::error::${commit} is not on main. Only reviewed main commits are released." >&2
+            exit 1
+          fi
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+
+      # The same rule as a Replit publish (scripts/deploy-checks.js): every
+      # required check ran from GitHub Actions on this commit and passed.
+      - name: Require passing checks on the commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.commit.outputs.commit }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${COMMIT}/check-runs?per_page=100" --jq '.check_runs[]' \
+            | jq -s '.' > "$RUNNER_TEMP/check-runs.json"
+          node scripts/release/require-checks.mjs "$RUNNER_TEMP/check-runs.json"
+
+      - name: Plan the tag
+        id: plan
+        env:
+          COMMIT: ${{ steps.commit.outputs.commit }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          git checkout --quiet --detach "$COMMIT"
+          node scripts/release/release.mjs plan --channel "$CHANNEL" > "$RUNNER_TEMP/plan.json"
+          jq . "$RUNNER_TEMP/plan.json"
+          echo "tag=$(jq -r .tag "$RUNNER_TEMP/plan.json")" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r .version "$RUNNER_TEMP/plan.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Create the tag
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          COMMIT: ${{ steps.commit.outputs.commit }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate "$TAG" --message "Field ${VERSION}" "$COMMIT"
+          git push origin "refs/tags/${TAG}"
+
+      # A tag pushed with GITHUB_TOKEN starts no workflow, so start the
+      # publish run explicitly.
+      - name: Start Release publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          COMMIT: ${{ steps.commit.outputs.commit }}
+        run: |
+          set -euo pipefail
+          gh workflow run release-publish.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$TAG"
+          {
+            echo "## ${TAG}"
+            echo
+            echo "Tagged ${COMMIT} and started Release publish."
+            echo "Approve its npm-publish and release environments when its checks pass:"
+            echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/release-publish.yml"
+          } >> "$GITHUB_STEP_SUMMARY"

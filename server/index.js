@@ -346,9 +346,9 @@ await mkdir(DATA_DIR, { recursive: true });
 // opened and getDb() fails closed; the price catalogue below then refuses to
 // boot unless its emergency override is set.
 //
-// Tenancy: this deployment serves one organisation (FIELD_ORG, default
-// "embark"); every tenant table is behind row-level security, and Field does
-// not start on a database role for which RLS would not hold.
+// Tenancy: this deployment serves one organisation (FIELD_ORG, else the
+// default organisation); every tenant table is behind row-level security, and
+// Field does not start on a database role for which RLS would not hold.
 let deploymentOrg = null;
 try {
   const migrations = await runMigrations();

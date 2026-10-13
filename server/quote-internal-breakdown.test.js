@@ -28,7 +28,7 @@ test("internal breakdown markdown renders line item maths and material orders", 
           quoteCatalogItemCode: "drainage",
           quoteCatalogEntry: {
             code: "drainage",
-            quoteCatalogId: "embark-default",
+            quoteCatalogId: "default",
             authorityItemCode: "DRAINAGE-INSTALL",
           },
           evidence: [

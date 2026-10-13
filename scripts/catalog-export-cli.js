@@ -21,7 +21,7 @@ const { exportCatalog } = await import("../server/catalog/index.js");
 
 let exitCode = 0;
 try {
-  // The deployment's organisation (FIELD_ORG, default embark): catalogue
+  // The deployment's organisation (FIELD_ORG, else the default organisation): catalogue
   // tables are only readable inside an organisation's transaction.
   const org = await resolveDeploymentOrg(getDb());
   const payload = await exportCatalog(orgScope(getDb(), org.uid));

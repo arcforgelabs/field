@@ -26,7 +26,7 @@ async function withFixturePricing(run) {
 
 const baseMeta = {
   id: "rec_quote_review",
-  quoteCatalogId: "embark-default",
+  quoteCatalogId: "default",
 };
 
 async function createRetainingWallZoneContext() {
@@ -588,7 +588,7 @@ test("customer-facing schedule keeps hidden support rows in totals while hiding 
   );
   assert.match(
     customerItems[0].components[0].supportEntries.find((entry) => entry.ref === "C1")?.reference?.appPath || "",
-    /^\/pricing\?quoteCatalogId=embark-default&itemCode=/
+    /^\/pricing\?quoteCatalogId=default&itemCode=/
   );
 }));
 

@@ -31,7 +31,7 @@ async function productionShapedCatalog(t) {
 
 function quoteWith(candidates) {
   return generateEvidenceQuote({
-    meta: { id: "rec_units", quoteCatalogId: "embark-default" },
+    meta: { id: "rec_units", quoteCatalogId: "default" },
     transcript: null,
     quoteInputs: {
       recordingIntent: "job-scope",
@@ -53,7 +53,7 @@ async function withAuthority(t, catalog) {
 
 test("on a production-shaped catalogue the health page names every rule and recipe unit problem, and only those", async (t) => {
   const catalog = await productionShapedCatalog(t);
-  const health = await catalog.store.health({ catalogId: "embark-default" });
+  const health = await catalog.store.health({ catalogId: "default" });
 
   const recipe = health.issues.filter((issue) => issue.key === "recipe_unit_mismatch");
   // The one known recipe problem: drainage allows disposal per metre of
@@ -74,7 +74,7 @@ test("on a production-shaped catalogue the health page names every rule and reci
 
 test("on a production-shaped catalogue every lawn and irrigation option prices, with the admin fee and controllers sold each", async (t) => {
   const catalog = await productionShapedCatalog(t);
-  const snapshot = buildPriceCatalogSnapshot(await catalog.store.getState(), { quoteCatalogId: "embark-default" });
+  const snapshot = buildPriceCatalogSnapshot(await catalog.store.getState(), { quoteCatalogId: "default" });
   const options = GOLDEN_CASES.filter((testCase) => /^(lawn|irrigation) option|^irrigation (battery|mains)/.test(testCase.name));
   assert.equal(options.length, 7);
   for (const testCase of options) {
@@ -102,7 +102,7 @@ test("on a production-shaped catalogue every lawn and irrigation option prices, 
   const loam = lawnBreakdown.materialOrders.find((order) => order.itemCode === "SANDY-LOAM-M3");
   assert.equal(loam.quantity, 2.76);
   assert.equal(loam.unitPrice ?? null, null);
-  const health = await catalog.store.health({ catalogId: "embark-default" });
+  const health = await catalog.store.health({ catalogId: "default" });
   assert.ok(health.issues.some((issue) => issue.key === "archived_item_in_use" && issue.code === "SANDY-LOAM-M3"));
 });
 

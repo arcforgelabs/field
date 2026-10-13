@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "../storage/fs.js";
 import { join } from "node:path";
 import JSON5 from "json5";
+import { DEFAULT_QUOTE_CATALOG_ID } from "../quote-catalog-ids.js";
 
 const QUOTE_CATALOG_ROOT = join(import.meta.dirname, "../../quote-catalogs");
 
@@ -34,7 +35,7 @@ export function loadRecipeChildrenByParent() {
  * pricing_basis at all — the recipe and quote engines already fail closed
  * for it, but nothing else surfaces why.
  *
- * Scoped to a single catalogId (e.g. "embark-default" or
+ * Scoped to a single catalogId (e.g. "default" or
  * "field-verification") — quote-catalogs/ can hold multiple catalogs, and a
  * production installation only ever serves one of them. Aggregating across
  * all of them (the earlier behaviour) made every installation's health
@@ -81,7 +82,7 @@ export function resetRecipeChildrenCache() {
   cachedDisposalItemCodesByCatalog = null;
 }
 
-const DEFAULT_TEST_CATALOG_ID = "embark-default";
+const DEFAULT_TEST_CATALOG_ID = DEFAULT_QUOTE_CATALOG_ID;
 
 export function buildRecipeChildrenFromCatalogRoot(root, disposalItemCodesByCatalog = new Map()) {
   const map = new Map();
