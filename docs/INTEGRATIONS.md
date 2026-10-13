@@ -10,9 +10,16 @@ Settings, Integrations shows your real values.
 
 ## Who sees what
 
-- Everyone who can open Settings sees **Settings, Integrations**: whether
-  each integration is set up and connected. Who changed it, when, and the
-  recent changes are shown to owners only.
+- Everyone who can open Settings sees **Settings, Integrations**: a
+  catalogue of cards (logo, name, one line), with a search box and
+  **Connected** and **Browse** tabs. A connected card shows a check; owners
+  see **+** on the others. The catalogue never shows a credential, a key or
+  a warning. A card opens the integration: for an owner who has not
+  connected it, its Connect wizard; once connected, "Connected to ..." with
+  **Configure**, and **Advanced** inside it for credentials, the key's id
+  and Disconnect. Who changed it, when, and the recent changes are shown to
+  owners only. The list is `client/src/features/settings/integrations-list.ts`:
+  a later integration is one more entry.
 - Only the people allowed to manage the organisation's integrations (owners
   today) can enter credentials, connect, replace or disconnect. The server
   enforces this on every route that changes anything. Everyone else sees the
@@ -53,8 +60,8 @@ deployment secret `FIELD_SECRETS_KEY`.
   loses nothing.
 - In a hosted Field, the hosting provider sets this key automatically at
   provisioning.
-- **Make it in Field (the default).** Settings, Integrations, Xero, **Connect
-  Xero**. When the key is not set, step 3 of the wizard, "Your encryption
+- **Make it in Field (the default).** Settings, Integrations, the Xero card
+  (or its **+**), which opens the Connect wizard. When the key is not set, step 3 of the wizard, "Your encryption
   key", makes it in your browser and shows it once, with **Copy**:
 
   1. Press **Generate key**. The browser makes 32 random bytes with
@@ -176,6 +183,9 @@ enter the credentials in Settings and remove `XERO_CLIENT_ID` and
 
 Use `server/secrets/credentials.js` for its credentials (status, write-only
 set, remove, audit) and `server/secrets/box.js` for any tokens, with the
-integration's name as the binding. Give it a screen under Settings,
-Integrations that follows the Xero one: write-only fields, owner-only
-changes, read-only for everyone else.
+integration's name as the binding. Add an entry to
+`client/src/features/settings/integrations-list.ts` (id, name, one line,
+logo, where its status comes from, and the view its card opens). Give it a
+screen that follows the Xero one: a wizard to connect, then Configure, with
+write-only fields under Advanced, owner-only changes, read-only for everyone
+else.

@@ -116,3 +116,28 @@
 html[data-field-secret-on-screen] #sentry-feedback { display: none !important; }
 .xwiz > .xero__row:first-child { flex-wrap: nowrap; justify-content: space-between; }
 .xwiz > .xero__row:first-child > :first-child { flex: 1 1 auto; }
+
+/* Integrations catalogue (integrations-page.tsx). */
+.fx-ints__bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.fx-ints__search { position: relative; flex: 0 1 280px; min-width: 0; display: flex; align-items: center; }
+.fx-ints__search svg { position: absolute; left: 10px; width: 14px; height: 14px; color: var(--t-dim); pointer-events: none; }
+.fx-ints__search .fx-input { width: 100%; padding-left: 30px; }
+.fx-ints__grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.fx-ints__card { position: relative; display: flex; align-items: flex-start; border: 1px solid var(--fx-line-strong); border-radius: var(--t-radius-lg, var(--t-radius)); background: var(--t-paper); transition: border-color .15s, box-shadow .15s; }
+.fx-ints__card:hover { border-color: var(--t-accent); box-shadow: var(--fx-shadow-xs); }
+.fx-ints__open { flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-start; gap: 12px; padding: 14px 52px 14px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: inherit; }
+.fx-ints__open:focus-visible, .fx-ints__state:focus-visible { outline: none; box-shadow: var(--fx-focus); }
+.fx-ints__text { display: grid; gap: 3px; min-width: 0; font-size: 12.5px; }
+.fx-ints__text b { font-size: 14px; font-weight: 650; color: var(--t-text); }
+.fx-ints__state { position: absolute; top: 12px; right: 12px; display: inline-grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--fx-line-strong); border-radius: var(--t-radius); background: var(--t-paper); color: var(--t-text); cursor: pointer; }
+.fx-ints__state svg { width: 15px; height: 15px; }
+.fx-ints__state--on { cursor: default; border-color: transparent; background: var(--t-s1); color: var(--t-accent); }
+.fx-ints__empty { margin: 0; font-size: 13px; }
+.fx-intmark { flex: none; display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--fx-line-strong); background: var(--t-bg); color: var(--t-accent); font: 700 18px var(--t-body); }
+.xero__head { display: flex; align-items: flex-start; gap: 12px; }
+.xero__configure { display: grid; gap: 18px; }
+.xero__advancedbody { display: grid; gap: 12px; margin-top: 10px; }
+@media (max-width: 640px) {
+  .fx-ints__grid { grid-template-columns: 1fr; }
+  .fx-ints__search { flex: 1 1 100%; }
+}

@@ -12,7 +12,7 @@ import { AppearanceSection } from "./appearance-section";
 import { PeopleSection } from "./people-section";
 import { InvoicingPanel } from "./invoicing-panel";
 import { EmailSignaturePanel } from "./email-signature-panel";
-import { XeroPanel } from "./xero-panel";
+import { IntegrationsPage } from "./integrations-page";
 import "./settings-page.css";
 
 const ClerkAccount = lazy(() => import("./clerk-account"));
@@ -87,7 +87,7 @@ export function SettingsPage() {
             </>
           )}
           {active === "email" && <EmailSignaturePanel />}
-          {active === "integrations" && <XeroPanel />}
+          {active === "integrations" && <IntegrationsPage />}
           {active === "appearance" && (
             <Panel title="Appearance" description="Saved in this browser. Clerk's account screens follow the same choice.">
               <AppearanceSection />

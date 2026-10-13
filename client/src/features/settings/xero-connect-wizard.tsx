@@ -183,7 +183,6 @@ export function XeroConnectWizard({ data, onChanged, onClose, onConnect, busy }:
     await api.xeroSetupStep("done");
     shell.toast(`Connected to ${data.connection.tenantName || "Xero"}.`);
     await onChanged();
-    onClose();
   }, "That did not save. Try again.");
 
   const stepNames: Array<{ n: WizardStep; label: string; skipped: boolean }> = [
