@@ -27,13 +27,47 @@
 // milestone's GST (its share of the quote's GST) differs from GST worked out
 // on its own subtotal, the GST is kept as printed, with the reason.
 //
+// An issued invoice whose record holds no issue time takes one from the
+// job's other records (`issueTimes`, issue-time-evidence.js), with a note on
+// its row and a warning naming the source; with none it is refused.
+//
 // Returns { milestones, invoices, creditNotes, payments, receipts, failures,
-// warnings }.
+// warnings }. Every `unmappable` failure carries a stable `code`
+// (UNMAPPABLE_CODES): the dry run and the boot log show codes and numbers,
+// never the reason's text.
+//
 // Rows carry local keys (milestoneKey, invoiceKey, paymentKey) that the
 // invoice service turns into uids.
 import { listInvoiceRevisions } from "../invoice-revisions.js";
 import { isMilestoneInvoiceIssued, isMilestonePaymentVoided } from "../job-documents.js";
 import { centsToText, fixed, quoteTotals, toCents } from "../quotes/totals.js";
+
+/**
+ * Where an issue time came from when the record held none
+ * (issue-time-evidence.js), as a row's note names it.
+ */
+export const ISSUE_TIME_SOURCE_LABELS = Object.freeze({
+  "older-field": "the job's invoice send time (invoiceSentAt), from before milestone invoices",
+  "issued-document": "the issued document Field recorded",
+  "issuance-ledger": "the issuance ledger record of its delivery",
+  "sent-email": "the first archived email that sent it",
+  "activity-log": "the job's activity log (invoice sent)",
+  "stored-pdf-date": "the date its stored PDF prints, at midnight in the business time zone",
+});
+
+/** Why a milestone does not map, as a stable code. */
+export const UNMAPPABLE_CODES = Object.freeze([
+  "no-amount",
+  "duplicate-number",
+  "no-issue-time",
+  "no-invoice-number",
+  "draft-no-number",
+  "successor-not-issued",
+  "credited-no-time",
+  "payment-no-invoice",
+  "payment-no-date",
+  "no-receipt-number",
+]);
 
 function text(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -151,8 +185,11 @@ function taxRateOf(quoteTaxRate) {
  *   basis         the quote Field invoices against: { version, number,
  *                 total, taxRate } (null when the job has no quote)
  *   jobNumber     the job number, the invoices' reference
+ *   issueTimes    issue times from the job's other records for invoices whose
+ *                 record holds none: Map number -> { issuedAt, issuedOn,
+ *                 source } (issue-time-evidence.js)
  */
-export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
+export function mapMilestoneState({ meta, basis = null, jobNumber = null, issueTimes = null }) {
   const milestones = [];
   const invoices = [];
   const creditNotes = [];
@@ -175,7 +212,7 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
     const percent = Number(state.percentage) > 0 ? fixed(state.percentage, 3) : null;
     const amount = Number(state.fixedTotal) > 0 ? money(state.fixedTotal) : null;
     if (!percent && !amount) {
-      failures.push({ kind: "unmappable", milestone: index, reason: `milestone ${index + 1} has neither a percentage nor a fixed amount` });
+      failures.push({ kind: "unmappable", code: "no-amount", milestone: index, reason: `milestone ${index + 1} has neither a percentage nor a fixed amount` });
       continue;
     }
     milestones.push({
@@ -201,7 +238,7 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
     const numbers = new Map();
     const addInvoice = (invoice) => {
       if (seenNumbers.has(invoice.number)) {
-        failures.push({ kind: "unmappable", milestone: index, number: invoice.number, reason: `invoice number ${invoice.number} appears twice on this job` });
+        failures.push({ kind: "unmappable", code: "duplicate-number", milestone: index, number: invoice.number, reason: `invoice number ${invoice.number} appears twice on this job` });
         return null;
       }
       seenNumbers.add(invoice.number);
@@ -209,11 +246,18 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
       invoices.push(invoice);
       return invoice;
     };
-    const fromRevision = (revision, { status, note }) => {
-      const issuedAt = iso(revision.issuedAt) || iso(revision.pdfIssuedAt);
+    const fromRevision = (revision, { status, note, missingTime = `issued revision ${revision.invoiceNumber} has no issue time` }) => {
+      const recorded = iso(revision.issuedAt) || iso(revision.pdfIssuedAt);
+      const evidence = recorded ? null : (issueTimes?.get(revision.invoiceNumber) || null);
+      const issuedAt = recorded || iso(evidence?.issuedAt);
       if (!issuedAt) {
-        failures.push({ kind: "unmappable", milestone: index, number: revision.invoiceNumber, reason: `issued revision ${revision.invoiceNumber} has no issue time` });
+        failures.push({ kind: "unmappable", code: "no-issue-time", milestone: index, number: revision.invoiceNumber, reason: missingTime, pdfPath: text(revision.pdfPath), pdfSha256: text(revision.pdfSha256) });
         return null;
+      }
+      if (evidence) {
+        const from = ISSUE_TIME_SOURCE_LABELS[evidence.source] || evidence.source;
+        note = `${note ? `${note} ` : ""}Issue time from ${from}: Field recorded none when it was issued.`;
+        warnings.push({ kind: "issue-time-from-evidence", code: evidence.source, milestone: index, number: revision.invoiceNumber, reason: `${revision.invoiceNumber} has no issue time on record; ${issuedAt} is taken from ${from}` });
       }
       const moneyResult = claimMoney({ subtotal: revision.subtotal, gst: revision.gst, total: revision.total, taxRate, milestoneKey, ...describe(revision.quoteVersion) });
       if (moneyResult.failure) {
@@ -235,7 +279,7 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
         status,
         revision: revision.revisionNumber,
         issuedAt,
-        issuedOn: issuedAt.slice(0, 10),
+        issuedOn: (evidence && evidence.issuedOn) || issuedAt.slice(0, 10),
         dueOn: null,
         currency: text(revision.currency) || "AUD",
         ...moneyResult.totals,
@@ -285,28 +329,31 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
       // Issued before invoice revisions froze a snapshot: the stored record
       // is what was issued (buildMilestoneInvoices freezes it from the same
       // values on its next rebuild).
-      const issuedAt = iso(state.issuedAt);
       const number = text(state.invoiceNumber);
-      if (!issuedAt || !number) {
-        failures.push({ kind: "unmappable", milestone: index, number, reason: `milestone ${index + 1} is ${state.status} but has no ${issuedAt ? "invoice number" : "issue time"}` });
+      if (!number) {
+        failures.push({ kind: "unmappable", code: "no-invoice-number", milestone: index, number, reason: `milestone ${index + 1} is ${state.status} but has no invoice number` });
       } else {
         current = fromRevision({
           invoiceNumber: number,
           revisionNumber: state.revisionNumber || 1,
-          issuedAt,
+          issuedAt: iso(state.issuedAt),
           subtotal: state.subtotal,
           gst: state.gst,
           total: state.total,
           currency: state.currency,
           quoteVersion: null,
           pdfPath: state.pdfPath,
-        }, { status: paid ? "paid" : "issued", note: "Issued before invoice revisions were recorded: mapped from the stored milestone record." });
+        }, {
+          status: paid ? "paid" : "issued",
+          note: "Issued before invoice revisions were recorded: mapped from the stored milestone record.",
+          missingTime: `milestone ${index + 1} is ${state.status} but has no issue time`,
+        });
         if (current) current.issuedRevision = false;
       }
     } else {
       const number = text(state.invoiceNumber);
       if (!number) {
-        failures.push({ kind: "unmappable", milestone: index, reason: `draft milestone ${index + 1} has no invoice number` });
+        failures.push({ kind: "unmappable", code: "draft-no-number", milestone: index, reason: `draft milestone ${index + 1} has no invoice number` });
       } else if (numbers.has(number)) {
         // The draft carries the number of a revision returned to draft: the
         // void row above is that invoice.
@@ -354,13 +401,13 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
     // Credit notes: each credited revision in full, naming its replacement.
     for (const { invoice, revision, successor, number } of credited) {
       if (!numbers.has(successor.invoiceNumber)) {
-        failures.push({ kind: "unmappable", milestone: index, number: invoice.number, reason: `${invoice.number} was replaced by ${successor.invoiceNumber}, which is not an issued invoice on this job` });
+        failures.push({ kind: "unmappable", code: "successor-not-issued", milestone: index, number: invoice.number, reason: `${invoice.number} was replaced by ${successor.invoiceNumber}, which is not an issued invoice on this job` });
         continue;
       }
       const note = revision.creditNote || null;
       const issuedAt = iso(note?.issuedAt) || iso(successor.revisedAt) || iso(revision.supersededAt) || iso(successor.issuedAt);
       if (!issuedAt) {
-        failures.push({ kind: "unmappable", milestone: index, number: invoice.number, reason: `${invoice.number} was credited with no time recorded` });
+        failures.push({ kind: "unmappable", code: "credited-no-time", milestone: index, number: invoice.number, reason: `${invoice.number} was credited with no time recorded` });
         continue;
       }
       creditNotes.push({
@@ -394,7 +441,7 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
       const recordedAgainst = text(payment.sourceInvoiceNumber);
       const invoice = (recordedAgainst && numbers.get(recordedAgainst)) || current;
       if (!invoice) {
-        failures.push({ kind: "unmappable", milestone: index, reason: `payment ${payment.id} has no invoice to be recorded against` });
+        failures.push({ kind: "unmappable", code: "payment-no-invoice", milestone: index, reason: `payment ${payment.id} has no invoice to be recorded against` });
         continue;
       }
       if (!(Number(payment.amount) > 0)) continue;
@@ -413,7 +460,7 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
         sourceInvoiceNumber: recordedAgainst,
       };
       if (!row.paidOn || !row.recordedAt) {
-        failures.push({ kind: "unmappable", milestone: index, reason: `payment ${payment.id} has no date` });
+        failures.push({ kind: "unmappable", code: "payment-no-date", milestone: index, reason: `payment ${payment.id} has no date` });
         continue;
       }
       payments.push(row);
@@ -435,7 +482,7 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null }) {
     // The receipt: a paid milestone's ER-… document, for the payment that cleared it.
     if ((paid || toCents(money(state.amountDue)) <= 0n) && lastActive && toCents(money(state.amountPaid)) > 0n && current) {
       const issuedAt = iso(lastActive.recordedAt) || iso(state.paidAt);
-      if (!text(state.receiptNumber)) failures.push({ kind: "unmappable", milestone: index, reason: `paid milestone ${index + 1} has no receipt number` });
+      if (!text(state.receiptNumber)) failures.push({ kind: "unmappable", code: "no-receipt-number", milestone: index, reason: `paid milestone ${index + 1} has no receipt number` });
       else receipts.push({
         key: lastActive.key,
         paymentKey: lastActive.key,

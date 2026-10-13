@@ -13,7 +13,10 @@
 //     the next boot writes it and records the backfill;
 //   - FIELD_DATA_MIGRATIONS_HOLD skips them; holding the quote backfill
 //     leaves the invoice backfill unrecorded (it waits for it);
-//   - a dry run writes nothing.
+//   - a dry run writes nothing;
+//   - April 2026 milestone invoices with no issue time: refused with code
+//     no-issue-time when nothing gives one, written with the date their
+//     stored PDF prints (and that source) when it does.
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -28,7 +31,7 @@ import { createTestDb, migratePostgresDatabase, queryRows, schema } from "../db-
 import { startTestPostgres, testPostgresMode } from "../db-runtime/test-postgres.js";
 import { DEFAULT_ORG_UID, withOrg } from "../db-runtime/tenancy.js";
 import { createInvoiceRowService } from "../invoices/invoice-rows.js";
-import { scenarios } from "../invoices/test-fixtures.js";
+import { createAprilMilestoneJob, scenarios } from "../invoices/test-fixtures.js";
 import { runAtomicJobGeneration } from "../job-generation.js";
 import { createQuoteRowService } from "../quotes/quote-rows.js";
 import { runDataMigrations } from "./index.js";
@@ -279,6 +282,41 @@ for (const backend of backends) {
       assert.deepEqual(await ledger(db), {});
       assert.deepEqual(treeHashes(dataDir), filesBefore);
     });
+
+    test("April 2026 milestone invoices with no issue time: refused by code without evidence, written with the PDF's date and its source with it", async (t) => {
+      const { db, dataDir, boot } = await setup(t);
+      // Every milestone authorised with no issue time, and no PDF left to say when.
+      await createAprilMilestoneJob(dataDir, { id: "job-april-none", number: "2604-81", withPdf: false });
+      const refused = await boot();
+      const invoices = refused.byId[INVOICE_ROWS_BACKFILL_ID];
+      assert.equal(invoices.status, "incomplete");
+      assert.deepEqual(invoices.refused, [{
+        jobId: "job-april-none",
+        mismatches: [0, 1, 2].map((milestone) => ({ kind: "unmappable", code: "no-issue-time", number: `EI-2604-81-M${milestone + 1}`, milestone })),
+      }]);
+      assert.equal(
+        refused.lines.at(-1),
+        `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: refused job job-april-none: ${[1, 2, 3].map((milestone) => `document (no uid) milestone ${milestone} unmappable (no-issue-time)`).join("; ")}`,
+        "the log line names the code, never the number",
+      );
+
+      // The same shape whose stored PDFs print the date they were drawn:
+      // written, with the date and where it came from.
+      const april = await createAprilMilestoneJob(dataDir, { id: "job-april-pdf", number: "2604-82", frozen: true });
+      const filesBefore = treeHashes(dataDir);
+      const dry = await boot({ mode: "dry-run" });
+      assert.deepEqual(dry.byId[INVOICE_ROWS_BACKFILL_ID].summary.issueTimesFromEvidence, { "stored-pdf-date": 3 });
+      const applied = await boot();
+      const summary = applied.byId[INVOICE_ROWS_BACKFILL_ID].summary;
+      assert.deepEqual(summary.issueTimesFromEvidence, { "stored-pdf-date": 3 });
+      assert.match(applied.lines.find((line) => line.includes(INVOICE_ROWS_BACKFILL_ID)), /; issue times from evidence: stored-pdf-date 3/);
+      const rows = await createInvoiceRowService({ db, orgUid: DEFAULT_ORG_UID }).readJob("job-april-pdf");
+      assert.deepEqual(rows.invoices.map((invoice) => [invoice.number, invoice.status, invoice.issuedAt, invoice.issuedOn, invoice.total]), april.milestones.map((milestone) => [
+        milestone.invoiceNumber, "issued", new Date(2026, 3, 14).toISOString(), "2026-04-14", milestone.total.toFixed(2),
+      ]));
+      for (const invoice of rows.invoices) assert.match(invoice.note, /Issue time from the date its stored PDF prints/);
+      assert.deepEqual(treeHashes(dataDir), filesBefore, "no job file was written");
+    });
   });
 }
 
@@ -292,9 +330,10 @@ test("a refused job's log line names uids and mismatch kinds, never a document n
         { kind: "totals", against: "issued-document", number: "EQ-2501-01", issuedDocumentUid: documentUid, version: 2, field: "taxTotal", rows: "90.00", shown: "92.55" },
         { kind: "payments", milestone: 0, field: "amountPaid", rows: "100.00", shown: "120.00" },
         { kind: "conflict", conflict: "sent-rows-differ", number: "EQ-2501-01", version: 1 },
+        { kind: "unmappable", code: "no-issue-time", number: "EI-2604-81-M1", milestone: 0 },
       ],
     }),
-    `job ${jobId}: document ${documentUid} v2 totals: tax against issued-document; milestone 1 payments: amount paid; document (no uid) v1 sent-rows-differ`,
+    `job ${jobId}: document ${documentUid} v2 totals: tax against issued-document; milestone 1 payments: amount paid; document (no uid) v1 sent-rows-differ; document (no uid) milestone 1 unmappable (no-issue-time)`,
   );
   assert.equal(describeRefusedJob({ job: `2026-01-04/${jobId}`, error: "Unexpected end of JSON input", mismatches: [] }), `job ${jobId}: could not be checked (Unexpected end of JSON input)`);
   assert.equal(

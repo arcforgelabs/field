@@ -28,6 +28,7 @@ import { sha256Hex } from "../documents/blob-store.js";
 import { quoteTaxRatePercent } from "../quotes/from-artifact.js";
 import { centsToText, fixed, toCents } from "../quotes/totals.js";
 import { claimMoney, mapMilestoneState } from "./from-milestones.js";
+import { findIssueTimes } from "./issue-time-evidence.js";
 import { extractInvoicePdfFacts } from "./issued-totals.js";
 import { agreedSentTotals, collectSentInvoiceCopies, quoteVersionTotals, sameTotals, versionsWithTotal } from "./sent-copies.js";
 
@@ -46,9 +47,11 @@ function compare(rows, against) {
 /**
  * What the job's files say about its invoices: { jobId, meta, basis, mapped }.
  * `basis` is the quote Field invoices against ({ version, number, total,
- * taxRate }), or null when the job has no quote.
+ * taxRate }), or null when the job has no quote. An issued invoice whose
+ * record holds no issue time takes one from the job's other records
+ * (issue-time-evidence.js; `issuedDocuments` is the issue service, or null).
  */
-export async function collectJobInvoices(jobDir) {
+export async function collectJobInvoices(jobDir, { issuedDocuments = null } = {}) {
   const meta = await readJobMeta(jobDir);
   const jobId = text(meta?.id ? String(meta.id) : null);
   if (!jobId) return { jobId: null, meta, basis: null, mapped: null };
@@ -70,7 +73,13 @@ export async function collectJobInvoices(jobDir) {
       basis = null;
     }
   }
-  const mapped = mapMilestoneState({ meta, basis, jobNumber: basis?.jobNumber || text(meta?.jobNumber) });
+  const jobNumber = basis?.jobNumber || text(meta?.jobNumber);
+  let mapped = mapMilestoneState({ meta, basis, jobNumber });
+  const wanted = mapped.failures.filter((failure) => failure.code === "no-issue-time" && failure.number);
+  if (wanted.length) {
+    const issueTimes = await findIssueTimes({ jobDir, jobId, meta, wanted, issuedDocuments });
+    if (issueTimes.size) mapped = mapMilestoneState({ meta, basis, jobNumber, issueTimes });
+  }
   return { jobId, meta, basis, mapped };
 }
 
@@ -218,7 +227,7 @@ export async function syncJobInvoiceRows({
   dryRun = false,
   actor = null,
 }) {
-  const { jobId, basis, mapped } = await collectJobInvoices(jobDir);
+  const { jobId, basis, mapped } = await collectJobInvoices(jobDir, { issuedDocuments });
   if (!jobId) return null;
   const result = {
     jobId,

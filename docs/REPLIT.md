@@ -160,6 +160,51 @@ The boot log has one line per backfill:
 "nothing to change" in place of "applied" means every job was already
 present. The numbers above are an example.
 
+A milestone the invoice rows backfill cannot map is refused with the kind
+`unmappable` and a code. The dry run shows the code with the invoice number
+and milestone; the log line shows the code only, for example
+`document (no uid) milestone 1 unmappable (no-issue-time)`. The codes:
+
+| Code | Meaning |
+| --- | --- |
+| `no-issue-time` | An issued invoice with no issue time, and no other record gives one (below) |
+| `no-invoice-number` | An issued milestone with no invoice number |
+| `duplicate-number` | Two invoices on the job have the same number |
+| `draft-no-number` | A draft milestone with no invoice number |
+| `no-amount` | A milestone with no percentage and no fixed amount |
+| `successor-not-issued` | A replaced invoice whose replacement is not issued on the job |
+| `credited-no-time` | A credited invoice with no credit time recorded |
+| `payment-no-invoice` | A payment with no invoice to record it against |
+| `payment-no-date` | A payment with no date |
+| `no-receipt-number` | A paid milestone with no receipt number |
+
+### Invoices with no issue time
+
+From 2026-04-10 to 2026-08-05 Field set a milestone's status from its
+amounts. A $0 milestone became "paid". When the quote was priced later, the
+next rebuild changed that "paid" to "authorised". No issue event ran, so
+Field recorded no issue time, and sending such an invoice did not record
+one either.
+
+The invoice rows backfill takes the issue time from the first of these
+records that names the invoice. It refuses the job (`no-issue-time`) only
+when none does:
+
+1. The job's `invoiceSentAt`, when the job has one milestone (the send time
+   of a job's single invoice from before milestone invoices).
+2. The issued document for the invoice number on this job, then the first
+   issuance ledger delivery whose PDF names it.
+3. The first archived email (`sent-emails.jsonl`) that names it.
+4. The first `invoice.sent` event in the job's activity log that names it.
+5. The date the stored PDF prints ("Issued: 14 April 2026"). This is a date
+   only: Field uses midnight on that date in the business time zone (the
+   `TZ` secret, Australia/Adelaide), and that date as the issue date.
+
+The invoice row's note names the source. The backfill counts the sources in
+its summary (`issueTimesFromEvidence`) and in its log line, for example
+`issue times from evidence: stored-pdf-date 3`. The totals are still checked
+against the stored PDF.
+
 ### Legacy invoices whose record and PDF disagree
 
 Milestone invoices issued before 2026-08-05 can hold amounts from one quote

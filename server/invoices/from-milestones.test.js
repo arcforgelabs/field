@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
-import { claimLineName, claimMoney, invoiceKind, mapMilestoneState } from "./from-milestones.js";
+import { claimLineName, claimMoney, invoiceKind, mapMilestoneState, UNMAPPABLE_CODES } from "./from-milestones.js";
 import { collectJobInvoices } from "./sync.js";
 import { actions, createLandedJob, scenarios } from "./test-fixtures.js";
 
@@ -145,6 +145,30 @@ describe("milestone state to invoice rows", () => {
     const mapped = mapMilestoneState({ meta, basis: null });
     assert.equal(mapped.invoices.length, 0);
     assert.match(mapped.failures[0].reason, /no issue time/);
+    assert.equal(mapped.failures[0].code, "no-issue-time");
+  });
+
+  test("every unmappable milestone carries a stable code", () => {
+    const base = { milestoneLabel: "Stage", percentage: 50, payments: [], subtotal: 10, gst: 1, total: 11 };
+    const mapped = mapMilestoneState({
+      meta: {
+        milestoneInvoices: [
+          { ...base, milestoneIndex: 0, percentage: 0, invoiceNumber: "EI-X-M1", status: "draft" },
+          { ...base, milestoneIndex: 1, invoiceNumber: null, status: "draft" },
+          { ...base, milestoneIndex: 2, invoiceNumber: null, status: "authorised", issuedAt: "2026-04-14T02:00:00.000Z" },
+          { ...base, milestoneIndex: 3, invoiceNumber: "EI-X-M4", status: "authorised", issuedAt: "2026-04-14T02:00:00.000Z" },
+          { ...base, milestoneIndex: 4, invoiceNumber: "EI-X-M4", status: "authorised", issuedAt: "2026-04-14T02:00:00.000Z" },
+        ],
+      },
+      basis: null,
+    });
+    assert.deepEqual(mapped.failures.map((failure) => [failure.kind, failure.code, failure.milestone]), [
+      ["unmappable", "no-amount", 0],
+      ["unmappable", "draft-no-number", 1],
+      ["unmappable", "no-invoice-number", 2],
+      ["unmappable", "duplicate-number", 4],
+    ]);
+    assert.ok(mapped.failures.every((failure) => UNMAPPABLE_CODES.includes(failure.code)));
   });
 
   test("the kind and the claim line's name", () => {

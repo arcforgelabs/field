@@ -19,6 +19,8 @@ import {
   updateJobMilestone,
   voidJobMilestonePayment,
 } from "../job-actions.js";
+import { ARTIFACT_STATE } from "../invoice-artifact-state.js";
+import { normalizeInvoiceRevision } from "../invoice-revisions.js";
 import { prepareMilestoneInvoiceDocument } from "../job-documents.js";
 import { runAtomicJobGeneration } from "../job-generation.js";
 import { readJobMeta } from "../job-meta-store.js";
@@ -245,6 +247,118 @@ export async function createLegacyVersionMismatchJob(dataDir, { id, number, reco
     milestoneIndex: 0,
   })}\n`);
   return { jobDir, meta, quotes, claims, pdf, number: invoiceNumber, deposit, completion };
+}
+
+/**
+ * A job shaped like the oldest milestone invoices in production (April 2026):
+ * every milestone "authorised" with no issue time, no payments and nothing
+ * paid. From 2026-04-10 to 2026-08-05 Field derived a milestone's status from
+ * its amounts: a $0 milestone (milestones built while the quote total was 0)
+ * was "paid", and a later rebuild against the priced quote turned that stored
+ * "paid" into "authorised" with the amount due. No issue event ran, so no
+ * `issuedAt` was written, and sending an "authorised" invoice never set one.
+ * The stored PDF prints the date it was drawn ("Issued: 14 April 2026").
+ *
+ *   frozen     today's legacy freeze has run: each milestone carries the
+ *              issued revision it synthesized, with no issue time either
+ *   evidence   extra records the job holds: { invoiceSentAt, sentEmail,
+ *              activity } (times by milestone index), written as Field wrote
+ *              them then
+ *   withPdf    false: the stored PDFs are gone
+ *
+ * Returns { jobDir, meta, quote, milestones, pdfs, printedOn }.
+ */
+export async function createAprilMilestoneJob(dataDir, { id = "job-april", number = "2604-92", schedule = [["Deposit", 30], ["Progress", 40], ["Final", 30]], frozen = false, evidence = {}, withPdf = true } = {}) {
+  const jobDir = join(dataDir, "2026-04-02", id);
+  const meta = { ...landedMeta({ id, number }), landedAt: "2026-04-11T00:00:00.000Z", ...(evidence.invoiceSentAt ? { invoiceSentAt: evidence.invoiceSentAt } : {}) };
+  const quote = invoiceQuote(meta, { rows: [["Excavation", 10000]] });
+  const printedAt = "2026-04-14T02:00:00.000Z";
+  const milestones = schedule.map(([label, percentage], index) => {
+    const claim = claimOf(quote, percentage);
+    const invoiceNumber = `EI-${number}-M${index + 1}`;
+    return {
+      id: `${id}-m${index + 1}`,
+      jobId: id,
+      quoteId: `EQ-${number}`,
+      milestoneIndex: index,
+      milestoneLabel: label,
+      invoiceNumber,
+      receiptNumber: `ER-${number}-M${index + 1}`,
+      reference: `EQ-${number}`,
+      percentage,
+      ...claim,
+      currency: "AUD",
+      amountPaid: 0,
+      amountDue: claim.total,
+      lineItems: [{ description: "Excavation", quantity: 1, unit: "lot", unitPrice: claim.subtotal, totalPrice: claim.subtotal }],
+      dueDate: null,
+      issuedAt: null,
+      paidAt: null,
+      status: "authorised",
+      payments: [],
+      pdfPath: `milestone-invoices/${invoiceNumber}.pdf`,
+      receiptPdfPath: `milestone-receipts/ER-${number}-M${index + 1}.pdf`,
+    };
+  });
+  const pdfs = [];
+  for (const milestone of milestones) {
+    // Drawn the way Field drew it: the date printed is when it was drawn.
+    const pdf = await renderLegacyInvoicePdf({ meta, quote, milestone: { ...milestone, issuedAt: printedAt }, amounts: {}, milestones });
+    pdfs.push(pdf);
+    if (withPdf) await write(join(jobDir, milestone.pdfPath), pdf);
+  }
+  const stored = frozen
+    ? milestones.map((milestone) => ({
+      ...milestone,
+      issuedRevision: normalizeInvoiceRevision({
+        revisionNumber: 1,
+        invoiceNumber: milestone.invoiceNumber,
+        issuedAt: null,
+        subtotal: milestone.subtotal,
+        gst: milestone.gst,
+        total: milestone.total,
+        currency: milestone.currency,
+        lineItems: milestone.lineItems,
+        pdfPath: milestone.pdfPath,
+        quoteVersion: 1,
+        quoteVersionInferred: true,
+        artifactState: ARTIFACT_STATE.ADOPT_PENDING,
+      }),
+    }))
+    : milestones;
+  await write(join(jobDir, "meta.json"), meta);
+  await write(join(jobDir, "quote.json"), quote);
+  await write(join(jobDir, "milestone-invoices/state.json"), {
+    version: 1,
+    paymentSchedule: { milestones: schedule.map(([label, percentage]) => ({ label, percentage })) },
+    milestoneInvoices: stored,
+  });
+  const sentEmails = Object.entries(evidence.sentEmail || {}).map(([index, ts]) => JSON.stringify({
+    id: `sent-${id}-${index}`,
+    ts,
+    kind: "invoice.sent",
+    documentType: "invoice",
+    messageId: `msg-${id}-${index}`,
+    to: ["customer@example.invalid"],
+    subject: `Invoice ${milestones[index].invoiceNumber}`,
+    attachments: [{ filename: `${milestones[index].invoiceNumber} — Sam Customer — Synthetic scope — Invoice.pdf`, contentType: "application/pdf" }],
+    quoteVersion: 1,
+    milestoneIndex: Number(index),
+  }));
+  if (sentEmails.length) await write(join(jobDir, "sent-emails.jsonl"), `${sentEmails.join("\n")}\n`);
+  const activity = [
+    { id: `act-${id}-generated`, kind: "invoice.milestones_generated", ts: "2026-04-11T00:00:00.000Z", actor: { kind: "system", label: "Field" }, title: "Milestone invoices generated", body: `${milestones.length} milestone invoice(s) generated.` },
+    ...Object.entries(evidence.activity || {}).map(([index, ts]) => ({
+      id: `act-${id}-sent-${index}`,
+      kind: "invoice.sent",
+      ts,
+      actor: { kind: "system", label: "Field" },
+      title: "Invoice sent",
+      body: `${milestones[index].invoiceNumber} (${milestones[index].milestoneLabel}) emailed to customer@example.invalid.`,
+    })),
+  ];
+  await write(join(jobDir, "job-state/activity.jsonl"), `${activity.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+  return { jobDir, meta, quote, milestones, pdfs, printedOn: "2026-04-14" };
 }
 
 /**
