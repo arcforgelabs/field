@@ -97,6 +97,7 @@
           - server/google-*.js
           - server/drive-upload{,.test}.js
           - shared/email-templates.*
+          - server/secrets/**
           - server/moasure{,.test}.js
           - scripts/setup-gmail-oauth{,.test}.js
           - docs/XERO.md
@@ -144,6 +145,7 @@
   - changed-files:
       - any-glob-to-any-file:
           - scripts/field-cli{,.test}.js
+          - scripts/field-server.js
           - scripts/install-field-cli{,.test}.js
           - skills/**
 
@@ -164,6 +166,9 @@
           - scripts/github-sync.sh
           - scripts/git-credential-github.sh
           - .agents/**
+          - deploy/**
+          - docs/SELF_HOSTING.md
+          - docs/RELEASING.md
 
 # CI and the test tooling it runs.
 "area: ci":
@@ -176,7 +181,9 @@
           - server/verification-runtime.test.js
           - scripts/undefined-names.test.js
           - scripts/quote-invoice-proof/**
-          - scripts/dependency-audit{,.test}.mjs
+          - scripts/dependency-audit.*
+          - scripts/release/**
+          - scripts/self-hosting/**
 
 "area: docs":
   - changed-files:
@@ -193,4 +200,6 @@
           - package-lock.json
           - client/package.json
           - client/package-lock.json
+          - e2e/package.json
+          - e2e/package-lock.json
           - .npmrc

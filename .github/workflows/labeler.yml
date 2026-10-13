@@ -1,6 +1,6 @@
 # Public-repo copy of arcforgelabs/.github@a115c8f8dc02978d8c82c9554f02ea8e013a6981; trusted base checkout only.
 # Port of vendor/openclaw/.github/workflows/labeler.yml; adaptations documented in README.
-# Field: the size label also leaves out package-lock.json and client/package-lock.json.
+# Field: the size label also leaves out package-lock.json, client/package-lock.json and e2e/package-lock.json.
 name: Labeler
 
 on:
@@ -134,7 +134,7 @@ jobs:
               per_page: 100,
             });
 
-            const excludedLockfiles = new Set(["package-lock.json", "client/package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb"]);
+            const excludedLockfiles = new Set(["package-lock.json", "client/package-lock.json", "e2e/package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb"]);
             const totalChangedLines = files.reduce((total, file) => {
               const path = file.filename ?? "";
               if (path.startsWith("docs/") || excludedLockfiles.has(path)) {
@@ -482,7 +482,7 @@ jobs:
                 per_page: 100,
               });
 
-              const excludedLockfiles = new Set(["package-lock.json", "client/package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb"]);
+              const excludedLockfiles = new Set(["package-lock.json", "client/package-lock.json", "e2e/package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb"]);
               const totalChangedLines = files.reduce((total, file) => {
                 const path = file.filename ?? "";
                 if (path.startsWith("docs/") || excludedLockfiles.has(path)) {
