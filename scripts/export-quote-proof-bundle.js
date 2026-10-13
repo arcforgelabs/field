@@ -159,7 +159,7 @@ async function main() {
   const outputDirArg = outputArgIndex >= 0 ? args[outputArgIndex + 1] : null;
 
   if (!jobDirArg) {
-    console.error("Usage: node apps/field/scripts/export-quote-proof-bundle.js <recording-dir> [--out <bundle-dir>]");
+    console.error("Usage: node scripts/export-quote-proof-bundle.js <recording-dir> [--out <bundle-dir>]");
     process.exit(1);
   }
 

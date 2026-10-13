@@ -9,8 +9,9 @@
 #   scripts/github-sync.sh handoff                # print a handoff block when no token is available
 #
 # Transport: real git over HTTPS using the GITHUB_TOKEN secret through
-# scripts/git-credential-github.sh. Without GITHUB_TOKEN nothing here can reach
-# GitHub — use `handoff` and let a human push from the Replit Git pane.
+# scripts/git-credential-github.sh. Without GITHUB_TOKEN, `pull` still works
+# for a public repository; pushing needs `handoff` and a human pushing from the
+# Replit Git pane.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -98,7 +99,7 @@ cmd_status() {
       echo "auth:     GITHUB_TOKEN is set but GitHub rejected it (expired, pending org approval, wrong resource owner, or repo not selected)"
     fi
   else
-    echo "auth:     no GITHUB_TOKEN — push/pull must go through the Replit Git pane (see: $0 handoff)"
+    echo "auth:     no GITHUB_TOKEN — pull works for a public repository; push must go through the Replit Git pane (see: $0 handoff)"
   fi
 }
 

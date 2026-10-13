@@ -1,18 +1,22 @@
 # Field DB Lane
 
-Additive DB-first scaffold for `apps/field`. This lane does not change the live runtime contract, live API routes, or the current shipped Field UX baseline work.
+Field's PostgreSQL schema and migrations. The Drizzle migrations in
+`drizzle/` are live: the server applies them at boot (see "Runtime" below).
+The older `migrations/0001_initial.sql` lane (from "Scope" on) is an additive
+scaffold that the running server does not use.
 
 ## Drizzle toolchain
 
 The typed Drizzle source lives in `src/` and targets PostgreSQL. The generated
 ESM output is written to `dist/` (ignored in source control and copied into
 the runtime image by the Docker build). `src/schema.ts` holds the
-test-scoped `drizzle_toolchain_probe` table (it proves the toolchain) and the
-price catalogue's tables (`server/catalog/README.md`, migration
-`0001_price_catalogue`).
+test-scoped `drizzle_toolchain_probe` table (it proves the toolchain) and
+every table the server uses: durable storage, users and tenancy, the price
+catalogue (`server/catalog/README.md`, migration `0003_price_catalogue`),
+data migrations, issued documents, quote rows and invoice rows.
 
 The generated migration set is `drizzle/`. It is intentionally separate from
-the older hand-written `migrations/0001_initial.sql` backfill lane above;
+the older hand-written `migrations/0001_initial.sql` backfill lane below;
 Drizzle does not replay or replace that legacy migration.
 
 From the repository root:
@@ -25,9 +29,11 @@ npm run db:check           # verify generated migration history is consistent
 npm run db:check:ci        # regenerate, check, and fail on uncommitted drift
 ```
 
-Applying or opening Studio requires an explicitly supplied `DATABASE_URL`.
-Keep it in the approved local environment/secret store; it is never needed by
-normal Field boot:
+Applying or opening Studio from the command line requires an explicitly
+supplied `DATABASE_URL` (these commands do not read `FIELD_DB_URL`). Keep it
+in the approved local environment/secret store. Normal Field boot does not
+need these commands: it applies the same migrations itself
+(`runMigrations`, below):
 
 ```bash
 export DATABASE_URL=<development-postgres-url>
@@ -218,7 +224,8 @@ drizzle-kit would drop and re-create a renamed table: it renames
 every index, constraint, sequence and policy renamed to match; rows, grants
 and row-level security carry over), drops the five never-written
 `assembly_*` tables (refusing if one holds rows), and adds `items.type` with
-its check, set to `kit` on every item with components. Its snapshot was taken
+its check, set to `kit` on every item with components, and `items.notes`
+(internal notes, never printed). Its snapshot was taken
 from a fresh `drizzle-kit generate` of the schema, and the schema the
 migration chain builds was compared with the one a fresh generate builds:
 they differ only in 0005's hand-written `ON DELETE SET NULL (column)`.
@@ -246,7 +253,7 @@ before 0007).
 `document_blobs` (PDF bytes once per organisation by SHA-256, hash checked by
 a `CHECK`), `issued_documents` (one immutable row per issued document,
 `doc_…`), `document_events` (append-only, `dev_…`) and
-`document_number_counters` (not used yet). Triggers refuse `UPDATE`,
+`document_number_counters` (the invoice number sequence, used since 0014). Triggers refuse `UPDATE`,
 `DELETE` and `TRUNCATE` on blobs and events and on every `issued_documents`
 column except `details`, for the owner as well as `field_app`, which is
 granted only `SELECT, INSERT` (and `UPDATE (details)`). Only
@@ -271,7 +278,10 @@ time, triggers refuse any change to its sections and lines, its money,
 customer and wording, setting it back to draft and deleting it, for the
 owner as well as `field_app`; `TRUNCATE` is always refused. `field_app` may
 read and write the rows otherwise. Only `server/quotes/` reads or writes
-them; nothing in the app reads them yet.
+them. Since 0011 (#10) the quote PDF, the quote email's totals, the job's
+totals and the job detail's customer pricing read them, through
+`server/quotes/read-model.js` (`FIELD_QUOTE_READS=files` sends those reads
+back to the job files).
 `rollback/0010_quote_rows.down.sql` reverses it (the backfill rebuilds the
 rows after 0010 is applied again, since the job files still hold every
 quote); run it before 0009's.
@@ -305,7 +315,7 @@ table; the bytes stay in `document_blobs` and in R2. Run it before 0011's.
 payments") adds seven tenant tables: `payment_milestones` (`pms_…`, a
 job's schedule), `invoices` (`inv_…`, one row per invoice as issued, number
 as printed, unique per job), `invoice_lines` (`iln_…`), `credit_notes` and
-`credit_note_lines` (`crn_…`, `cnl_…`; no writer until step 4b),
+`credit_note_lines` (`crn_…`, `cnl_…`; written by the issue service since 0015),
 `payments` (`pay_…`) and `receipts` (`rct_…`, one per payment). Money is
 `numeric(12,2)`; line rates, quantities and tax rates follow `quote_lines`,
 with the same `computed` / `printed` line-total check. Once an invoice or
@@ -315,10 +325,35 @@ the owner as well as `field_app`; its status, amount paid, due date, kind
 and note may change, and links missing when it was written are filled once.
 A payment is never deleted and may only be voided, once; a receipt may only
 be voided. `TRUNCATE` is always refused. `field_app` may read and write the
-rows otherwise. Only `server/invoices/` reads or writes them; nothing in the
-app reads them yet. `rollback/0013_invoice_rows.down.sql` drops them (the
-backfill rebuilds them from the job files after 0013 is applied again); run
-it before 0012's.
+rows otherwise. Only `server/invoices/` reads or writes them.
+`rollback/0013_invoice_rows.down.sql` drops them (the backfill rebuilds them
+from the job files after 0013 is applied again); run it before 0012's.
+
+### Invoice issue
+
+`0014_invoice_issue` (#28; design in `docs/PRICING_ENGINE.md` "Invoices and
+payments") adds `invoices.issue_key`, the idempotency key of the invoice
+issue service (`server/invoices/issue.js`). An invoice with a key was issued
+from the sequence: its number is `INV-YYYY-M-N`, unique in the organisation,
+and it carries the job reference. Invoices issued before 0014 keep their
+`EI-…` numbers and a null key. `rollback/0014_invoice_issue.down.sql` refuses
+once any invoice has been issued with an `INV` number; run it before 0013's.
+
+### Credit notes and business settings
+
+`0015_credit_notes` (#28) corrects an issued invoice with a credit note,
+never in place. `credit_notes` gains the replacement invoice and the issue
+service's idempotency key, and the new append-only `payment_allocations`
+moves the payments a credited invoice held to its replacement. Invoices
+revised in place before 0015 get no credit note.
+`rollback/0015_credit_notes.down.sql` refuses once a credit note has been
+issued; run it before 0014's.
+
+`0016_business_settings` (#28) adds `business_settings`, one row per
+organisation (none means every default). Its first setting says whether an
+invoice returned to draft and issued again with different content is
+credited first: `when-emailed` (the default), `always` or `never`. Run
+`rollback/0016_business_settings.down.sql` before 0015's.
 
 ### Adding tables
 
@@ -345,7 +380,7 @@ is set: `startTestPostgres()` returns `{ url, stop }` or `null`.
 
 - Postgres becomes the future canonical store for structured state.
 - Raw and binary artifacts stay referenced through `storage_objects`.
-- Quote-catalog metadata remains file-authoritative under `apps/field/quote-catalogs/`.
+- Quote-catalog metadata remains file-authoritative under `quote-catalogs/`.
 - Google Drive is modeled only as async backup/export through `backup_jobs`.
 
 ## Files

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Start the local Field development environment from this repo.
+# Start the local Field development environment from this repo. Like
+# `npm run dev`, it keeps a local PGlite database under data/pglite unless
+# FIELD_PGLITE, FIELD_PGLITE_DIR or DATABASE_URL say otherwise.
 #
 # Usage:
 #   ./dev.sh               # start Field locally
@@ -88,6 +90,14 @@ build_client() {
   npm --prefix "$REPO_DIR/client" run build
 }
 
+ensure_data_layer() {
+  if [[ -d "$REPO_DIR/server/db/dist" ]]; then
+    return
+  fi
+  echo "==> Building data layer..."
+  npm --prefix "$REPO_DIR" run db:build
+}
+
 ensure_client_bundle() {
   if [[ -f "$REPO_DIR/client/dist/index.html" ]]; then
     return
@@ -148,6 +158,7 @@ start() {
   ensure_run_dir
   clear_stale_pid
   ensure_local_config
+  ensure_data_layer
   ensure_client_bundle
 
   local existing_pid
@@ -164,7 +175,7 @@ start() {
   echo "==> Starting Field app..."
   (
     cd "$REPO_DIR"
-    nohup setsid env FIELD_CONFIG="$FIELD_CONFIG" node server/index.js >> "$FIELD_LOG" 2>&1 < /dev/null &
+    nohup setsid env FIELD_CONFIG="$FIELD_CONFIG" FIELD_PGLITE="${FIELD_PGLITE:-1}" node server/index.js >> "$FIELD_LOG" 2>&1 < /dev/null &
     echo $! > "$FIELD_PID_FILE"
   )
 

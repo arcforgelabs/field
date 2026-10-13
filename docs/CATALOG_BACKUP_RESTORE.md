@@ -17,3 +17,8 @@ protected.
 - **Moving a SQLite catalogue in** (cutover, or an old backup `.db`):
   `npm run catalog:import-legacy -- <catalog.db> --dry-run`, then without
   `--dry-run`. It is verified and all-or-nothing.
+
+The CLIs read and write the database `DATABASE_URL` (or `FIELD_DB_URL`)
+names. In a Replit workspace shell that is the workspace's own database, not
+production's (`docs/REPLIT.md` "Database"). For a copy of production's
+catalogue, use `GET /api/price-catalog/export` on the published app.

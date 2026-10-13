@@ -107,7 +107,7 @@ Every page starts with the page header (`.fx-ph`): breadcrumb or title, status, 
 
 `client/src/components/shell/ui.css` holds the app's primitives, prefixed `fx-`: page header, buttons (`fx-btn`, `--primary`, `--ghost`, `--danger`, `--sm`, `--icon`), segmented control (`fx-seg`, a raised white thumb on a tinted track, never a filled block), inputs, filter box, status pills (`fx-status--*`) and dots, summary tiles (`fx-strip`), board lanes and cards, tables, tabs, notices, the line editor (`fx-lines`, `fx-cell`), popovers and menus, dialogs, the palette and toasts, and the kit parts (sheet, bulk bar, badge, switch, affix input, skeleton). The catalogue adds filter chips (`fx-chip`) and the wide item sheet. `menu.tsx` is the anchored menu; `shell-context.ts` gives pages `newQuote()` and `toast(message, undo)`.
 
-The older kit in `client/src/components/field/` (`Button`, `DataTable`, `SideDrawer`, …) still serves the supplier price-list import; its buttons and badges follow the same sentence-case, soft look. New screens use the `fx-` primitives.
+The older kit in `client/src/components/field/` (`Button`, `DataTable`, `SegmentedControl`, …) still serves the sign-in screen and the People and Appearance sections of Settings, and holds `<FieldLogo />`; its buttons and badges follow the same sentence-case, soft look. New screens use the `fx-` primitives.
 
 Motion is short and informative: menus and dialogs fade up in about 120ms, board cards lift slightly on hover, a newly added quote row flashes the accent tint once. `prefers-reduced-motion` turns it off.
 

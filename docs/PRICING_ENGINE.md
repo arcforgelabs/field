@@ -741,7 +741,7 @@ in one transaction, and have no field-level history. The end state is
 | `sent-emails.jsonl`, `quote-delivery-outbox.json`, scheduled emails | `email_messages` (one row per email: status `scheduled`, `sending`, `sent`, `failed`; recipients, Gmail ids), linked to `document_events` |
 | `email-templates.json` | `email_templates` |
 | `gmail-oauth-users.json` | `oauth_tokens`, with the refresh token encrypted at rest |
-| `users.json` | `field_users` (done) |
+| `users.json` | `users` (done, migration `0002_field_users`) |
 | `config.json` business fields | `business_settings` (above). Secrets stay in Replit Secrets |
 | Capture-era files (`transcript*.json`, `evidence-pack.json`, `evidence-index.json`, `ingestion-ledger.json`, `quote-inputs.json`, `quote-context.json`, `site-conditions.json`, wall and Moasure files) | not migrated. Kept read-only with the job's archive |
 
@@ -758,7 +758,8 @@ per-job generation locks are retired.
 ## What goes away
 
 Hand-built quotes run through all of this today, and none of it is needed once
-quotes are rows. The figures are approximate lines of code on master `d7fbb80`.
+quotes are rows. The figures are approximate lines of code when this plan
+was written.
 
 | Remove | What it is | Size |
 | --- | --- | --- |
@@ -825,8 +826,10 @@ Rules for the migration:
 
 ## Price book UI
 
-Built from the shared component kit in `client/src/components/field/`, not
-inline styles:
+Built on Field's design system (`DESIGN.md`), not inline styles. The price
+book at `/pricing` (`client/src/features/catalogue/`) uses the `fx-`
+primitives; this plan was written against the older kit in
+`client/src/components/field/`, whose parts it names:
 - the grid is `DataTable`, `HeaderCell`, `Row` and `Cell` (`numeric`,
   `mono`), with `formatMoney` (always 2 decimals) and `formatPercent`;
 - the item pane is a `docked` `SideDrawer`;
@@ -895,13 +898,14 @@ offline quote and invoice proof passing (`npm run qa:quote-invoice-proof`).
 | 0b. Tenancy foundation | `organizations`, `org_memberships`, `org_uid` and RLS on the existing catalogue, user and snapshot tables; a request-scoped transaction helper that sets `field.org_uid`; an RLS test that proves cross-tenant reads and writes fail | Two-org test suite passes |
 | 1. Catalogue schema | Migration: `type`, `category_uid`, `pricing_method`, `is_sold`, code `CHECK`, money precision, `kit_components` (from `item_components`), recipes out of json5, drop the empty `assembly_*` tables and unused columns, `audit_log`, `business_settings`. One `price()` function | Catalogue tests green. Every active item prices identically before and after, except cents rounding, which is recorded |
 | 2. Catalogue clean-up | Generate the code, type and category proposal CSV. The operator reviews it. Apply it | 0 generated or `-copy` codes, 0 untyped, 0 uncategorised |
-| 3. Quote tables | `quotes`, `quote_sections`, `quote_lines`, invoices, payments, events, issued documents (events and issued documents are built: step 2 below). The quote service and one `quoteTotals`. Migrate all jobs, verified against sent PDFs to the cent | Every quote's totals match its PDF. New quotes are built only from rows |
+| 3. Quote tables | `quotes`, `quote_sections`, `quote_lines`, invoices, payments, events, issued documents (events, issued documents, quote rows and invoice rows are built, and invoices are issued and credited from rows: steps 2, 3, 4a and 4b below). The quote service and one `quoteTotals`. Migrate all jobs, verified against sent PDFs to the cent | Every quote's totals match its PDF. New quotes are built only from rows |
 | 3b. Jobs and the rest | `jobs`, `customers`, `contacts`, `job_notes`, `job_events`, `email_messages`, `email_templates`, `oauth_tokens`, `job_files`; migrate and verify every job; retire `field.db` and the file mirror | Nothing reads `DATA_DIR` except blobs |
 | 4. Strip the engine | Delete the removals list. Quote builder, PDF and email read only the new tables | ~30k lines gone; the proof passes |
 | 5. UI | Price book and drawer, then the quote builder, on Field's design system | The editing behaviour in "Price book UI" works; one catalogue editor |
 | 6. API and MCP | Typed catalogue and quote-line operations for external AI | Contract tests |
 
-Phases 1–2 and 3–4 can overlap. 5 waits for the shared components (`client/src/components/field/`).
+Phases 1–2 and 3–4 can overlap. 5 builds on Field's design system
+(`DESIGN.md`).
 
 ### Phase 1 as built (part one)
 
@@ -937,7 +941,7 @@ Not built yet, and why:
   the columns would be promises nothing keeps.
 - Recipes out of json5: the lawn, irrigation and drainage recipes are
   measured formulas, which `kit_components` deliberately cannot express
-  (decision 4); they leave with the engine in phase 4.
+  (see "`kit_components`"); they leave with the engine in phase 4.
 - `audit_log` (replaces `catalog_history`, which works) and
   `business_settings` (read by quote documents): they arrive with phases 3
   and 3b, which are their first readers.
@@ -1029,7 +1033,8 @@ stay the source of truth, and nothing reads the rows yet.
   writes nothing new. Without a database, `--dry-run` checks the files
   alone. Since #36 production runs it at boot as the data migration
   `2026-10-13-quote-rows-backfill`: every job that verifies is written,
-  each refused job is logged with both numbers, and the migration is
+  each refused job is logged by uid and mismatch kind (the dry run shows the
+  numbers), and the migration is
   recorded only when nothing is refused, so a later boot retries
   (`docs/REPLIT.md`, "The row backfills").
 - **Every sent PDF's totals reproduce.** With the 2026-10-12 decisions
