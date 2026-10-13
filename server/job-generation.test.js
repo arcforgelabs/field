@@ -8,6 +8,7 @@ import {
   JOB_GENERATION_POINTER,
   JOB_GENERATIONS_DIR,
   JOB_GENERATION_LOCK,
+  forgetVerifiedJobGenerations,
   resolveActiveJobGeneration,
   runAtomicJobGeneration,
   withJobGenerationLock,
@@ -215,9 +216,12 @@ test("generation staging rejects root and nested symlinks without following them
 test("reading a job with a long history stays fast: committed generations are not re-hashed on every read", async () => {
   // Regression for the 2026-10-13 jobs-board outage (docs/lessons-learned.md):
   // every read used to hash every file of every generation, so a job's read
-  // cost grew with its whole history. 20 reads of 60 generations, each adding
-  // a 200 KB PDF, took minutes that way; with the verification remembered
-  // they take well under a second.
+  // cost grew with its whole history. 60 generations, each adding a 200 KB
+  // PDF: a read that re-hashes them all (the verification forgotten) is the
+  // cost of the bug, and a read with the verification remembered must cost a
+  // small part of it. Both are timed in the same process, so a slow or busy
+  // runner slows both; a wall-clock limit failed under CI load (run
+  // 38354926356) though the cache worked.
   const jobDir = await mkdtemp(join(tmpdir(), "field-generation-history-"));
   try {
     await writeFile(join(jobDir, "meta.json"), JSON.stringify({ version: 0 }));
@@ -228,11 +232,21 @@ test("reading a job with a long history stays fast: committed generations are no
         await writeFile(join(stage, `quote-v${index}.pdf`), pdf);
       });
     }
-    await resolveActiveJobGeneration(jobDir);
-    const started = Date.now();
+    const coldReads = [];
+    for (let read = 0; read < 3; read += 1) {
+      forgetVerifiedJobGenerations();
+      const started = performance.now();
+      await resolveActiveJobGeneration(jobDir);
+      coldReads.push(performance.now() - started);
+    }
+    const cold = coldReads.sort((a, b) => a - b)[1];
+    const started = performance.now();
     for (let read = 0; read < 20; read += 1) await resolveActiveJobGeneration(jobDir);
-    const elapsed = Date.now() - started;
-    assert.ok(elapsed < 10_000, `20 reads of a 60-generation job took ${elapsed} ms`);
+    const warm = (performance.now() - started) / 20;
+    assert.ok(
+      warm * 4 < cold,
+      `a remembered read took ${warm.toFixed(1)} ms, not under a quarter of a re-hashing read (${cold.toFixed(1)} ms)`,
+    );
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }
