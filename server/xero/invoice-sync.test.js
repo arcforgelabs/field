@@ -22,6 +22,8 @@ import { createXeroInvoiceSync, syncBackoffMs } from "./invoice-sync.js";
 
 const REDIRECT = "https://field.example.invalid/api/integrations/xero/callback";
 const CUSTOMER = { name: "Synthetic Customer Pty Ltd", email: "accounts@customer.example.invalid" };
+const TENANT_A = "11111111-2222-3333-4444-555555555555";
+const TENANT_B = "99999999-8888-7777-6666-555555555555";
 let xero;
 let testDb;
 let now;
@@ -46,6 +48,7 @@ beforeEach(async () => {
   xero.state.idempotency.clear();
   xero.state.calls.length = 0;
   xero.state.ignoreTaxAmount = false;
+  xero.state.connections = [{ id: "conn-a", tenantId: TENANT_A, tenantName: "Synthetic Earthworks Pty Ltd", tenantType: "ORGANISATION" }];
   testDb = await createTestDb();
   now = new Date("2026-10-13T00:00:00.000Z");
   logs = [];
@@ -151,7 +154,7 @@ test("a draft: Field's number, the job and quote reference, Field's GST per line
   assert.equal(xero.state.invoices.length, 2);
 });
 
-test("an approved invoice: AUTHORISED with a due date, and nothing emailed", async () => {
+test("an approved invoice: created as a draft, totals checked, then approved, with a due date and nothing emailed", async () => {
   await connect();
   await connection.updateSettings({ createMode: "authorised", salesAccountCode: "4000" });
   advance(1000);
@@ -161,6 +164,9 @@ test("an approved invoice: AUTHORISED with a due date, and nothing emailed", asy
   assert.equal(created.Status, "AUTHORISED");
   assert.equal(created.DueDate, "2026-10-13");
   assert.equal(created.LineItems[0].AccountCode, "4000");
+  const writes = xero.state.calls.filter((call) => call.method !== "GET" && call.path.startsWith("/api.xro/2.0/Invoices"));
+  assert.deepEqual(writes.map((call) => [call.method, call.body?.Invoices?.[0]?.Status ?? "PDF"]), [["PUT", "DRAFT"], ["PUT", "PDF"], ["POST", "AUTHORISED"]], "a draft first, approved only after the check");
+  assert.equal((await row(result.invoiceUid)).invoice_xero_status, "AUTHORISED");
   assert.ok(!xero.state.calls.some((call) => call.path.endsWith("/Email")), "Xero is never asked to email it");
   assert.equal((await sync.jobStatus("job-xero")).invoices[result.number].label, "Approved in Xero");
 });
@@ -185,7 +191,7 @@ test("idempotent: when Xero's answer is lost after it created the invoice, the r
   await sync.tick();
   assert.equal(xero.state.invoices.length, 1, "no duplicate");
   const done = await row(result.invoiceUid);
-  assert.equal(done.state, "created");
+  assert.equal(done.state, "created", done.last_error_reason);
   assert.equal(done.invoice_xero_id, xero.state.invoices[0].InvoiceID);
   assert.equal(xero.state.attachments.length, 1);
 
@@ -330,8 +336,8 @@ test("an invoice credited in Field before it reached Xero is not sent (credit no
   const result = await issue();
   await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update invoices set status = 'credited' where uid = ${result.invoiceUid}`));
   // Queued while it was issued, credited before the send ran.
-  await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`insert into xero_invoice_syncs (invoice_uid, state, mode, queued_by, queued_at, created_at, updated_at)
-    values (${result.invoiceUid}, 'pending', 'draft', 'auto', now(), now(), now())`));
+  await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`insert into xero_invoice_syncs (invoice_uid, tenant_id, state, mode, queued_by, queued_at, created_at, updated_at)
+    values (${result.invoiceUid}, ${TENANT_A}, 'pending', 'draft', 'auto', now(), now(), now())`));
   await sync.tick();
   const skipped = await row(result.invoiceUid);
   assert.equal(skipped.state, "skipped");
@@ -360,4 +366,203 @@ test("a contact whose name Xero already has is found, not created twice", async 
   await sync.tick();
   assert.equal(xero.state.contacts.length, 1);
   assert.equal(xero.state.invoices[0].Contact.ContactID, "00000000-0000-0000-0000-00000000c0de");
+});
+
+test("approved mode: a draft whose totals differ is left a draft and flagged, never approved", async () => {
+  await connect();
+  await connection.updateSettings({ createMode: "authorised" });
+  advance(1000);
+  xero.state.ignoreTaxAmount = true;
+  const result = await issue({ subtotal: "333.33", gst: "33.34", total: "366.67" });
+  await sync.tick();
+  assert.equal(xero.state.invoices[0].Status, "DRAFT");
+  assert.ok(!xero.state.calls.some((call) => call.method === "POST" && /\/Invoices\//.test(call.path)), "no approval");
+  const flagged = await row(result.invoiceUid);
+  assert.equal(flagged.state, "mismatch");
+  assert.match(flagged.last_error_reason, /left as a draft, not approved/);
+
+  // Fixed in Xero, then Retry: checked again, and only then approved.
+  xero.state.invoices[0].TotalTax = 33.34;
+  xero.state.invoices[0].Total = 366.67;
+  await sync.retry({ invoiceUid: result.invoiceUid });
+  await sync.tick();
+  assert.equal(xero.state.invoices[0].Status, "AUTHORISED");
+  assert.equal((await row(result.invoiceUid)).state, "created");
+  assert.equal(xero.state.invoices.length, 1);
+});
+
+test("a contact Xero no longer accepts is forgotten and looked up again, once in the send and again on Retry", async () => {
+  await connect();
+  advance(1000);
+  const result = await issue();
+  // The first try finds the contact, then Xero is down.
+  xero.failNext({ method: "PUT", match: /\/Invoices$/, status: 503 });
+  await sync.tick();
+  const cached = (await row(result.invoiceUid)).xero_contact_id;
+  assert.ok(cached);
+  // Meanwhile the contact is archived in Xero (or merged away).
+  xero.state.contacts.find((contact) => contact.ContactID === cached).ContactStatus = "ARCHIVED";
+  advance(syncBackoffMs(1));
+  await sync.tick();
+  const done = await row(result.invoiceUid);
+  assert.equal(done.state, "created", done.last_error_reason);
+  assert.notEqual(done.xero_contact_id, cached, "a new contact");
+  assert.equal(xero.state.invoices[0].Contact.ContactID, done.xero_contact_id);
+
+  // Retry and Send forget the contact found before.
+  const second = await issue();
+  xero.failNext({ method: "PUT", match: /\/Invoices$/, status: 400, body: { ErrorNumber: 10, Type: "ValidationException", Message: "A validation exception occurred", Elements: [{ ValidationErrors: [{ Message: "Something else was wrong." }] }] } });
+  await sync.tick();
+  assert.equal((await row(second.invoiceUid)).state, "failed");
+  await sync.retry({ invoiceUid: second.invoiceUid });
+  assert.equal((await row(second.invoiceUid)).xero_contact_id, null, "Retry looks the contact up again");
+  await sync.tick();
+  assert.equal((await row(second.invoiceUid)).state, "created");
+});
+
+test("Create in Xero off: invoices it queued by itself wait, even ones waiting to retry; an owner's send still goes", async () => {
+  await connect();
+  advance(1000);
+  const waiting = await issue();
+  xero.failNext({ method: "PUT", match: /\/Invoices$/, status: 503 });
+  await sync.tick();
+  assert.equal((await row(waiting.invoiceUid)).state, "pending");
+  const queued = await issue();
+  await connection.updateSettings({ createMode: "off" });
+  // The second was issued before Off, but not queued yet; queue it as an auto row.
+  await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`insert into xero_invoice_syncs (invoice_uid, tenant_id, state, mode, queued_by, queued_at, created_at, updated_at)
+    values (${queued.invoiceUid}, ${TENANT_A}, 'pending', 'draft', 'auto', now(), now(), now()) on conflict do nothing`));
+  advance(2 * 60 * 60_000);
+  await sync.tick();
+  assert.equal(xero.state.invoices.length, 0, "nothing Field queued by itself goes while Off");
+  assert.equal((await row(waiting.invoiceUid)).state, "pending");
+
+  await sync.retry({ invoiceUid: waiting.invoiceUid, actor: "Owner" });
+  await sync.tick();
+  assert.equal((await row(waiting.invoiceUid)).state, "created", "the owner's send went");
+  assert.equal((await row(queued.invoiceUid)).state, "pending");
+  assert.equal(xero.state.invoices.length, 1);
+});
+
+test("another organisation: disconnect A, connect B; A's pending invoices are held, never sent to B, and go to B only when the owner sends them", async () => {
+  await connect();
+  advance(1000);
+  const inA = await issue();
+  await sync.tick();
+  assert.equal((await row(inA.invoiceUid)).state, "created");
+  const idInA = (await row(inA.invoiceUid)).invoice_xero_id;
+  const pendingForA = await issue();
+  xero.failNext({ method: "PUT", match: /\/Invoices$/, status: 503 });
+  await sync.tick();
+  assert.equal((await row(pendingForA.invoiceUid)).state, "pending");
+
+  await connection.disconnect({ actor: "Owner" });
+  xero.state.connections = [{ id: "conn-b", tenantId: TENANT_B, tenantName: "Synthetic Holdings Pty Ltd", tenantType: "ORGANISATION" }];
+  await connect();
+  assert.equal((await connection.state()).tenantId, TENANT_B);
+  advance(2 * 60 * 60_000);
+  await sync.tick();
+  const held = await row(pendingForA.invoiceUid);
+  assert.equal(held.state, "held");
+  assert.equal(held.tenant_id, TENANT_A);
+  assert.match(held.last_error_reason, /Synthetic Holdings Pty Ltd/);
+  assert.equal(xero.state.invoices.filter((invoice) => invoice.tenantId === TENANT_B).length, 0, "nothing went to B by itself");
+
+  const status = await sync.jobStatus("job-xero");
+  assert.equal(status.invoices[pendingForA.number].label, "Held: another Xero organisation");
+  assert.equal(status.invoices[pendingForA.number].canSend, true);
+  assert.equal(status.invoices[inA.number].label, "In another Xero organisation");
+  assert.equal(status.invoices[inA.number].canSend, true, "A's Xero id counts as unknown in B");
+  assert.equal(status.invoices[inA.number].canRetry, false);
+
+  // The owner sends both to B deliberately.
+  const preview = await sync.preview({ invoiceUids: [inA.invoiceUid, pendingForA.invoiceUid] });
+  assert.equal(preview.organisation, "Synthetic Holdings Pty Ltd");
+  assert.deepEqual(preview.invoices.map((entry) => entry.previously), ["Sent to another Xero organisation", "Sent to another Xero organisation"]);
+  await sync.push({ invoiceUids: [inA.invoiceUid, pendingForA.invoiceUid], actor: "Owner" });
+  await sync.tick();
+  const inB = xero.state.invoices.filter((invoice) => invoice.tenantId === TENANT_B);
+  assert.equal(inB.length, 2);
+  const moved = await row(inA.invoiceUid);
+  assert.equal(moved.state, "created");
+  assert.equal(moved.tenant_id, TENANT_B);
+  assert.notEqual(moved.invoice_xero_id, idInA);
+  const links = await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => queryRows(sql`select tenant_id, xero_invoice_id from xero_invoice_links where invoice_uid = ${inA.invoiceUid} order by linked_at`, tx));
+  assert.deepEqual(links.map((link) => link.tenant_id), [TENANT_A, TENANT_B], "A's id is kept in the history");
+  assert.equal(links[0].xero_invoice_id, idInA);
+});
+
+test("the invoice row's Xero id is set once per organisation; it moves only with its history recorded", async () => {
+  await connect();
+  advance(1000);
+  const result = await issue();
+  await sync.tick();
+  const set = (id, tenant) => withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update invoices set xero_invoice_id = ${id}, xero_tenant_id = ${tenant} where uid = ${result.invoiceUid}`));
+  const refused = (promise, pattern) => assert.rejects(promise, (error) => {
+    let message = "";
+    for (let inner = error; inner; inner = inner.cause) message += ` ${inner.message}`;
+    assert.match(message, pattern);
+    return true;
+  });
+  await refused(set("another-id", TENANT_A), /set once/);
+  await refused(set(null, null), /set once/);
+  await refused(withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`delete from xero_invoice_links`)), /append-only|permission denied/);
+  await set("id-in-b", TENANT_B);
+});
+
+test("two servers never send the same invoice: a claimed invoice is left alone", async () => {
+  await connect();
+  advance(1000);
+  const result = await issue();
+  const other = createXeroInvoiceSync({ db: testDb.db, orgUid: DEFAULT_ORG_UID, connection, http: () => createXeroHttp({ clientId: xero.clientId, clientSecret: xero.clientSecret, endpoints: xeroEndpoints(xero.base), sleep: async () => {} }), blobs: createPostgresBlobStore(), now: () => now, logger: { log() {}, warn() {}, error() {} } });
+  const outcomes = await Promise.all([sync.tick(), other.tick()]);
+  await other.stop();
+  assert.equal(xero.state.calls.filter((call) => call.method === "PUT" && call.path.endsWith("/Invoices")).length, 1, "one create");
+  assert.equal(xero.state.invoices.length, 1);
+  assert.equal((await row(result.invoiceUid)).state, "created");
+  assert.equal((await row(result.invoiceUid)).lease_owner, null, "the claim is let go");
+  assert.ok(outcomes.flat().some((entry) => entry.outcome === "created"));
+
+  // A worker that lost its claim cannot overwrite the result.
+  const late = await issue();
+  await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`insert into xero_invoice_syncs (invoice_uid, tenant_id, state, mode, queued_by, queued_at, lease_owner, lease_until, created_at, updated_at)
+    values (${late.invoiceUid}, ${TENANT_A}, 'pending', 'draft', 'auto', now(), 'someone-else', ${new Date(now.getTime() + 60_000).toISOString()}::timestamptz, now(), now())`));
+  await sync.tick();
+  assert.equal((await row(late.invoiceUid)).lease_owner, "someone-else");
+  assert.equal(xero.state.invoices.length, 1, "not sent while another holds it");
+});
+
+test("an invoice credited in Field after it reached Xero says to void it in Xero", async () => {
+  await connect();
+  advance(1000);
+  const result = await issue();
+  await sync.tick();
+  await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update invoices set status = 'credited' where uid = ${result.invoiceUid}`));
+  const shown = (await sync.jobStatus("job-xero")).invoices[result.number];
+  assert.equal(shown.state, "void-in-xero");
+  assert.equal(shown.label, "Void this in Xero");
+  assert.match(shown.reason, /credited in Field after it reached Xero/);
+  assert.equal(shown.canSend, false);
+});
+
+test("the sales account and GST tax type come from the organisation, and a saved code is checked there", async () => {
+  await connect();
+  const codes = await connection.codes();
+  assert.equal(codes.available, true);
+  assert.deepEqual(codes.accounts.map((account) => account.code), ["200", "260", "4000"], "active revenue accounts only");
+  assert.deepEqual(codes.taxRates.map((rate) => rate.taxType), ["OUTPUT", "EXEMPTOUTPUT", "BASEXCLUDED"], "active rates for sales only");
+  await assert.rejects(connection.updateSettings({ salesAccountCode: "310" }), (error) => error.code === "XERO_ACCOUNT_CODE_UNKNOWN" && /not an active revenue account in Synthetic Earthworks Pty Ltd/.test(error.message));
+  await assert.rejects(connection.updateSettings({ salesAccountCode: "299" }), (error) => error.code === "XERO_ACCOUNT_CODE_UNKNOWN");
+  await assert.rejects(connection.updateSettings({ taxType: "INPUT" }), (error) => error.code === "XERO_TAX_TYPE_UNKNOWN");
+  const saved = await connection.updateSettings({ salesAccountCode: "260", taxType: "OUTPUT" });
+  assert.equal(saved.salesAccountCode, "260");
+  assert.equal(saved.warning, undefined);
+
+  // Xero cannot be read: saved, with a warning.
+  xero.failNext({ method: "GET", match: /\/Accounts$/, status: 503, times: 5 });
+  const unchecked = await connection.updateSettings({ salesAccountCode: "4000" });
+  assert.equal(unchecked.salesAccountCode, "4000");
+  assert.match(unchecked.warning, /could not check these codes with Xero/);
+  const fallback = await (async () => { xero.failNext({ method: "GET", match: /\/TaxRates$/, status: 503, times: 5 }); return connection.codes(); })();
+  assert.deepEqual([fallback.available, fallback.code], [false, "XERO_UNAVAILABLE"]);
 });

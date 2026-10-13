@@ -195,7 +195,7 @@ export function createXeroConnectionService({
     /** The raw connection state the invoice sync reads (no tokens). */
     async state() {
       const row = await scope.transaction(read);
-      return { status: row?.status || "disconnected", tenantId: row?.tenantId || null, ...settingsOf(row) };
+      return { status: row?.status || "disconnected", tenantId: row?.tenantId || null, tenantName: row?.tenantName || null, ...settingsOf(row) };
     },
 
     /** Start connecting: record the sign-in in progress and return Xero's sign-in address. */
@@ -344,6 +344,25 @@ export function createXeroConnectionService({
         if (!/^[A-Z0-9_]{1,40}$/.test(taxType)) throw new XeroConnectionError("The tax type is Xero's code for it, for example OUTPUT (GST on Income).", { code: "XERO_TAX_TYPE_INVALID" });
         changes.taxType = taxType;
       }
+      // Checked against the organisation's own accounts and tax rates when
+      // Field can read them; saved with a warning when it cannot.
+      let warning = null;
+      if (changes.salesAccountCode !== undefined || changes.taxType !== undefined) {
+        const current = await scope.transaction(read);
+        if (current?.status === "connected") {
+          const codes = await this.codes();
+          if (codes.available) {
+            if (changes.salesAccountCode !== undefined && !codes.accounts.some((account) => account.code === changes.salesAccountCode)) {
+              throw new XeroConnectionError(`${changes.salesAccountCode} is not an active revenue account in ${current.tenantName || "your Xero organisation"}. Choose one from the list.`, { code: "XERO_ACCOUNT_CODE_UNKNOWN" });
+            }
+            if (changes.taxType !== undefined && !codes.taxRates.some((rate) => rate.taxType === changes.taxType)) {
+              throw new XeroConnectionError(`${changes.taxType} is not an active tax rate for sales in ${current.tenantName || "your Xero organisation"}. Choose one from the list.`, { code: "XERO_TAX_TYPE_UNKNOWN" });
+            }
+          } else {
+            warning = `Saved, but Field could not check these codes with Xero (${codes.code}). Check them in Xero.`;
+          }
+        }
+      }
       const row = await scope.transaction(async (tx) => {
         const previous = await read(tx);
         if (changes.createMode !== undefined) {
@@ -354,7 +373,37 @@ export function createXeroConnectionService({
         }
         return upsert(tx, { ...changes, updatedBy: actor });
       });
-      return settingsOf(row);
+      return warning ? { ...settingsOf(row), warning } : settingsOf(row);
+    },
+
+    /**
+     * The organisation's active revenue accounts and the active tax rates
+     * that apply to sales, from Xero (accounting.settings.read), for the
+     * owner's lists. Never throws: { available: false, code } when Xero cannot
+     * be read, and the screen falls back to typing the codes.
+     */
+    async codes() {
+      try {
+        const client = http(secrets);
+        const [accounts, rates] = await this.withAccessToken(async (token) => Promise.all([
+          client.accounting({ ...token, path: "/Accounts" }),
+          client.accounting({ ...token, path: "/TaxRates" }),
+        ]));
+        return {
+          available: true,
+          accounts: (accounts?.Accounts || [])
+            .filter((account) => account?.Code && account.Status === "ACTIVE" && (account.Class === "REVENUE" || ["REVENUE", "SALES", "OTHERINCOME"].includes(account.Type)))
+            .map((account) => ({ code: String(account.Code), name: String(account.Name || account.Code) }))
+            .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
+          taxRates: (rates?.TaxRates || [])
+            .filter((rate) => rate?.TaxType && rate.Status === "ACTIVE" && rate.CanApplyToRevenue !== false)
+            .map((rate) => ({ taxType: String(rate.TaxType), name: String(rate.Name || rate.TaxType), rate: Number(rate.EffectiveRate ?? rate.DisplayTaxRate ?? 0) })),
+        };
+      } catch (error) {
+        const code = /^[A-Z0-9_]{1,64}$/.test(String(error?.code || "")) ? error.code : "XERO_ERROR";
+        logger.warn?.(`[xero] the accounts and tax rates could not be read (${code})`);
+        return { available: false, code, accounts: [], taxRates: [] };
+      }
     },
 
     /**

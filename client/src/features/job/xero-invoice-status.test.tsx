@@ -43,6 +43,21 @@ describe("XeroInvoiceStatus", () => {
     expect(onSend).toHaveBeenCalled();
   });
 
+  it("credited in Field after it reached Xero: says to void it in Xero, with the reason, and no Retry", () => {
+    render(<XeroInvoiceStatus entry={entry({ state: "void-in-xero", label: "Void this in Xero", xeroStatus: "AUTHORISED", reason: "It was credited in Field after it reached Xero, and Xero still has it. Void it, or credit it, in Xero." })} isOwner onRetry={() => {}} onSend={() => {}} />);
+    expect(screen.getByText("Void this in Xero").className).toMatch(/fx-status--overdue/);
+    expect(screen.getByText(/credited in Field after it reached Xero/).className).toMatch(/fx-xero__why--bad/);
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("held for another Xero organisation: owners can send it to the one connected now", () => {
+    const onSend = vi.fn();
+    render(<XeroInvoiceStatus entry={entry({ state: "held", label: "Held: another Xero organisation", reason: "It was queued for another Xero organisation.", canSend: true })} isOwner onRetry={() => {}} onSend={onSend} />);
+    expect(screen.getByText("Held: another Xero organisation").className).toMatch(/fx-status--invoicing/);
+    fireEvent.click(screen.getByRole("button", { name: /Send to Xero/ }));
+    expect(onSend).toHaveBeenCalled();
+  });
+
   it("sending: the reason it waits", () => {
     render(<XeroInvoiceStatus entry={entry({ state: "pending", label: "Sending to Xero", reason: "Field could not reach Xero. It tries again by itself." })} isOwner onRetry={() => {}} onSend={() => {}} />);
     expect(screen.getByText("Sending to Xero").className).toMatch(/fx-status--invoicing/);

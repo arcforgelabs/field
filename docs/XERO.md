@@ -69,10 +69,15 @@ the owner on the server.
     customers get Field's own invoice email.
 
   Email from Xero is a later phase. It is not built.
-- **Account and tax.** The sales account code (default `200`, "Sales" in
-  Xero's standard chart) and the GST tax type (default `OUTPUT`, "GST on
-  Income" in Australia). Change them to match your chart of accounts. Lines
-  without GST use `EXEMPTOUTPUT` ("GST Free Income").
+- **Account and tax.** The sales account (default `200`, "Sales" in Xero's
+  standard chart) and the GST tax type (default `OUTPUT`, "GST on Income" in
+  Australia). Once Xero is connected, both are lists of the organisation's
+  own active revenue accounts and active tax rates for sales, read from Xero
+  (`accounting.settings.read`). A saved code is checked against them, so an
+  account Xero would refuse is caught here, not on an invoice. When Field
+  cannot read them, the screen says so and the codes are typed; they are then
+  saved with a warning. Lines without GST use `EXEMPTOUTPUT` ("GST Free
+  Income").
 
 Only invoices issued after Create in Xero is turned on go to Xero by
 themselves. Invoices issued before that, or while it was Off, go only when an
@@ -91,26 +96,53 @@ For each invoice, Field creates one Xero sales invoice (`ACCREC`):
 | --- | --- |
 | `InvoiceNumber` | Field's number, for example `INV-2026-10-1` |
 | `Reference` | The job and the accepted quote, for example `Job 2610-07 · Quote EQ-2610-07 v2` |
-| `Status` | `DRAFT`, or `AUTHORISED` for Approved invoice |
-| `Contact` | Found by the customer's email, else by name, else created |
+| `Status` | `DRAFT`. For Approved invoice, Field approves the draft (`AUTHORISED`) only after its totals match Field's |
+| `Contact` | Found by the customer's email, else by name, else created. Archived contacts are not used |
 | `Date`, `DueDate` | The issue date, and the due date (the issue date when Field has none) |
 | `LineAmountTypes` | `Exclusive` |
 | Lines | One for each line of Field's invoice, with the sales account code, the GST tax type and the GST that Field calculated |
 | Attachment | Field's issued PDF, the exact stored bytes, shown online with the invoice |
 
 Field sends the GST of each line, so Xero's totals equal Field's to the cent.
-After Xero creates the invoice, Field compares Xero's subtotal, GST and total
-with its own. If they differ, the invoice shows **In Xero, totals differ**,
-with both sets of figures.
+Field always creates the invoice as a draft first, then compares Xero's
+subtotal, GST and total with its own. If they differ, the invoice stays a
+draft and shows **In Xero, totals differ**, with both sets of figures. In
+Approved mode, only a draft whose totals match is approved, and its totals
+are checked again after.
 
-The Xero invoice id and status are stored on Field's invoice row
-(`invoices.xero_invoice_id`, `xero_status`, migration `0018_xero_invoice_sync`).
-Each invoice's progress is in `xero_invoice_syncs`.
+The Xero invoice id, its organisation and its status are stored on Field's
+invoice row (`invoices.xero_invoice_id`, `xero_tenant_id`, `xero_status`,
+migration `0018_xero_invoice_sync`). Every Xero invoice an invoice has had is
+also kept in `xero_invoice_links`, which is append-only. Each invoice's
+progress is in `xero_invoice_syncs`, for one organisation.
+
+### Another organisation
+
+Each queued invoice belongs to the Xero organisation it was queued for. If
+the owner disconnects and connects a different organisation:
+
+- invoices still queued for the old one are **held**. They are never sent to
+  the new organisation by themselves;
+- invoices already in the old one show **In another Xero organisation**;
+- an owner can send either kind to the new organisation with **Send to Xero**
+  (after the preview). The old Xero id then counts as unknown, and the new
+  one replaces it on the invoice row. The old one stays in
+  `xero_invoice_links`; the database refuses to replace an id whose history
+  is not recorded, or to change an id within one organisation.
+
+### Two servers at once
+
+A server claims an invoice with a five-minute lease before it sends it, and
+every write it makes names that lease. During an overlapping republish, two
+servers never send the same invoice, and a late one never overwrites the
+other's result.
 
 ### No duplicates
 
-- Each create call has an `Idempotency-Key` derived from Field's invoice uid
-  and the request (`field-<invoice uid>-invoice-<hash>`).
+- Each create call has an `Idempotency-Key` derived from Field's invoice uid,
+  the organisation and the request (`field-<invoice uid>-invoice-<hash>`).
+  Xero keeps keys per app, so the organisation is part of the hash: the same
+  invoice sent to another organisation never reuses a key.
 - Xero keeps idempotency keys for only 6 minutes. So before it creates an
   invoice, Field asks Xero whether an invoice with that number exists, and
   uses that invoice if it does.
@@ -129,6 +161,8 @@ Each issued invoice shows its Xero state:
 | Xero failed | Xero refused it, or retries ran out. Xero's reason is shown |
 | In Xero, totals differ | Created, but Xero's totals differ from Field's |
 | Not sent to Xero | Issued before Xero was connected, or credited before it reached Xero |
+| Held: another Xero organisation, In another Xero organisation | Queued for, or created in, the organisation connected before (above) |
+| Void this in Xero | Credited or voided in Field after it reached Xero. Void or credit it in Xero; phase 2 does this itself |
 
 Everyone signed in sees the state. Owners also get **Retry**, and **Send to
 Xero** for an invoice that was not sent.
@@ -145,6 +179,11 @@ Xero** for an invoice that was not sent.
   invoice shows Xero failed with the reason. Fix the cause, then press Retry.
 - **Connect again:** while the owner must connect again, invoices wait. They
   go as soon as Xero is connected again.
+- **A contact Xero refuses** (removed, archived or merged since Field found
+  it) is forgotten and looked up again once in the same send. Retry and Send
+  to Xero always look the contact up again.
+- **Create in Xero Off:** invoices Field queued by itself wait, even ones
+  waiting to retry. Invoices an owner sends or retries still go, as drafts.
 
 ### Invoices issued before the connection
 
@@ -158,7 +197,8 @@ Both show the preview before anything is sent.
 
 - Adjustment notes as Xero credit notes, and voids (phase 2). An invoice that
   is credited in Field before it reaches Xero is not sent. An invoice that is
-  credited after it reached Xero stays in Xero as it was.
+  credited after it reached Xero stays in Xero as it was, and shows **Void
+  this in Xero**.
 - Payments recorded in Field as Xero payments (phase 3).
 - Emailing from Xero (phase 4).
 
@@ -294,6 +334,11 @@ Not confirmed in Xero's documentation:
   differs.
 - The labels on developer.xero.com's app form. The portal needs a login. The
   steps above use plain words for that reason.
+- That an update naming only `InvoiceID` and `Status` keeps the invoice's
+  lines. Xero's docs say lines left out of an update are deleted, but give
+  the approval of a draft without lines as the usual way. Field checks the
+  totals in Xero's answer to the approval too, so a change would show as
+  "totals differ".
 - Whether `AUTHORISED` needs a `DueDate`. Xero's example of an approved
   invoice has one, so Field always sends one.
 - Whether Xero refuses a duplicate `InvoiceNumber` or only warns. Field looks

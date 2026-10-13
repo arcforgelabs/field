@@ -1107,6 +1107,10 @@ export const api = {
   updateXeroSettings(settings: Partial<Pick<import("./types.ts").XeroSettings, "createMode" | "salesAccountCode" | "taxType">>) {
     return request<{ ok: boolean; settings: import("./types.ts").XeroSettings }>("/api/integrations/xero/settings", { method: "PUT", body: JSON.stringify(settings) });
   },
+  /** Owner only: the organisation's revenue accounts and sales tax rates ({ available: false } when Xero cannot be read). */
+  xeroCodes() {
+    return request<import("./types.ts").XeroCodes>("/api/integrations/xero/codes");
+  },
   /** Each invoice's Xero state on a job (anyone signed in). */
   jobXeroStatus(jobId: string) {
     return request<import("./types.ts").JobXeroStatus>(`/api/jobs/${encodeURIComponent(jobId)}/xero`);

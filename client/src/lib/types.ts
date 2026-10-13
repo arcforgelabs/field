@@ -173,7 +173,8 @@ export interface XeroIntegration {
 /** One invoice's way to Xero, on the job's Invoices tab. */
 export interface XeroInvoiceState {
   invoiceUid: string;
-  state: "not-sent" | "pending" | "created" | "mismatch" | "failed" | "skipped";
+  /** held: queued for, or in, another Xero organisation. void-in-xero: credited or voided in Field after it reached Xero. */
+  state: "not-sent" | "pending" | "created" | "mismatch" | "failed" | "skipped" | "held" | "void-in-xero";
   label: string;
   xeroStatus: string | null;
   /** Why it failed, waits or differs, in plain words. */
@@ -213,12 +214,23 @@ export interface XeroPushPreview {
   }>;
 }
 
+/** The organisation's active revenue accounts and sales tax rates, for the lists. */
+export interface XeroCodes {
+  ok: boolean;
+  available: boolean;
+  code?: string;
+  accounts: Array<{ code: string; name: string }>;
+  taxRates: Array<{ taxType: string; name: string; rate: number }>;
+}
+
 export interface XeroSettings {
   createMode: XeroCreateMode;
   salesAccountCode: string;
   taxType: string;
   invoiceNumbering: "field";
   autoFrom: string | null;
+  /** Saved without checking the codes against Xero, and why. */
+  warning?: string;
 }
 
 /** Whether an invoice returned to draft and reissued with different content is credited first (#28). */

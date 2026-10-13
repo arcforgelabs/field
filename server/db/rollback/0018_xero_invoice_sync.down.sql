@@ -4,7 +4,8 @@
 --
 --   psql "$DATABASE_URL" --single-transaction -v ON_ERROR_STOP=1 -f server/db/rollback/0018_xero_invoice_sync.down.sql
 --
--- Field forgets which of its invoices are in Xero and how each one went. The
+-- Field forgets which of its invoices are in Xero (and in which organisation)
+-- and how each one went. The
 -- invoices in Xero stay there. After 0018 is applied again, nothing is sent
 -- by itself for invoices issued before; a retry or a send of one finds it in
 -- Xero by its number and does not create it again.
@@ -45,8 +46,11 @@ END
 $$;
 
 DROP TABLE "xero_invoice_syncs";
+DROP TABLE "xero_invoice_links";
+DROP FUNCTION field_refuse_xero_invoice_link_change();
 DROP INDEX "invoices_org_xero_invoice_key";
 ALTER TABLE "invoices" DROP COLUMN "xero_status";
+ALTER TABLE "invoices" DROP COLUMN "xero_tenant_id";
 ALTER TABLE "invoices" DROP COLUMN "xero_invoice_id";
 
-DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1791863490526;
+DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1791865685987;

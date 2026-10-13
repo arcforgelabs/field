@@ -27,6 +27,7 @@ test("issued invoices go to Xero without holding up issuing or email; owners alo
     ["POST", "/api/integrations/xero/push/preview", { sinceDays: 30 }],
     ["POST", "/api/integrations/xero/push", { invoiceUids: ["inv_01ARZ3NDEKTSV4RRFFQ69G5FAV"] }],
     ["POST", "/api/integrations/xero/invoices/inv_01ARZ3NDEKTSV4RRFFQ69G5FAV/retry"],
+    ["GET", "/api/integrations/xero/codes"],
   ];
   for (const [method, path, body] of ownerRoutes) {
     assert.equal(await anonymous(path, { method, body }), 401, `${method} ${path} without a sign-in`);
@@ -38,6 +39,11 @@ test("issued invoices go to Xero without holding up issuing or email; owners alo
   const connect = await api("/api/integrations/xero/connect", { method: "POST" });
   const back = await xero.authorize(connect.body.url);
   assert.equal((await fetch(`${base}${back.pathname}${back.search}`, { redirect: "manual" })).headers.get("location"), "/#/settings?section=integrations&xero=connected");
+  const codes = await api("/api/integrations/xero/codes");
+  assert.equal(codes.status, 200);
+  assert.equal(codes.body.available, true);
+  assert.ok(codes.body.accounts.some((account) => account.code === "200"));
+  assert.equal((await api("/api/integrations/xero/settings", { method: "PUT", body: { salesAccountCode: "310" } })).status, 400, "an expense account is refused");
   const { aid } = await seedJobs(api, ok);
 
   let status = null;

@@ -9,7 +9,11 @@
 //        by Connect is the proof an owner started it. Redirects to the screen.
 //   POST /api/integrations/xero/organisation     { tenantId }: the owner's choice
 //   POST /api/integrations/xero/disconnect
-//   PUT  /api/integrations/xero/settings         { createMode, salesAccountCode, taxType }
+//   PUT  /api/integrations/xero/settings         { createMode, salesAccountCode, taxType }:
+//        the codes are checked against the organisation's when Xero can be read
+//   GET  /api/integrations/xero/codes            the organisation's active revenue
+//        accounts and sales tax rates, for the lists ({ available: false } when
+//        Xero cannot be read)
 //   POST /api/integrations/xero/push/preview     { invoiceUids } or { sinceDays }: what
 //        sending invoices issued before the connection would create. Writes nothing.
 //   POST /api/integrations/xero/push             { invoiceUids }: send them
@@ -28,6 +32,7 @@ export const XERO_CONNECT_PATH = `${XERO_STATUS_PATH}/connect`;
 export const XERO_ORGANISATION_PATH = `${XERO_STATUS_PATH}/organisation`;
 export const XERO_DISCONNECT_PATH = `${XERO_STATUS_PATH}/disconnect`;
 export const XERO_SETTINGS_PATH = `${XERO_STATUS_PATH}/settings`;
+export const XERO_CODES_PATH = `${XERO_STATUS_PATH}/codes`;
 export const XERO_PUSH_PREVIEW_PATH = `${XERO_STATUS_PATH}/push/preview`;
 export const XERO_PUSH_PATH = `${XERO_STATUS_PATH}/push`;
 export const XERO_RETRY_PATH = `${XERO_STATUS_PATH}/invoices/:uid/retry`;
@@ -120,6 +125,13 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
     } catch (error) {
       fail(res, error, "disconnect");
     }
+  });
+
+  app.get(XERO_CODES_PATH, requireAuth, requireOwner, async (_req, res) => {
+    const xero = service(res);
+    if (!xero) return;
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ ok: true, ...(await xero.codes()) });
   });
 
   app.put(XERO_SETTINGS_PATH, requireAuth, requireOwner, async (req, res) => {

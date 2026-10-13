@@ -1,6 +1,7 @@
 // An invoice's way to Xero, on the job's Invoices tab (#93): Xero draft
 // created, Approved in Xero, Sending, Xero failed (with the reason), totals
-// differ, or Not sent to Xero. Owners get Retry, and Send to Xero (after a
+// differ, held for another Xero organisation, Void this in Xero (credited in
+// Field after it reached Xero), or Not sent to Xero. Owners get Retry, and Send to Xero (after a
 // preview) for an invoice issued before Xero was connected.
 import { useEffect, useState } from "react";
 import { RotateCw, Send } from "lucide-react";
@@ -15,6 +16,8 @@ const TONE: Record<XeroInvoiceState["state"], string> = {
   mismatch: "overdue",
   skipped: "draft",
   "not-sent": "draft",
+  held: "invoicing",
+  "void-in-xero": "overdue",
 };
 
 export function XeroInvoiceStatus({ entry, isOwner, onRetry, onSend }: {
@@ -33,7 +36,7 @@ export function XeroInvoiceStatus({ entry, isOwner, onRetry, onSend }: {
       {isOwner && entry.canSend && (
         <button type="button" className="fx-btn fx-btn--ghost fx-btn--sm" onClick={() => onSend(entry)}><Send aria-hidden />Send to Xero</button>
       )}
-      {showReason && <span className={`fx-xero__why${entry.state === "failed" || entry.state === "mismatch" ? " fx-xero__why--bad" : ""}`}>{entry.reason}</span>}
+      {showReason && <span className={`fx-xero__why${["failed", "mismatch", "void-in-xero"].includes(entry.state) ? " fx-xero__why--bad" : ""}`}>{entry.reason}</span>}
     </div>
   );
 }
