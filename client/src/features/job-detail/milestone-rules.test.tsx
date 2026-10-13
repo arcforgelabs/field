@@ -7,6 +7,7 @@ import { CapFindings, ScheduleSourceBadge } from "./milestone-rules";
 import { JobInvoices } from "@/features/job/job-invoices";
 
 vi.mock("@/components/shell/shell-context", () => ({ useShell: () => ({ toast: () => {} }) }));
+vi.mock("@/contexts/auth-context", () => ({ useAuth: () => ({ isOwner: false }) }));
 afterEach(() => vi.restoreAllMocks());
 
 const hard = {
@@ -44,6 +45,7 @@ describe("JobInvoices under milestone rules", () => {
       ],
     };
     vi.spyOn(api, "jobMilestoneRules").mockResolvedValue(rules);
+    vi.spyOn(api, "jobXeroStatus").mockRejectedValue(new Error("Xero is not connected"));
     const milestone = (index: number, label: string, total: number) => ({ id: `m${index}`, milestoneIndex: index, milestoneLabel: label, invoiceNumber: `EI-1-M${index + 1}`, percentage: index ? 90 : 10, subtotal: total / 1.1, gst: total / 11, total, amountPaid: 0, amountDue: total, status: "draft", payments: [] });
     const detail = { meta: { id: "job-1", paymentSchedule: { milestones: [{ label: "Deposit", percentage: 10 }, { label: "Final", percentage: 90 }], source: rules.scheduleSource }, milestoneInvoices: [milestone(0, "Deposit", 1650), milestone(1, "Final", 14850)] } } as unknown as RecordingDetail;
     render(<MemoryRouter><JobInvoices detail={detail} busy={null} onSend={() => {}} onRecordPayment={() => {}} run={async () => {}} /></MemoryRouter>);

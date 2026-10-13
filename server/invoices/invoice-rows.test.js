@@ -295,7 +295,7 @@ describe("migration 0015 rolls back", () => {
       await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
       const { jobId, mapped } = await collectJobInvoices(await scenarios.revisedPaid(dataDir));
       await createInvoiceRowService({ db, orgUid: ORG_A }).writeJob({ jobId, mapped });
-      for (const later of [ROLLBACK_0019, ROLLBACK_0018, ROLLBACK_0017, ROLLBACK_0016]) await client.exec(`begin; ${readFileSync(later, "utf8")}; commit;`);
+      for (const later of [ROLLBACK_0020, ROLLBACK_0019, ROLLBACK_0018, ROLLBACK_0017, ROLLBACK_0016]) await client.exec(`begin; ${readFileSync(later, "utf8")}; commit;`);
       await client.exec(`begin; ${readFileSync(ROLLBACK_0015, "utf8")}; commit;`);
       await migrate(drizzle(reference, { schema }), { migrationsFolder: before });
       assert.deepEqual(await schemaShape(db), await schemaShape(drizzle(reference, { schema })));
