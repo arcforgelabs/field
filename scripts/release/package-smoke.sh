@@ -17,7 +17,7 @@ port="${FIELD_PACKAGE_SMOKE_PORT:-19298}"
 server_pid=""
 cleanup() {
   status=$?
-  [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
+  if [[ -n "$server_pid" ]]; then kill "$server_pid" 2>/dev/null || true; fi
   if [[ $status -ne 0 && -f "$work/server.log" ]]; then
     echo "--- field-server log (last 60 lines)"
     tail -n 60 "$work/server.log"
