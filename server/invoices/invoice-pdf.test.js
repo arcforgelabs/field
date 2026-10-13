@@ -45,7 +45,7 @@ function job() {
     issuedAt: "2026-10-12T02:00:00.000Z",
     status: "authorised",
     payments: [],
-    issuedRevision: { revisionNumber: 1, invoiceNumber: "INV-2026-10-4", jobReference: "2610-05", quoteVersion: 2, issuedAt: "2026-10-12T02:00:00.000Z", subtotal: 2000, gst: 200, total: 2200, currency: "AUD", lineItems: [] },
+    issuedRevision: { revisionNumber: 1, invoiceNumber: "INV-2026-10-4", jobReference: "2610-05", referenceLine: "Job 2610-05 · Quote EQ-2610-05 v2", quoteVersion: 2, issuedAt: "2026-10-12T02:00:00.000Z", subtotal: 2000, gst: 200, total: 2200, currency: "AUD", lineItems: [] },
   };
   const completion = { ...deposit, id: "m2", milestoneIndex: 1, milestoneLabel: "Completion", invoiceNumber: "EI-2610-05-M2", status: "draft", issuedAt: null, issuedRevision: null };
   return { meta: { ...meta, milestoneInvoices: [deposit, completion] }, quote, deposit, completion };
@@ -179,5 +179,14 @@ test("the reference names the job and the quote whichever system numbers the inv
   // A draft has no reference yet; it is given when the invoice is issued.
   const { completion } = job();
   const { runs } = await render({ meta, quote, milestoneInvoice: completion });
+  assert.ok(!runs.some((run) => run.startsWith("Reference: Job")), runs.join(" | "));
+});
+
+test("a copy of an invoice issued before the reference line was recorded prints its old \"Job reference\" line", async () => {
+  const { meta, quote, deposit } = job();
+  const { referenceLine: _dropped, ...before } = deposit.issuedRevision;
+  const older = { ...deposit, issuedRevision: before };
+  const { runs } = await render({ meta: { ...meta, milestoneInvoices: [older] }, quote, milestoneInvoice: older });
+  assert.ok(runs.includes("Job reference: 2610-05"), runs.join(" | "));
   assert.ok(!runs.some((run) => run.startsWith("Reference: Job")), runs.join(" | "));
 });

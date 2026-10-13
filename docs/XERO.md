@@ -299,9 +299,16 @@ organisation's invoice settings, and the create response carries
 The Reference names the job and the quote, and Field's own invoice prints the
 same line: `Reference: Job 2610-07 · Quote EQ-2610-07 v2`. The version shows
 from v2 on; no document prints "v1". The format is the same whichever system
-numbers the invoice. Issued PDFs are stored and never drawn again, so only
-invoices issued from this release print it; earlier ones keep "Job reference:
-2610-07". Receipts and adjustment notes are unchanged.
+numbers the invoice.
+
+The issue service works the line out once, when the invoice is issued: the
+quote number from the quote row the invoice bills (else the number the job's
+files give), the job number and the version. It renders it into the PDF and
+stores it with the issued document, and the Xero sync sends that stored line.
+So the PDF and Xero never differ. An invoice issued before this release has
+no stored line: it printed "Job reference: 2610-07", and a reconstructed copy
+prints that again. Its Xero Reference is worked out from the quote row the
+same way. Receipts and adjustment notes are unchanged.
 
 ## Tests
 

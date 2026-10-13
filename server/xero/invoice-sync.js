@@ -54,6 +54,7 @@ import { hostname } from "node:os";
 import { and, asc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { schema } from "../db-runtime/index.js";
 import { orgScope } from "../db-runtime/tenancy.js";
+import { invoiceQuoteNumber } from "../invoices/customer-wording.js";
 import { XeroError } from "./client.js";
 import { XeroPayloadError, attachmentFileName, buildXeroInvoice, cents, contactFor, totalsMatch, xeroReference } from "./invoice-payload.js";
 
@@ -334,7 +335,10 @@ export function createXeroInvoiceSync({
         invoice,
         lines,
         contactId,
-        reference: xeroReference({ jobReference: invoice.reference, quoteNumber: quote?.number, quoteVersion: invoice.quoteVersion ?? quote?.version }),
+        // The reference the issue recorded and printed; for an invoice issued
+        // before that, the same line from the quote row (invoiceQuoteNumber).
+        reference: document?.details?.referenceLine
+          || xeroReference({ jobReference: invoice.reference, quoteNumber: invoiceQuoteNumber({ quoteRow: quote }), quoteVersion: invoice.quoteVersion ?? quote?.version }),
         settings: { salesAccountCode: state.salesAccountCode, taxType: state.taxType },
         mode: "draft",
       })],

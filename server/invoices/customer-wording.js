@@ -47,6 +47,15 @@ export function jobQuoteReference({ jobReference = null, quoteNumber = null, quo
   return parts.length ? parts.join(" · ") : null;
 }
 
+/**
+ * The quote number an invoice's reference names: the quote row's (the
+ * quotes table), else the number the job's files give. The issue service and
+ * the Xero sync both take it from here, so the two never differ.
+ */
+export function invoiceQuoteNumber({ quoteRow = null, fallback = null } = {}) {
+  return String(quoteRow?.number ?? "").trim() || String(fallback ?? "").trim() || null;
+}
+
 /** "Quote EQ-2601-01, revision 2, accepted 14 September 2026". */
 export function quoteReferenceLine(reference) {
   if (!reference?.number) return null;

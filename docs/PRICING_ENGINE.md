@@ -1174,10 +1174,12 @@ number and bytes now come from PostgreSQL.
   bytes and allocates nothing.
 - **Reference.** The job number (the quote's, else the job's, else the job
   part of the quote number) is the invoice's required reference, stored on
-  the row. With none, issuing is refused. Since #93 the invoice prints it
-  with the quote it bills, "Reference: Job 2610-07 · Quote EQ-2610-07 v2"
-  (no "v1"), the same line its Xero invoice carries; invoices issued before
-  print "Job reference".
+  the row. With none, issuing is refused. Since #93 the issue also records
+  the line the invoice prints with the quote it bills, "Reference: Job
+  2610-07 · Quote EQ-2610-07 v2" (no "v1"; the quote number from the quote
+  row), stored with the issued document and sent as its Xero invoice's
+  Reference. Invoices issued before print "Job reference", and so do their
+  reconstructed copies.
 - **Drafts.** A draft is tracked under its provisional `EI-…-M<n>` and its
   preview prints "Draft, not yet issued" and no payment reference. After an
   unsend it goes back to the provisional number; issuing the same content

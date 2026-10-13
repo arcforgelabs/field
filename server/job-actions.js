@@ -966,7 +966,7 @@ function isNewlyIssuedRevision(entry) {
   ));
 }
 
-function withIssuedNumber(entry, { number, reference, issuedAt, creditNoteNumber = null }) {
+function withIssuedNumber(entry, { number, reference, issuedAt, creditNoteNumber = null, referenceLine = null }) {
   const pdfPath = buildMilestoneInvoicePdfPath({ invoiceNumber: number, milestoneIndex: entry.milestoneIndex });
   const at = issuedAt || entry.issuedRevision.issuedAt || entry.issuedAt;
   return {
@@ -978,6 +978,8 @@ function withIssuedNumber(entry, { number, reference, issuedAt, creditNoteNumber
       ...entry.issuedRevision,
       invoiceNumber: number,
       jobReference: reference,
+      // The reference it prints, as the issue service worked it out (#93).
+      ...(referenceLine ? { referenceLine } : {}),
       issuedAt: at,
       pdfPath,
       ...(creditNoteNumber ? { creditNoteNumber } : {}),
@@ -1066,7 +1068,8 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
         issuedBy,
         invoice,
         details,
-        render: (number) => renderInvoice(entry, withIssuedNumber(entry, { number, reference, issuedAt: revision.issuedAt })),
+        quoteNumber: basis.number,
+        render: (number, { referenceLine = null } = {}) => renderInvoice(entry, withIssuedNumber(entry, { number, reference, referenceLine, issuedAt: revision.issuedAt })),
       });
       const issued = withIssuedNumber(entry, result);
       await writeIssuedInvoicePdf({ jobDir, relativePdfPath: issued.pdfPath, pdfBuffer: result.pdfBytes });
@@ -1132,7 +1135,8 @@ async function issueNewMilestoneInvoices({ jobDir, meta, quote, paymentSchedule 
       }),
       invoice,
       details,
-      render: (number, { creditNoteNumber }) => renderInvoice(entry, withIssuedNumber(entry, { number, reference, issuedAt: revision.issuedAt, creditNoteNumber })),
+      quoteNumber: basis.number,
+      render: (number, { creditNoteNumber, referenceLine = null }) => renderInvoice(entry, withIssuedNumber(entry, { number, reference, referenceLine, issuedAt: revision.issuedAt, creditNoteNumber })),
       whenToCredit: toCredit.whenToCredit,
     });
     const note = result.creditNote;
