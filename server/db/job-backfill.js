@@ -596,8 +596,21 @@ export async function mapRecordingDirectory({
   };
 }
 
+// First statement of every import: stop before anything is written when the
+// target is a database Field's server migrates (server/db-runtime/ records its
+// Drizzle migrations in drizzle.__drizzle_migrations). Both schemas define a
+// `quotes` table with different columns, so this import must never reach
+// Field's own database. psql -v ON_ERROR_STOP=1 stops at the raised error.
+export const REFUSE_FIELD_DATABASE_SQL = `DO $$
+BEGIN
+  IF to_regclass('drizzle.__drizzle_migrations') IS NOT NULL THEN
+    RAISE EXCEPTION 'backfill-db: refusing to write: this database has drizzle.__drizzle_migrations, so it is Field''s own database. Use a dedicated, empty database.';
+  END IF;
+END
+$$;`;
+
 export function renderImportSql(bundle, { includeSchemaSql = null } = {}) {
-  const statements = [];
+  const statements = [REFUSE_FIELD_DATABASE_SQL];
   if (includeSchemaSql) {
     statements.push(includeSchemaSql.trim());
   }

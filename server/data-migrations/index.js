@@ -20,7 +20,8 @@
 // refused }. A refused job never stops boot. With nothing refused it is
 // recorded; with refusals, or while a migration it `requires` is not yet
 // recorded, it is reported "incomplete" and NOT recorded, so the next boot
-// runs it again. Each refused job is logged by id with both numbers. It
+// runs it again. Each refused job is logged by job uid, issued-document uid
+// and mismatch kind; the numbers and amounts are in the dry run only. It
 // writes database rows only, which the rehearsal's catalogue-only copy does
 // not hold, so a rehearsal reports it "skipped".
 //

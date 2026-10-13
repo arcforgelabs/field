@@ -146,7 +146,8 @@ export async function uploadJobToDrive({ jobDir, meta, config }) {
         uploaded[driveKey] = audioId;
       }
     } catch (err) {
-      console.error(`[drive] failed to upload audio ${audioFilename}: ${err.message}`);
+      // By position: an uploaded file keeps the name it was given, which can name the customer.
+      console.error(`[drive] ${meta.id}: failed to upload audio file ${i + 1}: ${err.message}`);
     }
   }
 

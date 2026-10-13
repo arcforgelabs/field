@@ -161,7 +161,9 @@ service) or `FIELD_DB_TEST_DOCKER=1` lets them start one in Docker.
 
 To prove a change leaves quote and invoice output untouched, run the offline
 end-to-end proof against both checkouts and compare (PDFs and sent email must
-be byte-identical):
+be byte-identical; JSON responses must be equal once wall-clock times and the
+random part of each `doc_`/`dev_` uid are masked; two runs of one checkout
+match in full):
 
 ```bash
 npm run qa:quote-invoice-proof -- <before-checkout> /tmp/proof-before
