@@ -1,5 +1,6 @@
 import {
   cp,
+  lstat as lstatAsync,
   mkdir,
   mkdtemp,
   readdir,
@@ -18,7 +19,6 @@ import {
   renameSync,
   writeFileSync,
 } from "./storage/fs.js";
-import { lstat as lstatAsync, readdir as readdirAsync } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { flushDurableStorageQuietly } from "./storage/durable-hooks.js";
@@ -370,7 +370,7 @@ async function generationSignature(generationDir) {
   try {
     const lines = [];
     const walk = async (dir) => {
-      for (const name of (await readdirAsync(dir)).sort()) {
+      for (const name of (await readdir(dir)).sort()) {
         const path = join(dir, name);
         const info = await lstatAsync(path);
         lines.push(statLine(relative(generationDir, path), info));
