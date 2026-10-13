@@ -16,23 +16,26 @@
 //   - no job refused: recorded as applied, with the summary (written, already
 //     present, warnings), and never run again;
 //   - some jobs refused: every job that verifies is written; each refused job
-//     is logged with its id and both numbers; the migration is not recorded,
-//     so the next boot tries again. A retry is one pass over the jobs: a job
-//     already written is checked and left as it is (idempotent), and only
-//     what changed is written.
+//     is logged by job uid, issued-document uid and mismatch kind; the
+//     migration is not recorded, so the next boot tries again. A retry is
+//     one pass over the jobs: a job already written is checked and left as
+//     it is (idempotent), and only what changed is written.
 //
 // The invoice backfill also waits for the quote backfill: until that one is
 // recorded, it runs and writes but is not recorded, so a later boot fills the
 // links from invoices to the quote versions written in between.
 //
-// Nothing here logs or returns a customer name, an address or a line label:
-// refused jobs are reported by job id, document number, version, field and
-// amounts only.
-import { relative } from "node:path";
+// Nothing here logs or returns a customer name, an address or a line label.
+// The report (the owner's dry run) gives each refused job's id, document
+// number and uid, version, field and both amounts. The log line, which
+// reaches Sentry Logs, gives only the job uid, the issued-document uid and
+// the mismatch kind (../observability/row-failure-log.js).
+import { basename, relative } from "node:path";
 import { createIssuedDocumentService } from "../documents/issued-documents.js";
 import { backfillInvoiceRows } from "../invoices/backfill.js";
 import { createInvoiceRowService } from "../invoices/invoice-rows.js";
 import { backfillQuoteRows } from "../quotes/backfill.js";
+import { describeRowFailure } from "../observability/row-failure-log.js";
 import { createQuoteRowService } from "../quotes/quote-rows.js";
 
 export const QUOTE_ROWS_BACKFILL_ID = "2026-10-13-quote-rows-backfill";
@@ -60,7 +63,7 @@ function stopWhenAborted(signal) {
 // customer text.
 function numbersOnly(entry) {
   const out = {};
-  for (const key of ["kind", "against", "number", "version", "milestone", "field", "rows", "shown", "computed", "printed", "conflict"]) {
+  for (const key of ["kind", "against", "number", "issuedDocumentUid", "version", "milestone", "field", "rows", "shown", "computed", "printed", "conflict"]) {
     if (entry[key] !== undefined && entry[key] !== null && typeof entry[key] !== "object") out[key] = entry[key];
   }
   return out;
@@ -76,16 +79,39 @@ function jobOf(dataDir, jobDir) {
   return dataDir ? relative(dataDir, jobDir) : jobDir;
 }
 
+/**
+ * What identifies a mismatch's document without its number: the issued
+ * document's uid, by job, number and (for a quote) version, and an invoice's
+ * milestone. Quote entries carry the uid per version, invoice entries per
+ * invoice.
+ */
+function documentIdentities(report) {
+  const key = (jobId, number, version) => `${jobId}\u0000${number ?? ""}\u0000${version ?? ""}`;
+  const identities = new Map();
+  for (const entry of report.entries || []) {
+    if (entry.issuedDocumentUid) identities.set(key(entry.jobId, entry.number, entry.version), { issuedDocumentUid: entry.issuedDocumentUid });
+    for (const invoice of Array.isArray(entry.invoices) ? entry.invoices : []) {
+      identities.set(key(entry.jobId, invoice.number), { issuedDocumentUid: invoice.issuedDocumentUid || null, milestone: Number.isInteger(invoice.milestone) ? invoice.milestone : null });
+    }
+  }
+  return (entry) => identities.get(key(entry.jobId, entry.number, entry.version)) || {};
+}
+
 /** Refused jobs, one entry each: { jobId | job, mismatches: [numbers only] }. */
 function refusedJobs(report, dataDir, { dryRunConflicts = [] } = {}) {
   const byJob = new Map();
+  const identityOf = documentIdentities(report);
   const add = (jobId, entry) => {
     if (!byJob.has(jobId)) byJob.set(jobId, { jobId, mismatches: [] });
     if (entry) byJob.get(jobId).mismatches.push(entry);
   };
-  for (const entry of report.mismatches) add(entry.jobId, numbersOnly(entry));
-  for (const entry of report.conflicts) add(entry.jobId, numbersOnly({ ...entry, kind: entry.kind === "conflict" ? "conflict" : "sent-rows-differ" }));
-  for (const entry of dryRunConflicts) add(entry.jobId, numbersOnly(entry));
+  const withUid = (entry) => {
+    const { issuedDocumentUid = null, milestone = null } = identityOf(entry);
+    return { ...entry, issuedDocumentUid, milestone: entry.milestone ?? milestone };
+  };
+  for (const entry of report.mismatches) add(entry.jobId, numbersOnly(withUid(entry)));
+  for (const entry of report.conflicts) add(entry.jobId, numbersOnly(withUid({ ...entry, kind: entry.kind === "conflict" ? "conflict" : "sent-rows-differ" })));
+  for (const entry of dryRunConflicts) add(entry.jobId, numbersOnly(withUid(entry)));
   const refused = [...byJob.values()];
   for (const error of report.errors) refused.push({ job: jobOf(dataDir, error.jobDir), error: safeReason(error.reason), mismatches: [] });
   return refused;
@@ -157,14 +183,21 @@ function describeInvoiceRows(summary) {
     + `${summary.refusedJobs ? "; an owner settles refused legacy invoices at GET /api/admin/invoices/amount-disagreements" : ""}`;
 }
 
-/** One log line for a refused job: its id and both numbers of each mismatch. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * One log line for a refused job: its uid, and each mismatch's issued-document
+ * uid and kind. No document number, amount or reason: the line reaches Sentry
+ * Logs. A job that could not be read is named by its folder only when the
+ * folder is a uid (older folders were named after the site address).
+ */
 export function describeRefusedJob(entry) {
-  if (entry.error !== undefined) return `job ${entry.job}: could not be checked (${entry.error})`;
-  const parts = entry.mismatches.map((mismatch) => {
-    const where = [mismatch.number, mismatch.version != null ? `v${mismatch.version}` : null, mismatch.milestone != null ? `milestone ${mismatch.milestone + 1}` : null].filter(Boolean).join(" ");
-    const numbers = mismatch.rows !== undefined ? `: ${mismatch.field || mismatch.kind} rows ${mismatch.rows} vs ${mismatch.against || mismatch.kind} ${mismatch.shown}` : "";
-    return `${where ? `${where} ` : ""}${mismatch.conflict || mismatch.kind}${numbers}`;
-  });
+  if (entry.error !== undefined) {
+    const folder = basename(String(entry.job || ""));
+    // safeReason already dropped anything quoted from a file.
+    return `job ${UUID.test(folder) ? folder : "folder (not a uid; see the dry run)"}: could not be checked (${entry.error})`;
+  }
+  const parts = entry.mismatches.map((mismatch) => describeRowFailure(mismatch));
   return `job ${entry.jobId}: ${parts.join("; ") || "refused"}`;
 }
 

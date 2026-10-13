@@ -176,7 +176,9 @@ describe("quote-row dual-write", () => {
     assert.equal(status.mismatches, 1, "the same failure on a later commit is not counted again");
     assert.equal(status.removed, 2);
     assert.deepEqual(status.lastMismatch.failures[0], failing.versions[0].failures[0]);
-    assert.equal(lines.filter((line) => /job job-x v1: rows not written \(subtotal rows 10\.00 vs shown 10\.01\)/.test(line)).length, 1);
+    // The log line reaches Sentry: the mismatch kind, never the amounts.
+    assert.equal(lines.filter((line) => /job job-x v1: rows not written \(totals: subtotal against shown\)/.test(line)).length, 1);
+    assert.equal(lines.some((line) => /10\.0[01]/.test(line)), false);
     assert.equal(deleted, null, "the sync, not the recorder, removes stale rows");
   });
 

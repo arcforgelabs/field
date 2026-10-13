@@ -20,6 +20,35 @@ test("free text loses emails, phone numbers, BSBs and query strings", () => {
   assert.equal(scrubText("/#/pricing?health=1&status=all"), "/#/pricing?[query]");
 });
 
+test("free text loses document numbers and money amounts", () => {
+  for (const number of ["EQ-2501-01", "EQ-2501-01 v2", "EI-2501-01-M1", "EI-2501-01-M1-R2", "ER-2501-01-M1", "INV-2026-10-3", "RCT-2026-1-12", "CN-2026-1-1"]) {
+    assert.equal(scrubText(`issued ${number} today`), "issued [doc] today", number);
+  }
+  assert.equal(scrubText("attach invoices/EI-2501-01-M1.pdf"), "attach invoices/[doc].pdf");
+  for (const amount of ["$1,234.56", "$90", "A$90.00", "AUD 925", "-$12.00", "925.50", "1,018.05", "-12.50"]) {
+    assert.equal(scrubText(`claims ${amount} in all`), "claims [amount] in all", amount);
+  }
+  assert.equal(
+    scrubText("refused job 00000000-0000-4000-8000-000000000001: EI-2501-01-M1 totals: subtotal rows 900.00 vs revision-pdf 925.50"),
+    "refused job 00000000-0000-4000-8000-000000000001: [doc] totals: subtotal rows [amount] vs revision-pdf [amount]",
+  );
+});
+
+test("uuids, versions, timestamps, durations, status codes and counts stay", () => {
+  for (const text of [
+    `job ${JOB_UUID} v3`,
+    "node 24.10.0, release 1.2.3",
+    "at 2026-10-13T01:02:03.456Z, 12:30:45.12",
+    "took 12.34ms (450 ms)",
+    "GET /api/jobs 500 from 203.0.113.10",
+    "7 job(s), 14 invoice(s): 6 written, 1 refused",
+    "migration 2026-10-13-invoice-rows-backfill",
+    "sha256 0a1b2c3d4e5f",
+  ]) {
+    assert.equal(scrubText(text), text);
+  }
+});
+
 test("job segments are kept when they are UUIDs and redacted when they could be an address", () => {
   assert.equal(scrubText(`/api/jobs/${JOB_UUID}/quote`), `/api/jobs/${JOB_UUID}/quote`);
   assert.equal(scrubText("/api/jobs/12-main-st-exampleton/quote"), "/api/jobs/[job]/quote");
@@ -126,6 +155,31 @@ test("log lines get the same scrubbing as error messages", () => {
   assert.deepEqual(
     scrubLog({ level: "error", message: "[email-quote] failed for jane@example.com", attributes: { recipient: "jane@example.com", "sentry.origin": "auto.console.logging" } }),
     { level: "error", message: "[email-quote] failed for [email]", attributes: { recipient: "[redacted]", "sentry.origin": "auto.console.logging" } },
+  );
+});
+
+test("log lines lose document numbers and amounts, in the message and in console parameters", () => {
+  assert.deepEqual(
+    scrubLog({
+      level: "warn",
+      message: "[invoice-rows] EI-2501-01-M1 total 990.00 vs 1018.05",
+      attributes: {
+        "sentry.message.template": "[invoice-rows] {} {} {}",
+        "sentry.message.parameter.0": "EI-2501-01-M1",
+        "sentry.message.parameter.1": 1018.05,
+        "sentry.message.parameter.2": 14,
+      },
+    }),
+    {
+      level: "warn",
+      message: "[invoice-rows] [doc] total [amount] vs [amount]",
+      attributes: {
+        "sentry.message.template": "[invoice-rows] {} {} {}",
+        "sentry.message.parameter.0": "[doc]",
+        "sentry.message.parameter.1": "[amount]",
+        "sentry.message.parameter.2": 14,
+      },
+    },
   );
 });
 

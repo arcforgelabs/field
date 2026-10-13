@@ -32,7 +32,7 @@ import { scenarios } from "../invoices/test-fixtures.js";
 import { runAtomicJobGeneration } from "../job-generation.js";
 import { createQuoteRowService } from "../quotes/quote-rows.js";
 import { runDataMigrations } from "./index.js";
-import { INVOICE_ROWS_BACKFILL_ID, invoiceRowsBackfill, QUOTE_ROWS_BACKFILL_ID, quoteRowsBackfill } from "./row-backfills.js";
+import { describeRefusedJob, INVOICE_ROWS_BACKFILL_ID, invoiceRowsBackfill, QUOTE_ROWS_BACKFILL_ID, quoteRowsBackfill } from "./row-backfills.js";
 
 const MIGRATIONS = [quoteRowsBackfill, invoiceRowsBackfill];
 const postgresEnabled = testPostgresMode().kind !== "none";
@@ -188,7 +188,7 @@ for (const backend of backends) {
       assert.deepEqual(await rowCounts(db), counts);
     });
 
-    test("a planted mismatch: the other jobs are written, the refused job is logged by id with both numbers, and the backfill retries until it verifies", async (t) => {
+    test("a planted mismatch: the other jobs are written, the refused job is logged by uid and mismatch kind, and the backfill retries until it verifies", async (t) => {
       const { db, dirs, boot } = await setup(t);
       // job-deposit: its deposit's stored revision no longer matches its PDF.
       let original = null;
@@ -205,17 +205,18 @@ for (const backend of backends) {
       assert.deepEqual(invoices.refused, [{
         jobId: "job-deposit",
         mismatches: [
-          { kind: "totals", against: "revision-pdf", number: "EI-2605-02-M1", field: "subtotal", rows: "900.00", shown: "925.50" },
-          { kind: "totals", against: "revision-pdf", number: "EI-2605-02-M1", field: "taxTotal", rows: "90.00", shown: "92.55" },
-          { kind: "totals", against: "revision-pdf", number: "EI-2605-02-M1", field: "total", rows: "990.00", shown: "1018.05" },
+          { kind: "totals", against: "revision-pdf", number: "EI-2605-02-M1", milestone: 0, field: "subtotal", rows: "900.00", shown: "925.50" },
+          { kind: "totals", against: "revision-pdf", number: "EI-2605-02-M1", milestone: 0, field: "taxTotal", rows: "90.00", shown: "92.55" },
+          { kind: "totals", against: "revision-pdf", number: "EI-2605-02-M1", milestone: 0, field: "total", rows: "990.00", shown: "1018.05" },
         ],
       }]);
       assert.deepEqual(first.lines.slice(1), [
         `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: incomplete (7 job(s) with milestones, 14 invoice(s): 6 job(s) written, 0 already present, 1 job(s) refused; ${invoices.summary.warnings} warning(s); an owner settles refused legacy invoices at GET /api/admin/invoices/amount-disagreements); not recorded (1 job(s) refused), runs again at next boot`,
-        `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: refused job job-deposit: EI-2605-02-M1 totals: subtotal rows 900.00 vs revision-pdf 925.50; EI-2605-02-M1 totals: taxTotal rows 90.00 vs revision-pdf 92.55; EI-2605-02-M1 totals: total rows 990.00 vs revision-pdf 1018.05`,
+        `[data-migrations] ${INVOICE_ROWS_BACKFILL_ID}: refused job job-deposit: document (no uid) milestone 1 totals: subtotal against revision-pdf; document (no uid) milestone 1 totals: tax against revision-pdf; document (no uid) milestone 1 totals: total against revision-pdf`,
       ]);
       const logged = first.lines.join("\n");
-      for (const text of ["Sam Customer", "Synthetic job", "customer@example.invalid", "Retaining wall"]) {
+      // The log reaches Sentry Logs: the numbers and amounts stay in the dry run.
+      for (const text of ["Sam Customer", "Synthetic job", "customer@example.invalid", "Retaining wall", "EI-2605-02-M1", "900.00", "925.50", "1018.05"]) {
         assert.equal(logged.includes(text), false, `the log holds no customer text (${text})`);
       }
       assert.deepEqual(Object.keys(await ledger(db)), [QUOTE_ROWS_BACKFILL_ID], "the invoice backfill is not recorded");
@@ -280,3 +281,24 @@ for (const backend of backends) {
     });
   });
 }
+
+test("a refused job's log line names uids and mismatch kinds, never a document number, an amount or an address folder", () => {
+  const jobId = "00000000-0000-4000-8000-000000000001";
+  const documentUid = "00000000-0000-4000-8000-0000000000d1";
+  assert.equal(
+    describeRefusedJob({
+      jobId,
+      mismatches: [
+        { kind: "totals", against: "issued-document", number: "EQ-2501-01", issuedDocumentUid: documentUid, version: 2, field: "taxTotal", rows: "90.00", shown: "92.55" },
+        { kind: "payments", milestone: 0, field: "amountPaid", rows: "100.00", shown: "120.00" },
+        { kind: "conflict", conflict: "sent-rows-differ", number: "EQ-2501-01", version: 1 },
+      ],
+    }),
+    `job ${jobId}: document ${documentUid} v2 totals: tax against issued-document; milestone 1 payments: amount paid; document (no uid) v1 sent-rows-differ`,
+  );
+  assert.equal(describeRefusedJob({ job: `2026-01-04/${jobId}`, error: "Unexpected end of JSON input", mismatches: [] }), `job ${jobId}: could not be checked (Unexpected end of JSON input)`);
+  assert.equal(
+    describeRefusedJob({ job: "2026-01-04/12-main-st-exampleton", error: "x", mismatches: [] }),
+    "job folder (not a uid; see the dry run): could not be checked (x)",
+  );
+});

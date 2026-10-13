@@ -248,14 +248,21 @@ describe("invoice-row dual-write", () => {
 
   test("a job that fails its checks is counted with both numbers, once, and not written; nothing throws", async () => {
     const lines = [];
-    const failing = { jobId: "job-x", ok: false, action: "refused", failures: [{ kind: "totals", against: "revision-pdf", number: "EI-X-M1", field: "total", rows: "110.00", shown: "120.00" }] };
+    const failing = {
+      jobId: "job-x",
+      ok: false,
+      action: "refused",
+      invoices: [{ number: "EI-X-M1", issuedDocumentUid: "doc-x" }],
+      failures: [{ kind: "totals", against: "revision-pdf", number: "EI-X-M1", field: "total", rows: "110.00", shown: "120.00" }],
+    };
     const stub = createInvoiceRowRecorder({ service: {}, logger: { error: (line) => lines.push(line), warn: (line) => lines.push(line) }, sync: async () => failing });
     assert.equal(await stub.syncJob("/job-x"), failing);
     await stub.syncJob("/job-x");
     const status = stub.status();
     assert.equal(status.mismatches, 1, "the same failure on a later commit is not counted again");
     assert.deepEqual(status.lastMismatch.failures, failing.failures);
-    assert.equal(lines.filter((line) => /job job-x: rows not written \(EI-X-M1 total rows 110\.00 vs revision-pdf 120\.00\)/.test(line)).length, 1);
+    // The log line reaches Sentry: uids and the mismatch kind, never the number or amounts.
+    assert.deepEqual(lines, ["[invoice-rows] job job-x: rows not written (document doc-x totals: total against revision-pdf); the job files still hold them"]);
   });
 
   test("a recorder whose database fails logs, counts and returns null", async () => {

@@ -833,7 +833,8 @@ function warnOnQuoteChargeDrift(quote) {
 
   if (Math.abs(chargeTotal - lineItemTotal) > 1) {
     console.warn(
-      `[generate-evidence-quote] charge/lineItem drift: charge=${chargeTotal} lineItems=${lineItemTotal}`
+      // No amounts: this line reaches Sentry Logs.
+      "[generate-evidence-quote] charge/lineItem drift: the charges and the line items differ by more than 1"
     );
   }
 }

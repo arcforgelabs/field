@@ -581,11 +581,16 @@ than User-Agent, query strings (sign-in tokens can travel in one), the user,
 console breadcrumbs, local variables, and any value under a key that names a
 customer, contact, address, title, note, bank or credential. Free text
 (error messages, log lines, URLs, file paths) is rewritten: email addresses,
-Australian phone numbers, BSBs and query strings become placeholders, and job
-folder or route segments that are not UUIDs (older job folders were named
-after the site address) become `[job]`. A name or street typed into free text
-cannot be recognised reliably, so keep customer details out of log and error
-messages. Replays mask all text and inputs, mask `title`, `aria-label`, `alt`
+document numbers (`EQ-…`, `EI-…`, `ER-…`, `INV-…`, `RCT-…`, `CN-…`), money
+amounts (with a currency sign, or a number with two decimals), Australian
+phone numbers, BSBs and query strings become placeholders, and job folder or
+route segments that are not UUIDs (older job folders were named after the
+site address) become `[job]`. A whole amount without a currency sign looks
+like a count, and a name or street typed into free text cannot be recognised
+reliably, so log lines name jobs and documents by uid: a refused data
+migration or row check logs the job uid, the issued document's uid and the
+kind of mismatch, and the numbers and amounts stay inside Field (the
+data-migrations dry run). Replays mask all text and inputs, mask `title`, `aria-label`, `alt`
 and similar attributes, block images, frames, canvases, contact links, job
 links and links with a query string, and record no network detail. A problem
 report's message and screenshot are sent as the operator wrote and took them.

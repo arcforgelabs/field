@@ -14,6 +14,7 @@
 // Per job: a job whose rows would not equal what was issued and what Field
 // shows is not written (its rows keep what they had) and is counted under
 // `mismatches`, with both numbers in `lastMismatch`.
+import { describeRowFailure } from "../observability/row-failure-log.js";
 import { syncJobInvoiceRows } from "./sync.js";
 
 const NOOP = Object.freeze({
@@ -77,9 +78,9 @@ export function createInvoiceRowRecorder({ service, quoteRows = null, issuedDocu
           if (conflicts.length) state.conflicts += 1;
           if (conflicts.length !== result.failures.length) state.mismatches += 1;
           state.lastMismatch = { at: new Date().toISOString(), jobId: result.jobId, failures: result.failures.slice(0, 10) };
-          logger.warn(`[invoice-rows] job ${result.jobId}: ${result.action === "refused" ? "rows not written" : "rows kept as issued"} (${result.failures.slice(0, 5).map((failure) => (failure.rows !== undefined
-            ? `${failure.number ? `${failure.number} ` : ""}${failure.field} rows ${failure.rows} vs ${failure.against || failure.kind} ${failure.shown}`
-            : failure.reason || failure.kind)).join("; ")}); the job files still hold them`);
+          // By uid and kind only: the line reaches Sentry Logs.
+          const uidByNumber = new Map((result.invoices || []).filter((invoice) => invoice.issuedDocumentUid).map((invoice) => [invoice.number, invoice.issuedDocumentUid]));
+          logger.warn(`[invoice-rows] job ${result.jobId}: ${result.action === "refused" ? "rows not written" : "rows kept as issued"} (${result.failures.slice(0, 5).map((failure) => describeRowFailure(failure, { documentUid: uidByNumber.get(failure.number) || null })).join("; ")}); the job files still hold them`);
         }
       }
       return result;
