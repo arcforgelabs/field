@@ -381,6 +381,9 @@ An issued invoice is a money document, not a projection of the current quote.
   - What is owed follows the choice. The PDF and the payments do not change.
   - The owner routes are `GET /api/admin/invoices/amount-disagreements` and
     `POST /api/admin/invoices/amount-disagreements/settle`.
+  - The owner screen `/invoices/amounts`
+    (`client/src/features/invoices/invoice-amounts-page.tsx`) calls them. It
+    sends the chosen set's total from the report; the owner never types it.
 - `GET /api/jobs/:id/milestones/:index/pdf` serves an issued revision's stored bytes and accepts `?revision=<n>` to address a superseded one. `GET /api/jobs/:id/milestones/:index/revisions` lists the history. The `field` CLI exposes `credit-invoice` (formerly `revise-invoice`) and `list-invoice-revisions`. A credit note's PDF is an issued document: `GET /api/jobs/:id/documents` lists it and `GET /api/documents/:uid/pdf` serves it, and the email editor offers it as an attachment when the replacement invoice is sent. An invoice returned to draft and reissued with different content is credited first according to the account setting `creditNoteOnReissue` in `business_settings` (`when-emailed` by default: only when Field has evidence it was emailed or delivered; `always`; `never`), read by the issue service; "Credit and reissue" always credits.
 
 ## Presentation Organizer

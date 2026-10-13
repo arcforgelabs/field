@@ -1097,6 +1097,17 @@ export const api = {
       body: JSON.stringify(settings),
     });
   },
+  /** Owner only. Read-only; it can take 15 s or more (409 while another runs, 504 out of time). */
+  invoiceAmountDisagreements() {
+    return request<import("./types.ts").InvoiceAmountReport>("/api/admin/invoices/amount-disagreements");
+  },
+  /** Owner only. Records which set of amounts an invoice was issued for. */
+  settleInvoiceAmounts(input: import("./types.ts").InvoiceAmountSettleInput) {
+    return request<{ ok: boolean; settlement: unknown }>("/api/admin/invoices/amount-disagreements/settle", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
   updateTerms(terms: Array<{ id: string; title: string; body: string }>) {
     return request<{ ok: boolean }>("/api/terms", {
       method: "PUT",

@@ -10,6 +10,7 @@ import { AppShell } from "@/components/shell/app-shell";
 const JobsPage = lazy(() => import("@/features/jobs/jobs-page").then((m) => ({ default: m.JobsPage })));
 const JobPage = lazy(() => import("@/features/job/job-page").then((m) => ({ default: m.JobPage })));
 const InvoicesPage = lazy(() => import("@/features/invoices/invoices-page").then((m) => ({ default: m.InvoicesPage })));
+const InvoiceAmountsPage = lazy(() => import("@/features/invoices/invoice-amounts-page").then((m) => ({ default: m.InvoiceAmountsPage })));
 const EmailComposerPage = lazy(() => import("@/features/job-detail/email-composer-page").then((m) => ({ default: m.EmailComposerPage })));
 const CataloguePage = lazy(() => import("@/features/catalogue/catalogue-page").then((m) => ({ default: m.CataloguePage })));
 const SupplierImportPage = lazy(() => import("@/features/pricing/supplier-import-page").then((m) => ({ default: m.SupplierImportPage })));
@@ -44,6 +45,14 @@ function ProtectedRoute({ children, bare = false }: { children: React.ReactNode;
       <Suspense fallback={<div className="fx-loading">Loading…</div>}>{children}</Suspense>
     </AppShell>
   );
+}
+
+// Owner screens: anyone else goes to the screen they came from. The server
+// checks the owner role again on every owner route (requireAdmin).
+function OwnerRoute({ children, fallback }: { children: React.ReactNode; fallback: string }) {
+  const { isOwner } = useAuth();
+  if (!isOwner) return <Navigate to={fallback} replace />;
+  return <>{children}</>;
 }
 
 // The quote editor used to be its own screen; it is the job page now.
@@ -111,6 +120,16 @@ export function App() {
           element={
             <ProtectedRoute>
               <InvoicesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/invoices/amounts"
+          element={
+            <ProtectedRoute>
+              <OwnerRoute fallback="/invoices">
+                <InvoiceAmountsPage />
+              </OwnerRoute>
             </ProtectedRoute>
           }
         />
