@@ -277,7 +277,7 @@ The screen shows **Connect again**, with the reason:
 | `XERO_REFRESH_REJECTED` | Xero refused the refresh token: it was revoked at Xero, or was not used for 60 days | Connect again |
 | `XERO_CLIENT_REJECTED` | Xero did not accept the app's client id and client secret | Check them (in Settings, or the environment override), then connect again |
 | `XERO_APP_CHANGED` | The credentials were replaced with another app's, so the earlier sign-in no longer applies | Connect again |
-| `SECRETS_KEY_MISSING`, `SECRETS_KEY_INVALID`, `SECRETS_KEY_PREVIOUS_INVALID`, `SECRETS_KEY_UNKNOWN`, `SECRET_UNREADABLE` | `FIELD_SECRETS_KEY` or `FIELD_SECRETS_KEY_PREVIOUS` is missing, not 32 bytes, or not the key that wrote the stored sign-in | Fix the key (`docs/INTEGRATIONS.md`). Field does not store this state: once the key is right, Xero is connected again by itself |
+| `SECRETS_KEY_MISSING`, `SECRETS_KEY_INVALID`, `SECRETS_KEY_PREVIOUS_INVALID`, `SECRETS_KEY_UNKNOWN`, `SECRET_UNREADABLE` | `FIELD_SECRETS_KEY` or `FIELD_SECRETS_KEY_PREVIOUS` is missing, too short, or not the key that wrote the stored sign-in | Fix the key (`docs/INTEGRATIONS.md`). Field does not store this state: once the key is right, Xero is connected again by itself |
 | `LEGACY_TOKENS_UNREADABLE` | The sign-in from the first Xero release could not be moved under `FIELD_SECRETS_KEY` | Connect again |
 | `XERO_FORBIDDEN`, `XERO_SCOPE_MISSING` | Xero refused the organisation, or the sign-in lacks a scope | Connect again, and allow access |
 

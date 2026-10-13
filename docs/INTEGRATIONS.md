@@ -51,13 +51,24 @@ deployment secret `FIELD_SECRETS_KEY`.
 - It is its own secret: never `SESSION_SECRET`, and never derived from an
   integration's credentials. Rotating a Xero app's client secret therefore
   loses nothing.
-- It is 32 random bytes, in base64 (or 64 hex characters). Make one with:
+- **Make it with your password manager.** In Bitwarden, open the password
+  generator and make a password of 40 characters or more, with upper case,
+  lower case and numbers. Any random string of at least 40 characters works;
+  Field turns it into its 32-byte key with HKDF-SHA256. Use a generated
+  string, never a phrase you made up: the key is only as strong as the
+  string. Leave commas out, because `FIELD_SECRETS_KEY_PREVIOUS` separates
+  keys with commas.
+- A key of 32 random bytes in base64, or 64 hex characters, also works, and
+  is used as it is. To make one on a computer with Node.js:
 
   ```bash
   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
   ```
 
-  Put it in the deployment's secrets (on Replit, Secrets), then restart or
+- Anything shorter than 40 characters that is not such a key is refused
+  (`SECRETS_KEY_INVALID`), and the screen says so.
+
+  Put the key in the deployment's secrets (on Replit, Secrets), then restart or
   republish Field. Never paste it into chat, an issue, a pull request or a
   file in the repository. Keep a copy in your password manager: without it,
   the stored credentials and tokens cannot be read.
@@ -66,7 +77,7 @@ deployment secret `FIELD_SECRETS_KEY`.
   id of the key that wrote it (a hash of the key, never the key).
   `server/secrets/` is the module every integration uses.
 - **It fails closed.** If `FIELD_SECRETS_KEY` (or a value in
-  `FIELD_SECRETS_KEY_PREVIOUS`) is missing, is not 32 bytes, or cannot read a
+  `FIELD_SECRETS_KEY_PREVIOUS`) is missing, is too short, or cannot read a
   stored value, nothing is stored or sent. The screen says which, and a
   connected integration shows "Connect again". Field does not store that
   state: once the key is fixed, the integration is connected again by
@@ -74,7 +85,7 @@ deployment secret `FIELD_SECRETS_KEY`.
 
 ## Rotating the key
 
-1. Make a new key (above).
+1. Make a new key (above), for example a new 40-character password from the generator.
 2. Set `FIELD_SECRETS_KEY_PREVIOUS` to the current key, and
    `FIELD_SECRETS_KEY` to the new one. Several previous keys can be listed,
    separated by commas.

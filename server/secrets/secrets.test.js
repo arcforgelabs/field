@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { hkdfSync } from "node:crypto";
 import test from "node:test";
 import { sql } from "drizzle-orm";
 import { scrubEvent } from "../../shared/sentry-scrub.js";
@@ -52,7 +53,7 @@ test("a missing, malformed or wrong key fails closed, and errors never quote a v
   assert.deepEqual([missing.available, missing.problem], [false, "SECRETS_KEY_MISSING"]);
   assert.throws(() => createSecretBox({ keyring: missing, orgUid: ORG, integration: "xero" }).seal(VALUE, "client_secret"), (error) => error.code === "SECRETS_KEY_MISSING");
   assert.throws(() => createSecretBox({ keyring: missing, orgUid: ORG, integration: "xero" }).open(sealed, "client_secret"), (error) => error.code === "SECRETS_KEY_MISSING");
-  for (const bad of ["too-short", "SESSION_SECRET-like value that is not a key", Buffer.alloc(16, 1).toString("base64")]) {
+  for (const bad of ["too-short", "a39characterstringisnotlongenoughforkey", Buffer.alloc(16, 1).toString("base64")]) {
     const keyring = loadSecretsKeyring({ FIELD_SECRETS_KEY: bad });
     assert.deepEqual([keyring.available, keyring.problem], [false, "SECRETS_KEY_INVALID"], bad);
   }
@@ -67,6 +68,34 @@ test("a missing, malformed or wrong key fails closed, and errors never quote a v
   // A hex key works as well as base64.
   assert.equal(loadSecretsKeyring({ FIELD_SECRETS_KEY: Buffer.alloc(32, 3).toString("hex") }).available, true);
   assert.equal(JSON.stringify(testKeyring().status()).includes(TEST_SECRETS_KEY), false, "the status names the key's id, never the key");
+});
+
+test("a generated password of 40 or more characters is a key (HKDF-SHA256); base64 and hex keys are unchanged", () => {
+  // Made at runtime, so secret scanners do not flag a fixture as a real key.
+  const password = ["field", "test", "generated", "password"].join("-").padEnd(41, "7");
+  assert.equal(password.length, 41);
+  const keyring = loadSecretsKeyring({ FIELD_SECRETS_KEY: password });
+  assert.equal(keyring.available, true);
+  // The same derivation every time, so values stay readable across restarts.
+  const expected = Buffer.from(hkdfSync("sha256", Buffer.from(password, "utf8"), "field-secrets-v1", "field-secrets-v1", 32));
+  assert.equal(keyring.currentId, secretsKeyId(expected));
+  assert.deepEqual(keyring.currentKey(), expected);
+  const sealed = createSecretBox({ keyring, orgUid: ORG, integration: "xero" }).seal(VALUE, "client_secret");
+  const again = createSecretBox({ keyring: loadSecretsKeyring({ FIELD_SECRETS_KEY: `  ${password}\n` }), orgUid: ORG, integration: "xero" });
+  assert.equal(again.open(sealed, "client_secret"), VALUE, "surrounding whitespace is ignored");
+  // Keys already in use keep their bytes and their ids.
+  assert.equal(testKeyring().currentId, secretsKeyId(Buffer.from(TEST_SECRETS_KEY, "base64")));
+  const hex = Buffer.alloc(32, 3).toString("hex");
+  assert.equal(loadSecretsKeyring({ FIELD_SECRETS_KEY: hex }).currentId, secretsKeyId(Buffer.from(hex, "hex")));
+  // A password works as a previous key, for rotation.
+  const rotated = createSecretBox({ keyring: loadSecretsKeyring({ FIELD_SECRETS_KEY: TEST_SECRETS_KEY, FIELD_SECRETS_KEY_PREVIOUS: password }), orgUid: ORG, integration: "xero" });
+  assert.equal(rotated.open(sealed, "client_secret"), VALUE);
+  // A mistyped base64 key (padded, but not 32 bytes) is refused, not taken as a password.
+  assert.equal(loadSecretsKeyring({ FIELD_SECRETS_KEY: `${TEST_SECRETS_KEY.slice(0, -4)}xx==` }).problem, "SECRETS_KEY_INVALID");
+  // Shorter strings are refused, with a message that says what to use.
+  const short = loadSecretsKeyring({ FIELD_SECRETS_KEY: password.slice(0, 39) });
+  assert.deepEqual([short.available, short.problem], [false, "SECRETS_KEY_INVALID"]);
+  assert.throws(() => short.currentKey(), (error) => /at least 40 characters/.test(error.message) && !error.message.includes(password.slice(0, 39)));
 });
 
 test("rotation: values written with the previous key are read with it and rewritten with the current one", () => {
