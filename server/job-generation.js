@@ -1,5 +1,6 @@
 import {
   cp,
+  lstat as lstatAsync,
   mkdir,
   mkdtemp,
   readdir,
@@ -323,14 +324,91 @@ async function hasValidManifestContents(generationDir, marker) {
   }
 }
 
+// A committed generation never changes, but every read used to re-hash every
+// file of every generation of the job (quarantineUncommittedGenerations checks
+// them all), several times per job on the jobs board. The cost grew with the
+// job's whole history until GET /api/jobs stopped answering. A full check is
+// now remembered against a stat signature of the generation (each entry's
+// path, size, inode and change time, and the commit marker's): a write,
+// rename or replacement of any file changes the signature and the next read
+// checks the bytes again.
+const VERIFIED_GENERATION_LIMIT = 20_000;
+const verifiedGenerations = new Map();
+
+function rememberVerification(generationDir, signature, valid) {
+  if (!signature) return;
+  verifiedGenerations.delete(generationDir);
+  verifiedGenerations.set(generationDir, { signature, valid });
+  if (verifiedGenerations.size > VERIFIED_GENERATION_LIMIT) {
+    verifiedGenerations.delete(verifiedGenerations.keys().next().value);
+  }
+}
+
+function statLine(path, info) {
+  return `${path}\0${info.isDirectory() ? "d" : info.isFile() ? "f" : "o"}\0${info.size}\0${info.ino}\0${info.ctimeMs}\0${info.mtimeMs}`;
+}
+
+function generationSignatureSync(generationDir) {
+  try {
+    const lines = [];
+    const walk = (dir) => {
+      for (const name of readdirSync(dir).sort()) {
+        const path = join(dir, name);
+        const info = lstatSync(path);
+        lines.push(statLine(relative(generationDir, path), info));
+        if (info.isDirectory()) walk(path);
+      }
+    };
+    walk(generationDir);
+    return lines.join("\n");
+  } catch {
+    return null;
+  }
+}
+
+async function generationSignature(generationDir) {
+  try {
+    const lines = [];
+    const walk = async (dir) => {
+      for (const name of (await readdir(dir)).sort()) {
+        const path = join(dir, name);
+        const info = await lstatAsync(path);
+        lines.push(statLine(relative(generationDir, path), info));
+        if (info.isDirectory()) await walk(path);
+      }
+    };
+    await walk(generationDir);
+    return lines.join("\n");
+  } catch {
+    return null;
+  }
+}
+
+/** For tests: forget every remembered verification. */
+export function forgetVerifiedJobGenerations() {
+  verifiedGenerations.clear();
+}
+
 function hasValidCommitMarkerSync(generationDir, generationId = null) {
+  const signature = generationSignatureSync(generationDir);
+  const known = signature && verifiedGenerations.get(generationDir);
   const marker = readJsonSync(commitMarkerPath(generationDir));
-  return isValidCommitMarker(marker, generationId) && hasValidManifestContentsSync(generationDir, marker);
+  if (!isValidCommitMarker(marker, generationId)) return false;
+  if (known && known.signature === signature) return known.valid;
+  const valid = hasValidManifestContentsSync(generationDir, marker);
+  rememberVerification(generationDir, signature, valid);
+  return valid;
 }
 
 async function hasValidCommitMarker(generationDir, generationId = null) {
+  const signature = await generationSignature(generationDir);
+  const known = signature && verifiedGenerations.get(generationDir);
   const marker = await readJson(commitMarkerPath(generationDir));
-  return isValidCommitMarker(marker, generationId) && await hasValidManifestContents(generationDir, marker);
+  if (!isValidCommitMarker(marker, generationId)) return false;
+  if (known && known.signature === signature) return known.valid;
+  const valid = await hasValidManifestContents(generationDir, marker);
+  rememberVerification(generationDir, signature, valid);
+  return valid;
 }
 
 function readProcessStartIdentity(pid = process.pid) {

@@ -8,7 +8,7 @@ as it was sent. It also exposes a typed API, CLI and OAuth MCP surface so
 external systems, AI agents included, can build and revise quotes. See
 `VISION.md`.
 
-Field was built for Embark Landscaping & Earthworks. Its source is at
+Field was built for Embark Landscaping & Earthworks, which maintains it at
 [arcforgelabs/field](https://github.com/arcforgelabs/field).
 
 Licence: MIT (`LICENSE`).
@@ -36,7 +36,6 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `docs/REMOTE_MCP.md` | The OAuth MCP surface AI agents and other systems connect through |
 | `docs/concepts/surveyor.md` | Surveyor, Field's before/after proof lane |
 | `docs/lessons-learned.md` | Persistent production bugs and the fixes that resolved them |
-| `.github/rulesets/main.json` | The ruleset on `main`: pull request, required checks, no force push or deletion, the maintainer's bypass (`CONTRIBUTING.md`, "Merging to main") |
 | `docs/review/` | Before and after renders of customer documents a change alters, from synthetic data, for the owner's review |
 | `server/catalog/README.md` | The PostgreSQL price catalogue |
 | `server/db/README.md` | The database runtime, migrations and tenancy |
@@ -179,8 +178,7 @@ Client development lives in `client/`.
 
 - **Replit:** `.replit` and `scripts/replit-deploy.sh` run Field as a
   published app on a Reserved VM, built from a commit fetched from GitHub
-  (`main`, or a pinned ref) only after its GitHub CI passed
-  (`scripts/deploy-checks.js`), not from the workspace's files;
+  (`main`, or a pinned ref), not from the workspace's files;
   `scripts/replit-build.sh` and `scripts/replit-start.sh` build and start a
   tree. `docs/REPLIT.md` is the runbook (secrets, PostgreSQL, durable storage,
   Clerk, publishing, rollback). `scripts/github-sync.sh` keeps a Replit

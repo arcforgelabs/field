@@ -7,6 +7,57 @@ the commit that landed it — so future debugging has the full trail.
 
 ---
 
+## 2026-10-13 — The jobs board stays on "Loading jobs…" and restarts do not help (fixed in #109 and #110)
+
+**Symptom:** On a live installation, `GET /api/jobs` stopped answering. The
+board stayed on "Loading jobs…", and the browser gave up with an AbortError
+after 30–60 s. `/health`, `/api/auth/me` and `/api/ui-config` answered, but
+slowly (`/api/storage/status` took 1.9 s). Later, reads of single jobs also
+ran past 12 s. Restarts did not clear it, and no server error reached Sentry,
+because the requests were slow, not failing.
+
+**Wrong diagnoses:**
+- A stuck in-flight request. Restarts ruled this out.
+- A lock that outlived the process: a job generation lock, a durable-storage
+  claim, or a PostgreSQL advisory lock. None of Field's locks survives a
+  restart. The generation lock is reclaimed once its owner is dead, and it
+  gives up after 30 s.
+- A release regression. The hang began on one release and continued on the
+  next.
+
+**Root cause:** every read of a job (`resolveActiveJobGeneration`) called
+`quarantineUncommittedGenerations`, which checked *every* generation's commit
+marker. It did this by reading and hashing all of that generation's files,
+twice. Each generation holds the job's files, so one read cost about the sum
+of all bytes in the job's whole history. That grows with history, faster than
+linearly for a job whose generations add PDFs. The jobs board reads each job
+several times (meta, quote artifacts, lifecycle, issuance ledger, issued
+artifact), so the list cost the sum over every job. It worked until enough
+history had built up, then crossed the browser's limit all at once. Heavy
+reading of many jobs in a row hastened it, and it stayed slow after restarts
+because the cost is in the data.
+
+**Fix:**
+- #110: a full check of a committed generation is remembered against a stat
+  signature (path, type, size, inode, change time and modification time of
+  every entry, and the marker's). Any write, rename or replacement changes the
+  signature, so the bytes are checked again. Changed, removed and added files
+  are still caught. On a synthetic job with 40 generations, 5 reads went from
+  7.7 s to 0.16 s.
+- #109: `GET /api/jobs` gives each job 5 s and the list 25 s. A job that runs
+  over is left out (the response sets `X-Field-Jobs-Skipped`) and is logged and
+  reported to Sentry by job id and step only. A slow job can never hang the
+  board again, and the slow job is named.
+
+**Prevention:**
+- `server/job-generation.test.js` has a regression test: 20 reads of a job
+  with 60 generations must finish within a fixed time.
+- Any per-read work that scales with a job's history needs a cache or a test
+  like that one.
+- A route that loops over every job needs a time limit for each job.
+
+---
+
 ## 2026-10-12 — Jobs open by their link but are missing from the jobs board (#32, fixed in #34)
 
 **Symptom:** On a live installation the board listed 57 jobs while the data
