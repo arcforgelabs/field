@@ -18,7 +18,7 @@ const COLORS = {
   footerBg: "#faf8f4",
 };
 
-export function renderQuoteEmailHtml({
+export async function renderQuoteEmailHtml({
   clientName,
   jobTitle,
   quoteNumber,
@@ -188,7 +188,7 @@ export function renderQuoteEmailHtml({
   </mj-body>
 </mjml>`;
 
-  const { html, errors } = mjml2html(mjmlTemplate);
+  const { html, errors } = await mjml2html(mjmlTemplate);
   if (errors?.length) {
     // Where, not what: the template holds the customer's details, and a
     // warning can quote an attribute value.

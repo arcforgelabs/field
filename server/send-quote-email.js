@@ -491,7 +491,7 @@ export async function composeDocumentEmail({
   const biz = applyBusinessProfileOverride(quoteCatalog.businessProfile || {});
   // A quote email's totals come from the quote's rows (#10).
   const rowsView = resolvedDocumentType === "quote" ? await loadQuoteRows({ quote, meta }) : null;
-  const htmlBody = buildEmailHtml({
+  const htmlBody = await buildEmailHtml({
     meta,
     quote,
     totals: rowsView?.financials || null,
