@@ -97,26 +97,8 @@ To roll back, promote the previous stable tag. Nothing is unpublished.
 
 ## Run a release
 
-Docker, by digest (from `release-manifest.json`):
-
-```bash
-gh attestation verify oci://ghcr.io/arcforgelabs/field@sha256:<digest> --repo arcforgelabs/field
-docker run -p 19200:19200 -v field-data:/app/data \
-  -e DATABASE_URL=... -e FIELD_STORAGE=postgres -e FIELD_CONFIG_JSON=... \
-  ghcr.io/arcforgelabs/field@sha256:<digest>
-```
-
-npm, by exact version (the shrinkwrap pins every dependency):
-
-```bash
-npm install --omit=dev @arcforgelabs/field@2026.10.14
-npm audit signatures
-FIELD_DATA=./data FIELD_CONFIG_JSON=... DATABASE_URL=... FIELD_STORAGE=postgres npx field-server
-```
-
-An installation that pins a release records the version, the npm integrity
-and the image digest from `release-manifest.json`, and checks them before it
-runs. `README.md` ("Getting started") describes the configuration.
+`docs/SELF_HOSTING.md` describes how to pin, verify and run a release with
+Docker, with Node, or on Replit (`deploy/replit/`).
 
 ## One-time setup
 
