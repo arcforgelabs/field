@@ -170,6 +170,49 @@ export interface XeroIntegration {
   choices: { createMode: Array<{ value: XeroCreateMode; label: string; description: string }> };
 }
 
+/** One invoice's way to Xero, on the job's Invoices tab. */
+export interface XeroInvoiceState {
+  invoiceUid: string;
+  state: "not-sent" | "pending" | "created" | "mismatch" | "failed" | "skipped";
+  label: string;
+  xeroStatus: string | null;
+  /** Why it failed, waits or differs, in plain words. */
+  reason: string | null;
+  nextAttemptAt: string | null;
+  canRetry: boolean;
+  canSend: boolean;
+}
+
+export interface JobXeroStatus {
+  ok: boolean;
+  connected: boolean;
+  connection: XeroConnectionStatus;
+  createMode: XeroCreateMode;
+  /** By invoice number. */
+  invoices: Record<string, XeroInvoiceState>;
+}
+
+/** What sending invoices issued before the connection would create. */
+export interface XeroPushPreview {
+  ok: boolean;
+  wroteNothing: true;
+  connected: boolean;
+  mode: "draft" | "authorised";
+  invoices: Array<{
+    invoiceUid: string;
+    jobId: string;
+    number: string;
+    reference: string | null;
+    customer: string | null;
+    issuedAt: string | null;
+    total: string;
+    status: string;
+    creates: string;
+    previously: string | null;
+    problem: string | null;
+  }>;
+}
+
 export interface XeroSettings {
   createMode: XeroCreateMode;
   salesAccountCode: string;

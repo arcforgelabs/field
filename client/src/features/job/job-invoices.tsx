@@ -1,10 +1,13 @@
 // A job's milestone invoices, in order: how much is paid, and for each
 // invoice its state and the one thing to do next (send it, record the
-// payment, or send the receipt).
-import { useState } from "react";
+// payment, or send the receipt). With Xero connected (#93), each issued
+// invoice also shows its Xero state; owners get Retry and Send to Xero.
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check, Eye, FileMinus, Mail, MoreHorizontal, Send, Undo2, Wallet } from "lucide-react";
-import type { MilestoneInvoice, RecordingDetail } from "@/lib/types";
+import type { JobXeroStatus, MilestoneInvoice, RecordingDetail, XeroInvoiceState } from "@/lib/types";
+import { useAuth } from "@/contexts/auth-context";
+import { XeroInvoiceStatus, XeroPushDialog } from "./xero-invoice-status";
 import { api } from "@/lib/api";
 import { openDocumentPdf } from "@/lib/open-document";
 import { useShell } from "@/components/shell/shell-context";
@@ -26,6 +29,28 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
   const firstOpen = invoices.find((invoice) => invoice.status !== "paid");
   const shell = useShell();
   const [crediting, setCrediting] = useState<MilestoneInvoice | null>(null);
+  const { isOwner } = useAuth();
+  const [xero, setXero] = useState<JobXeroStatus | null>(null);
+  const [pushing, setPushing] = useState<XeroInvoiceState | null>(null);
+  const loadXero = useCallback(() => {
+    api.jobXeroStatus(meta.id).then(setXero).catch(() => setXero(null));
+  }, [meta.id]);
+  // Again whenever the job changes (an invoice was issued), and while one is on its way.
+  useEffect(() => { loadXero(); }, [loadXero, detail]);
+  const sending = xero ? Object.values(xero.invoices).some((entry) => entry.state === "pending") : false;
+  useEffect(() => {
+    if (!sending) return undefined;
+    const timer = window.setInterval(loadXero, 5000);
+    return () => window.clearInterval(timer);
+  }, [sending, loadXero]);
+  const xeroFor = (invoice: MilestoneInvoice): XeroInvoiceState | null => {
+    if (!xero || invoice.status === "draft") return null;
+    const entry = xero.invoices[invoice.invoiceNumber] || null;
+    // Only once Xero is connected, or for an invoice that already went.
+    if (!entry || (!xero.connected && entry.state === "not-sent")) return null;
+    return entry;
+  };
+  const retryXero = (entry: XeroInvoiceState) => void run("xero", async () => { await api.retryXero(entry.invoiceUid); loadXero(); }, "Sending to Xero again");
   const pdf = (invoice: MilestoneInvoice, type: "invoice" | "receipt") => void openDocumentPdf(api.quotePdfUrl(meta.id, undefined, invoice.milestoneIndex, type), shell.toast);
   const credit = (invoice: MilestoneInvoice): MenuItem => ({ label: "Credit and reissue", icon: <FileMinus />, onSelect: () => setCrediting(invoice) });
   const navigate = useNavigate();
@@ -94,6 +119,7 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
             <div style={{ minWidth: 0 }}>
               <div className="fx-ms__t">{invoice.milestoneLabel} <span className="fx-dim" style={{ fontWeight: 400 }}>· {invoice.percentage}%</span></div>
               <div className="fx-ms__s fx-num">{invoice.invoiceNumber}{invoice.payments?.length ? ` · ${invoice.payments.filter((payment) => !payment.voidedAt).length} payment${invoice.payments.length === 1 ? "" : "s"}` : ""}</div>
+              {xeroFor(invoice) && <XeroInvoiceStatus entry={xeroFor(invoice) as XeroInvoiceState} isOwner={isOwner} onRetry={retryXero} onSend={setPushing} />}
             </div>
             <div className="fx-ms__hide-sm"><span className={`fx-status fx-status--${INVOICE_STATE_TONE[state]}`} title={INVOICE_STATE_LABEL[state]}>{when}</span></div>
             <div className="fx-ms__hide-sm fx-num" style={{ textAlign: "right" }}>
@@ -120,6 +146,13 @@ export function JobInvoices({ detail, busy, onSend, onRecordPayment, run }: {
       <div className="fx-doc-actions">
         <span className="fx-mute" style={{ fontSize: 12 }}>Sent and paid invoices are locked: to correct one, credit and reissue it. Later milestones follow the quote's payment schedule.</span>
       </div>
+      {pushing && (
+        <XeroPushDialog
+          invoiceUids={[pushing.invoiceUid]}
+          onCancel={() => setPushing(null)}
+          onSent={(count) => { setPushing(null); shell.toast(count ? "Sending to Xero" : "Nothing was sent"); loadXero(); }}
+        />
+      )}
       {crediting && (
         <CreditInvoiceDialog
           invoice={crediting}

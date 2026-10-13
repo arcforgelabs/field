@@ -116,7 +116,12 @@ export async function startFakeXero({
     const failure = state.failures.find((entry) => entry.times > 0 && entry.method === req.method && entry.match.test(url.pathname));
     if (failure) {
       failure.times -= 1;
-      return send(res, failure.status, failure.body, failure.headers);
+      if (!failure.afterProcessing) return send(res, failure.status, failure.body, failure.headers);
+      // Xero did the work, but the answer is lost on the way back.
+      const writeHead = res.writeHead.bind(res);
+      const end = res.end.bind(res);
+      res.writeHead = () => writeHead(failure.status, { "content-type": "application/json", ...failure.headers });
+      res.end = () => end(JSON.stringify(failure.body ?? {}));
     }
 
     // Identity: authorize (auto-consent), token, revocation.
@@ -181,9 +186,9 @@ export async function startFakeXero({
     if (api === "/Accounts" && req.method === "GET") return send(res, 200, { Accounts: accounts });
     if (api === "/TaxRates" && req.method === "GET") return send(res, 200, { TaxRates: Object.entries(RATES).map(([TaxType, rate]) => ({ TaxType, Name: TaxType, Status: "ACTIVE", EffectiveRate: rate })) });
     if (api === "/Contacts" && req.method === "GET") {
-      const where = url.searchParams.get("where") || "";
-      const match = /^(Name|EmailAddress)=="(.*)"$/.exec(where);
-      const found = match ? state.contacts.filter((contact) => String(contact[match[1]] || "").toLowerCase() === match[2].replace(/\\"/g, "\"").toLowerCase()) : state.contacts;
+      // searchTerm: case-insensitive, in the name or the email (as Xero's).
+      const term = String(url.searchParams.get("searchTerm") || "").toLowerCase();
+      const found = term ? state.contacts.filter((contact) => contact.Name.toLowerCase().includes(term) || String(contact.EmailAddress || "").toLowerCase().includes(term)) : state.contacts;
       return send(res, 200, { Contacts: found });
     }
     if (api === "/Contacts" && req.method === "PUT") {
@@ -199,6 +204,11 @@ export async function startFakeXero({
     if (api === "/Invoices" && req.method === "GET") {
       const numbers = (url.searchParams.get("InvoiceNumbers") || "").split(",").filter(Boolean);
       return send(res, 200, { Invoices: state.invoices.filter((invoice) => !numbers.length || numbers.includes(invoice.InvoiceNumber)) });
+    }
+    const single = /^\/Invoices\/([^/]+)$/.exec(api);
+    if (single && req.method === "GET") {
+      const invoice = state.invoices.find((entry) => entry.InvoiceID === single[1] || entry.InvoiceNumber === decodeURIComponent(single[1]));
+      return invoice ? send(res, 200, { Invoices: [invoice] }) : send(res, 404, { Title: "Not found" });
     }
     if (api === "/Invoices" && (req.method === "PUT" || req.method === "POST")) {
       const created = [];
@@ -235,9 +245,13 @@ export async function startFakeXero({
     clientId,
     clientSecret,
     state,
-    /** The next `times` calls of `method` to a path matching `match` answer with `status`. */
-    failNext({ method = "PUT", match, status, body: failureBody = {}, headers = {}, times = 1 }) {
-      state.failures.push({ method, match, status, body: failureBody, headers, times });
+    /**
+     * The next `times` calls of `method` to a path matching `match` answer with
+     * `status`. With `afterProcessing`, the fake does the work first and the
+     * answer is lost (a timeout after Xero created the invoice).
+     */
+    failNext({ method = "PUT", match, status, body: failureBody = {}, headers = {}, times = 1, afterProcessing = false }) {
+      state.failures.push({ method, match, status, body: failureBody, headers, times, afterProcessing });
     },
     /** Every access token Xero issued expires now. */
     expireAccessTokens() {

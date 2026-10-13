@@ -434,6 +434,9 @@ export function createXeroConnectionService({
       }
     },
 
+    /** An API call Xero refused for the organisation (403, a missing scope): the owner connects again. */
+    markNeedsReconnect: (code) => markNeedsReconnect(code),
+
     /** Called with { type: "connected" | "disconnected" } (the invoice sync resumes on connect). */
     onChange(listener) {
       listeners.add(listener);

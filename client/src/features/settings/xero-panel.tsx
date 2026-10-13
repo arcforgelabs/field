@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import type { XeroCreateMode, XeroIntegration } from "@/lib/types";
 import { useShell } from "@/components/shell/shell-context";
 import { shortDate } from "@/lib/job-status";
+import { XeroPushDialog } from "@/features/job/xero-invoice-status";
 
 /** What the owner reads for a code from the callback (docs/XERO.md "When connecting fails"). */
 const CALLBACK_MESSAGES: Record<string, string> = {
@@ -40,6 +41,8 @@ export function XeroPanel() {
   const [taxType, setTaxType] = useState("");
   const [tenant, setTenant] = useState("");
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [earlierDays, setEarlierDays] = useState(30);
+  const [previewing, setPreviewing] = useState(false);
 
   async function load() {
     try {
@@ -203,6 +206,31 @@ export function XeroPanel() {
           </button>
         </div>
       </fieldset>
+
+      {connected && (
+        <fieldset className="xero__group" aria-label="Invoices issued before">
+          <legend className="xero__h">Invoices issued before</legend>
+          <p className="fx-dim xero__p">Invoices issued before Xero was connected, or while Create in Xero was off, are not sent by themselves. Preview them, then choose which to send{settings.createMode === "authorised" ? " as approved invoices" : " as drafts"}.</p>
+          <div className="xero__row">
+            <label className="fx-label" style={{ flex: "0 1 220px" }}>Issued in the last
+              <select className="fx-select" value={earlierDays} onChange={(event) => setEarlierDays(Number(event.target.value))}>
+                <option value={30}>30 days</option>
+                <option value={90}>90 days</option>
+                <option value={365}>12 months</option>
+              </select>
+            </label>
+            <button type="button" className="fx-btn" style={{ alignSelf: "flex-end" }} onClick={() => setPreviewing(true)}>Preview</button>
+          </div>
+        </fieldset>
+      )}
+
+      {previewing && (
+        <XeroPushDialog
+          sinceDays={earlierDays}
+          onCancel={() => setPreviewing(false)}
+          onSent={(count) => { setPreviewing(false); shell.toast(count ? `Sending ${count} to Xero` : "Nothing was sent"); }}
+        />
+      )}
 
       <SetupSteps data={data} open={!secretsReady || connection.status === "disconnected"} onCopy={copy} />
 

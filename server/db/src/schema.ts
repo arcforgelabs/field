@@ -1352,6 +1352,9 @@ export const invoices = pgTable(
     revisedBy: text("revised_by"),
     /** Why the status is what it is, where the files say more than the status. */
     note: text("note"),
+    /** The matching invoice in the owner's Xero (#93), filled once; and its Xero status when Field last saw it. */
+    xeroInvoiceId: text("xero_invoice_id"),
+    xeroStatus: text("xero_status"),
     createdAt: createdAt(),
     createdBy: text("created_by"),
     updatedAt: updatedAt(),
@@ -1360,6 +1363,7 @@ export const invoices = pgTable(
   },
   (t) => [
     uniqueIndex("invoices_org_uid_key").on(t.orgUid, t.uid),
+    uniqueIndex("invoices_org_xero_invoice_key").on(t.orgUid, t.xeroInvoiceId),
     uniqueIndex("invoices_org_job_number_key").on(t.orgUid, t.jobId, t.number),
     uniqueIndex("invoices_org_issue_key").on(t.orgUid, t.issueKey),
     /** A sequence number is unique in the organisation, not only in its job. */
@@ -1865,3 +1869,73 @@ export const xeroConnections = pgTable(
 );
 
 export type XeroConnection = typeof xeroConnections.$inferSelect;
+
+/**
+ * Each issued invoice on its way to Xero (#93, phase 1): one row per invoice
+ * from when it is queued. The issued invoices are the outbox
+ * (server/xero/invoice-sync.js queues every invoice issued since Create in
+ * Xero was turned on), so issuing never waits on Xero or writes here.
+ *
+ *   pending   queued, or waiting to retry (`next_attempt_at`), or waiting
+ *             for the owner to connect again
+ *   created   in Xero, with its id and status, its PDF attached and its
+ *             totals equal to Field's
+ *   mismatch  in Xero, but Xero's totals differ from Field's: the owner checks
+ *   failed    Xero refused it, or retries ran out; `last_error_reason` says why
+ *   skipped   not sent (credited or voided in Field before it reached Xero)
+ *
+ * The Xero invoice id and status are also on the invoice row
+ * (invoices.xero_invoice_id, xero_status).
+ */
+export const XERO_SYNC_STATES = ["pending", "created", "mismatch", "failed", "skipped"] as const;
+export type XeroSyncState = (typeof XERO_SYNC_STATES)[number];
+
+export const xeroInvoiceSyncs = pgTable(
+  "xero_invoice_syncs",
+  {
+    orgUid: orgUid(),
+    invoiceUid: text("invoice_uid").notNull(),
+    state: text("state").$type<XeroSyncState>().notNull().default("pending"),
+    /** draft or authorised: what Create in Xero said when it was queued. */
+    mode: text("mode").$type<"draft" | "authorised">().notNull(),
+    /** auto (issued after Create in Xero was turned on) or owner (sent or retried by an owner). */
+    queuedBy: text("queued_by").$type<"auto" | "owner">().notNull(),
+    requestedBy: text("requested_by"),
+    queuedAt: timestamp("queued_at", { withTimezone: true, mode: "date" }).notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true, mode: "date" }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "date" }),
+    /** A short code (XERO_VALIDATION, XERO_RATE_LIMITED, ...). */
+    lastErrorCode: text("last_error_code"),
+    /** The plain reason the owner reads. Never logged. */
+    lastErrorReason: text("last_error_reason"),
+    xeroInvoiceId: text("xero_invoice_id"),
+    xeroStatus: text("xero_status"),
+    xeroContactId: text("xero_contact_id"),
+    /** Xero's total and Field's, as compared after the invoice was created. */
+    xeroTotal: numeric("xero_total", { precision: 12, scale: 2 }),
+    fieldTotal: numeric("field_total", { precision: 12, scale: 2 }),
+    createdInXeroAt: timestamp("created_in_xero_at", { withTimezone: true, mode: "date" }),
+    attachedAt: timestamp("attached_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgUid, t.invoiceUid] }),
+    foreignKey({
+      name: "xero_invoice_syncs_invoice_fk",
+      columns: [t.orgUid, t.invoiceUid],
+      foreignColumns: [invoices.orgUid, invoices.uid],
+    }),
+    index("xero_invoice_syncs_due_idx").on(t.orgUid, t.nextAttemptAt).where(sql`${t.state} = 'pending'`),
+    check("xero_invoice_syncs_state_check", sql`${t.state} in ('pending','created','mismatch','failed','skipped')`),
+    check("xero_invoice_syncs_mode_check", sql`${t.mode} in ('draft','authorised')`),
+    check("xero_invoice_syncs_queued_by_check", sql`${t.queuedBy} in ('auto','owner')`),
+    check("xero_invoice_syncs_attempts_check", sql`${t.attempts} >= 0`),
+    check("xero_invoice_syncs_last_error_code_check", sql`${t.lastErrorCode} is null or ${t.lastErrorCode} ~ '^[A-Z0-9_]{1,64}$'`),
+    check("xero_invoice_syncs_created_check", sql`${t.state} not in ('created','mismatch') or ${t.xeroInvoiceId} is not null`),
+    tenantIsolation("xero_invoice_syncs"),
+  ],
+);
+
+export type XeroInvoiceSync = typeof xeroInvoiceSyncs.$inferSelect;

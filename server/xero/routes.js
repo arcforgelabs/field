@@ -10,6 +10,14 @@
 //   POST /api/integrations/xero/organisation     { tenantId }: the owner's choice
 //   POST /api/integrations/xero/disconnect
 //   PUT  /api/integrations/xero/settings         { createMode, salesAccountCode, taxType }
+//   POST /api/integrations/xero/push/preview     { invoiceUids } or { sinceDays }: what
+//        sending invoices issued before the connection would create. Writes nothing.
+//   POST /api/integrations/xero/push             { invoiceUids }: send them
+//   POST /api/integrations/xero/invoices/:uid/retry
+//
+//   GET  /api/jobs/:id/xero                      each invoice's Xero state, for the
+//        job's Invoices tab. Any signed-in person may read it; Retry and Send
+//        are the owner routes above.
 //
 // Every route but the callback needs a signed-in owner (requireOwner: with
 // Clerk, a verified owner sign-in; machine tokens never pass).
@@ -20,6 +28,10 @@ export const XERO_CONNECT_PATH = `${XERO_STATUS_PATH}/connect`;
 export const XERO_ORGANISATION_PATH = `${XERO_STATUS_PATH}/organisation`;
 export const XERO_DISCONNECT_PATH = `${XERO_STATUS_PATH}/disconnect`;
 export const XERO_SETTINGS_PATH = `${XERO_STATUS_PATH}/settings`;
+export const XERO_PUSH_PREVIEW_PATH = `${XERO_STATUS_PATH}/push/preview`;
+export const XERO_PUSH_PATH = `${XERO_STATUS_PATH}/push`;
+export const XERO_RETRY_PATH = `${XERO_STATUS_PATH}/invoices/:uid/retry`;
+export const XERO_JOB_STATUS_PATH = "/api/jobs/:id/xero";
 export { XERO_CALLBACK_PATH };
 
 const SCREEN = "/#/settings?section=integrations";
@@ -33,7 +45,7 @@ function codeOf(error, fallback) {
  * `connection()` returns the connection service (connection.js) or null when
  * the server has no database. `publicUrl()` the configured public address.
  */
-export function registerXeroRoutes(app, { requireAuth, requireOwner, connection, publicUrl = () => null, actorOf = () => null, logger = console }) {
+export function registerXeroRoutes(app, { requireAuth, requireOwner, connection, sync = () => null, publicUrl = () => null, actorOf = () => null, logger = console }) {
   const service = (res) => {
     const found = connection();
     if (!found) res.status(503).json({ error: "Xero needs the database, which this server does not have.", code: "XERO_NO_DATABASE" });
@@ -119,6 +131,63 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
       res.json({ ok: true, settings });
     } catch (error) {
       fail(res, error, "saving the settings");
+    }
+  });
+
+  const syncService = (res) => {
+    const found = sync();
+    if (!found) res.status(503).json({ error: "Xero needs the database, which this server does not have.", code: "XERO_NO_DATABASE" });
+    return found;
+  };
+  const uids = (value) => (Array.isArray(value) ? value.filter((uid) => typeof uid === "string" && /^inv_[0-9A-HJKMNP-TV-Z]{26}$/.test(uid)).slice(0, 200) : null);
+
+  app.post(XERO_PUSH_PREVIEW_PATH, requireAuth, requireOwner, async (req, res) => {
+    const xero = syncService(res);
+    if (!xero) return;
+    try {
+      const days = Number(req.body?.sinceDays);
+      const issuedSince = Number.isFinite(days) && days > 0 ? new Date(Date.now() - Math.min(days, 3660) * 86_400_000) : null;
+      const invoiceUids = uids(req.body?.invoiceUids);
+      if (!invoiceUids && !issuedSince) return res.status(400).json({ error: "Name the invoices (invoiceUids) or a period (sinceDays).", code: "XERO_PUSH_INVALID" });
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ ok: true, wroteNothing: true, ...(await xero.preview({ invoiceUids, issuedSince })) });
+    } catch (error) {
+      fail(res, error, "the preview");
+    }
+  });
+
+  app.post(XERO_PUSH_PATH, requireAuth, requireOwner, async (req, res) => {
+    const xero = syncService(res);
+    if (!xero) return;
+    try {
+      const invoiceUids = uids(req.body?.invoiceUids);
+      if (!invoiceUids?.length) return res.status(400).json({ error: "Choose at least one invoice.", code: "XERO_PUSH_INVALID" });
+      res.json({ ok: true, ...(await xero.push({ invoiceUids, actor: actorOf(req) })) });
+    } catch (error) {
+      fail(res, error, "sending invoices");
+    }
+  });
+
+  app.post(XERO_RETRY_PATH, requireAuth, requireOwner, async (req, res) => {
+    const xero = syncService(res);
+    if (!xero) return;
+    try {
+      const [invoiceUid] = uids([req.params.uid]) || [];
+      if (!invoiceUid) return res.status(400).json({ error: "That is not an invoice.", code: "XERO_PUSH_INVALID" });
+      res.json({ ok: true, ...(await xero.retry({ invoiceUid, actor: actorOf(req) })) });
+    } catch (error) {
+      fail(res, error, "retry");
+    }
+  });
+
+  app.get(XERO_JOB_STATUS_PATH, requireAuth, async (req, res) => {
+    const xero = sync();
+    res.setHeader("Cache-Control", "no-store");
+    if (!xero) return res.json({ ok: true, connected: false, connection: "disconnected", createMode: "off", invoices: {} });
+    try {
+      res.json({ ok: true, ...(await xero.jobStatus(req.params.id)) });
+    } catch (error) {
+      fail(res, error, "the job's Xero status");
     }
   });
 }
