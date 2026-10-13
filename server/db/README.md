@@ -364,8 +364,10 @@ is set: `startTestPostgres()` returns `{ url, stop }` or `null`.
 
 ## Apply Schema
 
+Into a dedicated, empty database only, never `$DATABASE_URL` (see Backfill CLI):
+
 ```bash
-psql "$DATABASE_URL" -f server/db/migrations/0001_initial.sql
+psql "$LEGACY_DATABASE_URL" -f server/db/migrations/0001_initial.sql
 ```
 
 ## Backfill CLI
@@ -375,20 +377,27 @@ From the repository root:
 ```bash
 node scripts/backfill-db.js --source-root /path/to/field/data
 node scripts/backfill-db.js --source-root /path/to/field/data --emit-sql /tmp/field-backfill.sql
-node scripts/backfill-db.js --source-root /path/to/field/data --include-schema --apply
+node scripts/backfill-db.js --source-root /path/to/field/data --include-schema --apply --database-url "$LEGACY_DATABASE_URL"
 node scripts/backfill-db.js --source-root /path/to/field/data --seed-backup-jobs --emit-sql -
 ```
 
 With no output option it prints a count of rows per table and writes nothing.
-`--emit-sql` writes the SQL; `--apply` pipes it to `psql` (needs `DATABASE_URL`
-or `FIELD_DATABASE_URL`). Every row is an upsert on a stable key, so a second
-import changes no row counts. `scripts/backfill-db.test.js` proves this on
-synthetic job folders and an in-memory PGlite.
+`--emit-sql` writes the SQL; `--apply` pipes it to `psql`. Every row is an
+upsert on a stable key, so a second import changes no row counts.
+`scripts/backfill-db.test.js` proves this on synthetic job folders and an
+in-memory PGlite.
 
 This lane writes the `0001_initial.sql` tables, not the Drizzle tables that
 `server/db-runtime/` migrates, and the server never reads them. Both schemas
 have a `quotes` table with different columns, so never apply it to Field's
-own database. Use a dedicated, empty database.
+own database. Use a dedicated, empty database. Two guards hold this:
+
+- `--apply` needs `--database-url`. It never reads `DATABASE_URL` or
+  `FIELD_DATABASE_URL`, because on Replit they are Field's own database.
+- The SQL starts with a check that raises an error, before anything is
+  written, when the target has `drizzle.__drizzle_migrations` (the table
+  `server/db-runtime/` records its migrations in). This also covers SQL from
+  `--emit-sql` that someone pipes to `psql` by hand.
 
 ## Backup Model
 

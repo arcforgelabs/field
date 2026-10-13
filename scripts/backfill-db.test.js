@@ -9,6 +9,7 @@ import test, { after } from "node:test";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
+import { createTestDb } from "../server/db-runtime/index.js";
 
 const SCRIPT = fileURLToPath(new URL("./backfill-db.js", import.meta.url));
 
@@ -51,10 +52,40 @@ function writeSyntheticData(root) {
   write(root, "jobs/job-b/meta.json", { id: "job-b", title: "Synthetic report", createdAt: "2026-02-01T00:00:00.000Z" });
 }
 
+function spawnScript(args, env = {}) {
+  return spawnSync(process.execPath, [SCRIPT, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+    timeout: 30_000,
+  });
+}
+
 function runScript(args) {
-  const result = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+  const result = spawnScript(args);
   assert.equal(result.status, 0, result.stderr);
   return result.stdout;
+}
+
+// A stand-in for psql that records its arguments and the SQL on its stdin.
+function fakePsql() {
+  const dir = tempDir();
+  const bin = join(dir, "psql");
+  nodeFs.writeFileSync(
+    bin,
+    `#!${process.execPath}
+const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(join(dir, "args.json"))}, JSON.stringify(process.argv.slice(2)));
+fs.writeFileSync(${JSON.stringify(join(dir, "stdin.sql"))}, fs.readFileSync(0));
+process.exit(Number(process.env.FAKE_PSQL_EXIT || 0));
+`,
+    { mode: 0o755 },
+  );
+  return {
+    bin,
+    called: () => nodeFs.existsSync(join(dir, "args.json")),
+    args: () => JSON.parse(nodeFs.readFileSync(join(dir, "args.json"), "utf8")),
+    stdin: () => nodeFs.readFileSync(join(dir, "stdin.sql"), "utf8"),
+  };
 }
 
 async function count(db, table) {
@@ -120,4 +151,80 @@ test("backfill-db SQL with --include-schema applies to an empty database, and ag
   } finally {
     await db.close();
   }
+});
+
+test("backfill-db --apply refuses to run without --database-url, even when DATABASE_URL is set", () => {
+  const root = tempDir();
+  writeSyntheticData(root);
+  const psql = fakePsql();
+
+  const result = spawnScript(["--source-root", root, "--apply", "--psql", psql.bin], {
+    DATABASE_URL: "postgres://field-own-database.invalid/field",
+    FIELD_DATABASE_URL: "postgres://field-own-database.invalid/field",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--apply needs --database-url/);
+  assert.equal(psql.called(), false);
+});
+
+test("backfill-db --apply pipes the SQL to psql for the --database-url target", () => {
+  const root = tempDir();
+  writeSyntheticData(root);
+  const psql = fakePsql();
+  const sqlPath = join(tempDir(), "backfill.sql");
+
+  const result = spawnScript(
+    ["--source-root", root, "--emit-sql", sqlPath, "--apply", "--database-url", "postgres://localhost/legacy", "--psql", psql.bin],
+    { DATABASE_URL: "postgres://field-own-database.invalid/field" },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /SQL applied via psql/);
+  assert.deepEqual(psql.args(), ["postgres://localhost/legacy", "-v", "ON_ERROR_STOP=1", "-f", "-"]);
+  assert.equal(psql.stdin(), nodeFs.readFileSync(sqlPath, "utf8"));
+});
+
+test("backfill-db SQL refuses a database with Field's Drizzle migrations and writes nothing", async () => {
+  const root = tempDir();
+  writeSyntheticData(root);
+  const sqlPath = join(tempDir(), "backfill.sql");
+  runScript(["--source-root", root, "--include-schema", "--seed-backup-jobs", "--emit-sql", sqlPath]);
+  const sql = nodeFs.readFileSync(sqlPath, "utf8");
+
+  const testDb = await createTestDb();
+  try {
+    const columns = async () => {
+      const { rows } = await testDb.client.query(
+        "select column_name from information_schema.columns where table_schema = 'public' and table_name = 'quotes' order by ordinal_position",
+      );
+      return rows.map((row) => row.column_name);
+    };
+    const quoteColumns = await columns();
+    const quoteCount = await count(testDb.client, "quotes");
+
+    await assert.rejects(testDb.client.exec(sql), /refusing to write: this database has drizzle.__drizzle_migrations/);
+
+    const { rows } = await testDb.client.query("select to_regclass('public.captures') is null as absent");
+    assert.equal(rows[0].absent, true);
+    assert.deepEqual(await columns(), quoteColumns);
+    assert.equal(await count(testDb.client, "quotes"), quoteCount);
+  } finally {
+    await testDb.close();
+  }
+});
+
+test("backfill-db --apply reports a psql failure without printing the database URL", () => {
+  const root = tempDir();
+  writeSyntheticData(root);
+  const psql = fakePsql();
+
+  const result = spawnScript(
+    ["--source-root", root, "--apply", "--database-url", "postgres://user:s3cret@localhost/legacy", "--psql", psql.bin],
+    { FAKE_PSQL_EXIT: "3" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /psql failed \(exit 3\)/);
+  assert.doesNotMatch(result.stderr + result.stdout, /s3cret/);
 });
