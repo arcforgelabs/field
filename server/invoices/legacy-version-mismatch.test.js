@@ -391,6 +391,9 @@ describe("legacy milestone invoices from two quote versions", () => {
     // was emailed; a later variation (v3) revised the deposit to -R2.
     const job = await createLegacyVersionMismatchJob(dataDir, { id: "job-settle-superseded", number: "2607-74", recordVersion: 2, pdfVersion: 1 });
     await actions.update(job.jobDir, 1, { dueDate: "2026-09-30" });
+    // Paid against the first revision, more than the PDF's 3960.00; the
+    // payment carries to the revision that replaces it.
+    await act(job.jobDir, recordJobMilestonePayment, { milestoneIndex: 0, payment: { amount: 5000, date: "2026-07-20", method: "bank_transfer" } });
     await applyVariation(job.jobDir, job.quotes[2], ["Extra drainage", 2000]);
     await actions.revise(job.jobDir, 0);
     const revised = await deposit(job.jobDir);

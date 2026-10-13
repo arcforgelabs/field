@@ -3637,7 +3637,10 @@ export async function settleJobMilestoneInvoiceAmounts({
   if (givenCents === null || givenCents !== toCents(option.total)) {
     throw createJobActionError(`${SETTLEMENT_LABELS[choose]} for ${number} totals ${option.total}, not ${total ?? "(none given)"}; reload and choose again`, 409);
   }
-  if (toCents(entry.paid) > toCents(option.total)) {
+  // Only the current revision bills anything: payments made against a
+  // superseded revision were carried to its replacement, so they do not limit
+  // which amounts the superseded one was issued for.
+  if (entry.current && toCents(entry.paid) > toCents(option.total)) {
     throw createJobActionError(`${entry.paid} is already paid against ${number}, more than ${option.total}; void or move that payment first`, 409);
   }
 
