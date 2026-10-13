@@ -54,11 +54,15 @@ step. Field does not use OpenClaw's `extended-stable` channel.
 | `field-release-checks.yml` (Field Release Checks) | From Field Release Publish, or by hand to rehearse | Requires the tag to be a calendar version on `main` that matches `package.json`. Runs every CI lane on its commit (`docs/CI.md`). Packs the npm tarball with a shrinkwrap of the tested dependencies, then installs it in an empty directory and starts it. Publishes nothing. |
 | `field-release-publish.yml` (Field Release Publish) | From Field Release Prepare, or by hand for an existing tag | `image` job (environment `release`): pushes the image by digest, attests it and its SBOM, verifies the attestation, runs the Playwright smoke against the pushed digest, then adds the channel's tags. Then it creates the GitHub Release with the manifest, and starts Field NPM Release for the tarball it proved. |
 | `field-npm-release.yml` (Field NPM Release) | From Field Release Publish | Requires the tarball from that run to match the GitHub Release's manifest. `approve` (environment `npm-release`), then `publish` (environment `npm-publish`): npm trusted publishing with provenance, to the channel's dist-tag. Then it verifies what npm serves and attaches the post-publish evidence. |
-| `field-release-promote.yml` (Field Release Promote) | By hand, from `main` | Points `latest` at a published stable release: verifies it (the manifest's checksum, the npm integrity, signatures and provenance, and the image attestation), then in environment `npm-release` moves npm `latest`, GHCR `stable` and `latest`, and GitHub's latest release. Use it to roll back. It also moves `beta` up when the beta channel is behind. |
+| `field-release-promote.yml` (Field Release Promote) | By hand, from `main` | Points a channel at a published release, to roll it back or put it back. It verifies the release (the manifest's checksum, the npm integrity, signatures and provenance, and the image attestation), then in environment `npm-release` moves the channel. A stable tag moves npm `latest`, GHCR `stable` and `latest`, and GitHub's latest release, and moves `beta` up when the beta channel is behind. A beta tag moves npm and GHCR `beta`. |
 
 Each protected environment needs Samuel's approval and accepts only runs from
 `main`. Release tags (`v20*`) cannot be moved or deleted
 (`.github/rulesets/release-tags.json`).
+
+npm can take minutes to serve a new version. Field NPM Release reads it back
+with backoff for about 15 minutes, and a rerun skips a version npm already
+serves with the manifest's integrity, so rerunning its failed jobs is safe.
 
 Running Field Release Publish again for the same tag is safe. It checks again,
 updates the GitHub Release's assets, and starts Field NPM Release, which skips
@@ -92,8 +96,9 @@ forward with a new tag.
    Approve it as in step 3. It is then npm `latest`, GHCR `stable` and
    `latest`, and GitHub's latest release.
 
-To roll back, point `latest` at the previous stable release, and approve
-`npm-release`. Nothing is unpublished:
+To roll back, point the channel at the previous release (a stable tag for
+`latest`, a beta tag for `beta`), and approve `npm-release`. Nothing is
+unpublished:
 
 ```bash
 gh workflow run field-release-promote.yml --repo arcforgelabs/field --ref main -f tag=v2026.10.15
