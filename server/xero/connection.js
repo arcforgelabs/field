@@ -201,7 +201,7 @@ export function createXeroConnectionService({
     /** Start connecting: record the sign-in in progress and return Xero's sign-in address. */
     async startConnect({ redirectUri, actor = null }) {
       requireSecrets();
-      if (!redirectUri) throw new XeroConnectionError("This installation's address is unknown. Set publicUrl in the configuration (docs/XERO.md).", { code: "XERO_REDIRECT_UNKNOWN", statusCode: 409 });
+      if (!redirectUri) throw new XeroConnectionError("Set publicUrl, this installation's public address, in the configuration first. Field builds the redirect address from it (docs/XERO.md).", { code: "XERO_PUBLIC_URL_MISSING", statusCode: 409 });
       const { state } = newAuthorizationRequest();
       await scope.transaction((tx) => upsert(tx, {
         pendingStateHash: hashState(state),
@@ -213,17 +213,20 @@ export function createXeroConnectionService({
 
     /**
      * Xero sent the owner back with `code` and `state`. The state must be the
-     * one in progress and unexpired; it is spent either way. Returns the new
-     * connection status.
+     * one in progress and unexpired. The callback needs no sign-in, so a
+     * wrong state changes nothing: only the owner's own state is spent (used
+     * or expired), and a guessed request cannot break a sign-in in progress.
+     * Returns the new connection status.
      */
     async completeConnect({ code, state, redirectUri }) {
       requireSecrets();
       if (!state || !code) throw new XeroConnectionError("Xero did not return a sign-in code.", { code: "XERO_CALLBACK_INCOMPLETE" });
       const pending = await scope.transaction(async (tx) => {
         const row = await read(tx);
-        const matches = row?.pendingStateHash && row.pendingStateHash === hashState(state) && row.pendingExpiresAt && new Date(row.pendingExpiresAt) > now();
-        if (row?.pendingStateHash) await upsert(tx, { pendingStateHash: null, pendingBy: null, pendingExpiresAt: null });
-        return matches ? row : null;
+        const ours = Boolean(row?.pendingStateHash) && row.pendingStateHash === hashState(state);
+        if (!ours) return null;
+        await upsert(tx, { pendingStateHash: null, pendingBy: null, pendingExpiresAt: null });
+        return row.pendingExpiresAt && new Date(row.pendingExpiresAt) > now() ? row : null;
       });
       if (!pending) throw new XeroConnectionError("This Xero sign-in was not started here, was used already or took too long. Press Connect again.", { code: "XERO_STATE_INVALID", statusCode: 400 });
       const tokens = await client().exchangeCode({ code, redirectUri });

@@ -27,9 +27,10 @@ Field.
    https://<your-field-host>/api/integrations/xero/callback
    ```
 
-   Field builds it from the `publicUrl` in its configuration. If `publicUrl`
-   is not set, the screen shows the address you opened Field at, and a
-   warning. Set `publicUrl`, so the address never changes.
+   Field builds it from the `publicUrl` in its configuration (on Replit, in
+   `FIELD_CONFIG_JSON`). Field never builds it from the address a request
+   came to, because a client controls that. Until `publicUrl` is set, the
+   screen asks for it and Connect stays off.
 5. In the app's configuration, copy the client id and generate a client
    secret. Xero shows the secret once.
 6. Add both as deployment secrets, then restart Field. On Replit, add them in
@@ -99,7 +100,8 @@ owner sends them.
   the new one in the same transaction, under a row lock: two servers never
   spend the same refresh token.
 - The sign-in in progress is kept only as a hash of its random state, for 10
-  minutes. The callback acts only on that state, once.
+  minutes. The callback acts only on that state, once. A callback with any
+  other state is refused and leaves the sign-in in progress as it was.
 - Logs and Sentry get codes, never a token, a code or a secret.
   `shared/sentry-scrub.js` also removes bearer tokens, JSON web tokens and
   OAuth values from any free text.
@@ -121,7 +123,7 @@ The callback returns to Settings, Integrations, Xero with a code:
 
 | Code | Why |
 | --- | --- |
-| `XERO_STATE_INVALID` | The sign-in was not started here, was used already, or took longer than 10 minutes. Press Connect again |
+| `XERO_STATE_INVALID` | The sign-in was not started here, was used already, or took longer than 10 minutes. Press Connect again. A wrong state changes nothing, so a guessed request cannot cancel a sign-in in progress |
 | `XERO_ACCESS_DENIED` | You cancelled at Xero. Nothing changed |
 | `XERO_AUTHORISE_REFUSED` | Xero refused the request. Check the redirect address in your Xero app |
 | `XERO_NO_ORGANISATION` | No organisation was connected. Choose one at Xero |

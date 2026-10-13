@@ -85,15 +85,12 @@ export function readXeroSecrets(env = process.env) {
 
 /**
  * This installation's redirect address: the configured public address plus
- * the callback path. Without `publicUrl` it falls back to the address the
- * request came to, and says so (`fromRequest`), so the screen can ask the
- * owner to set it.
+ * the callback path. Without `publicUrl` there is none: Field never builds it
+ * from the request's Host or X-Forwarded-Host, which a client controls, and
+ * Connect is refused until publicUrl is set.
  */
-export function xeroRedirectUri({ publicUrl = null, req = null } = {}) {
+export function xeroRedirectUri({ publicUrl = null } = {}) {
   const configured = text(publicUrl);
-  if (configured) return { redirectUri: `${configured.replace(/\/+$/, "")}${XERO_CALLBACK_PATH}`, fromRequest: false };
-  if (!req) return { redirectUri: null, fromRequest: true };
-  const proto = String(req.headers?.["x-forwarded-proto"] || req.protocol || "http").split(",")[0].trim();
-  const host = String(req.headers?.["x-forwarded-host"] || req.get?.("host") || "").split(",")[0].trim();
-  return { redirectUri: host ? `${proto}://${host}${XERO_CALLBACK_PATH}` : null, fromRequest: true };
+  if (!configured) return { redirectUri: null, configured: false };
+  return { redirectUri: `${configured.replace(/\/+$/, "")}${XERO_CALLBACK_PATH}`, configured: true };
 }

@@ -39,7 +39,7 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
     if (!found) res.status(503).json({ error: "Xero needs the database, which this server does not have.", code: "XERO_NO_DATABASE" });
     return found;
   };
-  const redirect = (req) => xeroRedirectUri({ publicUrl: publicUrl(), req });
+  const redirect = () => xeroRedirectUri({ publicUrl: publicUrl() });
   const fail = (res, error, label) => {
     const statusCode = error?.statusCode || (error?.name === "XeroError" ? 502 : 500);
     if (statusCode >= 500) logger.warn?.(`[xero] ${label} failed (${codeOf(error, "XERO_ERROR")})`);
@@ -50,9 +50,9 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
     const xero = service(res);
     if (!xero) return;
     try {
-      const { redirectUri, fromRequest } = redirect(req);
+      const { redirectUri, configured } = redirect();
       res.setHeader("Cache-Control", "no-store");
-      res.json({ ok: true, redirectUri, publicUrlConfigured: !fromRequest, ...(await xero.status()) });
+      res.json({ ok: true, redirectUri, publicUrlConfigured: configured, ...(await xero.status()) });
     } catch (error) {
       fail(res, error, "status");
     }
@@ -62,7 +62,7 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
     const xero = service(res);
     if (!xero) return;
     try {
-      res.json({ ok: true, ...(await xero.startConnect({ redirectUri: redirect(req).redirectUri, actor: actorOf(req) })) });
+      res.json({ ok: true, ...(await xero.startConnect({ redirectUri: redirect().redirectUri, actor: actorOf(req) })) });
     } catch (error) {
       fail(res, error, "connect");
     }
@@ -81,7 +81,7 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, connection,
       const result = await xero.completeConnect({
         code: typeof req.query.code === "string" ? req.query.code : "",
         state: typeof req.query.state === "string" ? req.query.state : "",
-        redirectUri: redirect(req).redirectUri,
+        redirectUri: redirect().redirectUri,
       });
       res.redirect(`${SCREEN}&xero=${result.status === "connected" ? "connected" : "choose"}`);
     } catch (error) {

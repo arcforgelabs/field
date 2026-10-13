@@ -60,6 +60,9 @@ test("Xero settings routes: owners only, the callback needs the owner's state, a
   assert.equal(connect.status, 200, JSON.stringify(connect.body));
   assert.ok(connect.body.url.startsWith(`${xero.base}/identity/connect/authorize?`));
   const back = await xero.authorize(connect.body.url);
+  // A guessed callback while the owner is at Xero changes nothing.
+  const guessed = await fetch(`${base}/api/integrations/xero/callback?code=fake-code&state=guessed`, { redirect: "manual" });
+  assert.equal(guessed.headers.get("location"), "/#/settings?section=integrations&xero=error&code=XERO_STATE_INVALID");
   assert.equal(`${back.origin}${back.pathname}`, `${PUBLIC_URL}/api/integrations/xero/callback`);
   const callback = await fetch(`${base}${back.pathname}${back.search}`, { redirect: "manual" });
   assert.equal(callback.status, 302);

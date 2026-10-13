@@ -9,7 +9,7 @@ import { sql } from "drizzle-orm";
 import { createTestDb, queryRows } from "../db-runtime/index.js";
 import { DEFAULT_ORG_UID, withOrg } from "../db-runtime/tenancy.js";
 import { createXeroHttp } from "./client.js";
-import { readXeroSecrets, xeroEndpoints } from "./config.js";
+import { readXeroSecrets, xeroEndpoints, xeroRedirectUri } from "./config.js";
 import { createXeroConnectionService } from "./connection.js";
 import { startFakeXero } from "./fake-xero.js";
 
@@ -105,6 +105,25 @@ test("the callback refuses a state it did not start, an expired one and a reused
   await service.completeConnect({ code: second.searchParams.get("code"), state: second.searchParams.get("state"), redirectUri: REDIRECT });
   await assert.rejects(service.completeConnect({ code: second.searchParams.get("code"), state: second.searchParams.get("state"), redirectUri: REDIRECT }), (error) => error.code === "XERO_STATE_INVALID");
   assert.equal((await service.status()).connection.status, "connected");
+});
+
+test("a guessed state is refused and leaves the owner's sign-in in progress as it was", async () => {
+  const { service, rawRow } = await fresh();
+  const { url } = await service.startConnect({ redirectUri: REDIRECT, actor: "Owner" });
+  const pending = (await rawRow()).pending_state_hash;
+  for (const guess of ["guessed", "", "AAAA"]) {
+    await assert.rejects(service.completeConnect({ code: "fake-code", state: guess, redirectUri: REDIRECT }), (error) => ["XERO_STATE_INVALID", "XERO_CALLBACK_INCOMPLETE"].includes(error.code));
+  }
+  assert.equal((await rawRow()).pending_state_hash, pending, "still the owner's");
+  const back = await xero.authorize(url);
+  assert.deepEqual(await service.completeConnect({ code: back.searchParams.get("code"), state: back.searchParams.get("state"), redirectUri: REDIRECT }), { status: "connected" });
+});
+
+test("Connect is refused without publicUrl: no redirect address is built from the request", async () => {
+  const { service } = await fresh();
+  await assert.rejects(service.startConnect({ redirectUri: null }), (error) => error.code === "XERO_PUBLIC_URL_MISSING" && error.statusCode === 409);
+  assert.deepEqual(xeroRedirectUri({ publicUrl: null }), { redirectUri: null, configured: false });
+  assert.deepEqual(xeroRedirectUri({ publicUrl: "https://field.example.invalid/", req: { headers: { "x-forwarded-host": "attacker.example.invalid" } } }), { redirectUri: REDIRECT, configured: true });
 });
 
 test("several organisations: the owner chooses one", async () => {

@@ -112,12 +112,18 @@ export function XeroPanel() {
 
   const { connection, secrets, settings } = data;
   const secretsReady = secrets.clientIdSet && secrets.clientSecretSet;
+  const canConnect = secretsReady && data.publicUrlConfigured;
   const status = STATUS_LABEL[connection.status];
   const dirty = mode !== settings.createMode || account.trim() !== settings.salesAccountCode || taxType.trim().toUpperCase() !== settings.taxType;
   const connected = connection.status === "connected";
 
   return (
     <Section>
+      {!data.publicUrlConfigured && (
+        <div className="fx-notice fx-notice--warn" role="note" style={{ margin: 0 }}>
+          <span>Set <code>publicUrl</code>, this installation's public address, in Field's configuration (on Replit, in <code>FIELD_CONFIG_JSON</code>), then restart Field. Field builds the redirect address from it, and Connect stays off until it is set.</span>
+        </div>
+      )}
       {notice && <div className={`fx-notice ${notice.tone === "bad" ? "fx-notice--bad" : ""}`} role="status" style={{ margin: 0 }}><span>{notice.text}</span></div>}
 
       <div className="xero__card" aria-label="Connection">
@@ -130,12 +136,12 @@ export function XeroPanel() {
             <p className="fx-dim xero__meta">
               {connected && connection.connectedAt ? `Connected ${shortDate(connection.connectedAt)}${connection.connectedBy ? ` by ${connection.connectedBy}` : ""}. Field refreshes the sign-in by itself.` : null}
               {connection.status === "needs_reconnect" ? connection.reconnectMessage : null}
-              {connection.status === "disconnected" ? (secretsReady ? "Connect to choose the Xero organisation Field writes to." : "Set up your Xero app first (below).") : null}
+              {connection.status === "disconnected" ? (canConnect ? "Connect to choose the Xero organisation Field writes to." : "Set up your Xero app first (below).") : null}
             </p>
           </div>
           <div className="xero__actions">
             {(connection.status === "disconnected" || connection.status === "needs_reconnect") && (
-              <button type="button" className="fx-btn fx-btn--primary" disabled={!secretsReady || busy !== null} onClick={connect}><Link2 aria-hidden />{busy === "connect" ? "Opening Xero…" : connection.status === "needs_reconnect" ? "Connect again" : "Connect to Xero"}</button>
+              <button type="button" className="fx-btn fx-btn--primary" disabled={!canConnect || busy !== null} onClick={connect}><Link2 aria-hidden />{busy === "connect" ? "Opening Xero…" : connection.status === "needs_reconnect" ? "Connect again" : "Connect to Xero"}</button>
             )}
             {connection.status !== "disconnected" && (
               <button type="button" className="fx-btn" disabled={busy !== null} onClick={() => setConfirmDisconnect(true)}><Unlink aria-hidden />Disconnect</button>
@@ -249,10 +255,10 @@ function SetupSteps({ data, open, onCopy }: { data: XeroIntegration; open: boole
                 <li>
                   Paste this installation's redirect address:
                   <div className="xero__copy">
-                    <code>{redirectUri || "unknown: set publicUrl"}</code>
+                    <code>{redirectUri || "https://<your-field-host>/api/integrations/xero/callback"}</code>
                     {redirectUri && <button type="button" className="fx-btn fx-btn--sm" onClick={() => onCopy(redirectUri)}><Copy aria-hidden />Copy</button>}
                   </div>
-                  {!data.publicUrlConfigured && <span className="xero__warn">Field's public address (publicUrl) is not configured, so this is the address you opened Field at. Set publicUrl so it never changes.</span>}
+                  {!data.publicUrlConfigured && <span className="xero__warn">publicUrl is not set, so Field cannot show this installation's address yet.</span>}
                 </li>
                 <li>In the app's configuration, copy the client id and generate a client secret. Xero shows the secret once.</li>
                 <li>

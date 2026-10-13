@@ -48,10 +48,13 @@ describe("XeroPanel", () => {
     expect(screen.getByText(/Email from Xero is coming later/)).toBeTruthy();
   });
 
-  it("warns when the public address is not configured", async () => {
-    vi.spyOn(api, "xeroIntegration").mockResolvedValue(integration({ publicUrlConfigured: false }));
+  it("without publicUrl: says to set it, shows no address, and Connect stays off", async () => {
+    vi.spyOn(api, "xeroIntegration").mockResolvedValue(integration({ publicUrlConfigured: false, redirectUri: null }));
     show();
-    await waitFor(() => expect(screen.getByText(/publicUrl\) is not configured/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("note").textContent).toMatch(/Connect stays off until it is set/));
+    expect(screen.queryByText(REDIRECT)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Copy/ })).toBeNull();
+    expect((screen.getByRole("button", { name: /Connect to Xero/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("Connect sends the owner to Xero's sign-in address", async () => {
