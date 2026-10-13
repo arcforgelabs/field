@@ -13,7 +13,8 @@ the runtime image by the Docker build). `src/schema.ts` holds the
 test-scoped `drizzle_toolchain_probe` table (it proves the toolchain) and
 every table the server uses: durable storage, users and tenancy, the price
 catalogue (`server/catalog/README.md`, migration `0003_price_catalogue`),
-data migrations, issued documents, quote rows and invoice rows.
+data migrations, issued documents, quote rows, invoice rows, business
+settings and milestone rules.
 
 The generated migration set is `drizzle/`. It is intentionally separate from
 the older hand-written `migrations/0001_initial.sql` backfill lane below;
@@ -354,6 +355,14 @@ organisation (none means every default). Its first setting says whether an
 invoice returned to draft and issued again with different content is
 credited first: `when-emailed` (the default), `always` or `never`. Run
 `rollback/0016_business_settings.down.sql` before 0015's.
+
+`0017_milestone_rules` (#29) adds the organisation's milestone rules as
+rows: `milestone_rules` (one band of contract value in one region: every
+region, a country, or a state), `milestone_rule_milestones` (its default
+milestones) and `milestone_rule_caps` (at most one cap per milestone kind,
+`hard` or `soft`), and `business_settings.country` and `.region`. Rules are
+settings, not issued documents: an owner replaces them, so `field_app` may
+delete them. Run `rollback/0017_milestone_rules.down.sql` before 0016's.
 
 ### Adding tables
 

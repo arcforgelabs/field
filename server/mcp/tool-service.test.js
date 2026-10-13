@@ -302,3 +302,19 @@ test("an edit landing between the MCP re-read and its write is refused, not over
   await apply("field_catalog_structure_update", { action: "category_create", name: "Mulch" });
   assert.deepEqual((await store.listCategories()).map((row) => row.name).sort(), ["Mulch", "Plant"]);
 });
+
+test("milestone rules are readable and a job can be checked before issue; rules are not written through MCP", async () => {
+  const rules = [{ uid: "mrl_01JAAAAAAAAAAAAAAAAAAAAAAA", name: "SA domestic, under $20,000", caps: [{ kind: "deposit", mode: "hard", maxAmount: 1000, maxPercent: null }] }];
+  const service = createFieldMcpService({
+    listMilestoneRules: async () => ({ ok: true, rules, version: "1:x", businessRegion: { country: "AU", region: "SA", from: "settings" }, options: {} }),
+    checkJobMilestones: async (id) => ({ hasRules: true, rule: rules[0], milestones: [{ milestoneIndex: 0, blocked: id === "job-1" }] }),
+  });
+  assert.deepEqual(await service.call("field_milestone_rules_list", {}, { subject: "agent" }), { rules, version: "1:x", businessRegion: { country: "AU", region: "SA", from: "settings" } });
+  const checked = await service.call("field_milestone_check", { jobId: "job-1" }, { subject: "agent" });
+  assert.equal(checked.jobId, "job-1");
+  assert.equal(checked.milestones[0].blocked, true);
+  assert.throws(() => validateToolArguments("field_milestone_check", {}), /arguments.jobId is required/);
+  assert.throws(() => validateToolArguments("field_milestone_rules_update", {}), /Unknown tool/);
+  const unavailable = createFieldMcpService({});
+  await assert.rejects(unavailable.call("field_milestone_rules_list", {}, { subject: "agent" }), /need the database/);
+});

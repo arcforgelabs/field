@@ -1768,17 +1768,147 @@ export const businessSettings = pgTable(
   {
     orgUid: orgUid().primaryKey(),
     creditNoteOnReissue: text("credit_note_on_reissue").$type<CreditNoteOnReissue>().notNull().default("when-emailed"),
+    /**
+     * Where the business is (step 4c, #29): an ISO 3166-1 country code ("AU")
+     * and a state or province code ("SA"). Null means: read it from the
+     * business address. Milestone rules for a region apply to a job whose
+     * site address is not readable as one.
+     */
+    country: text("country"),
+    region: text("region"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     updatedBy: text("updated_by"),
   },
   (t) => [
     check("business_settings_credit_note_on_reissue_check", sql`${t.creditNoteOnReissue} in ('when-emailed','always','never')`),
+    check("business_settings_country_check", sql`${t.country} is null or ${t.country} ~ '^[A-Z]{2}$'`),
+    check("business_settings_region_check", sql`${t.region} is null or (${t.country} is not null and ${t.region} ~ '^[A-Z0-9]{1,3}$')`),
     tenantIsolation("business_settings"),
   ],
 );
 
+/** How a milestone rule measures a contract: the quote total with GST, or without. */
+export const MILESTONE_RULE_VALUE_BASES = ["inc-gst", "ex-gst"] as const;
+export type MilestoneRuleValueBasis = (typeof MILESTONE_RULE_VALUE_BASES)[number];
+/** A hard cap refuses the issue; a soft cap alerts and is recorded with the invoice. */
+export const MILESTONE_CAP_MODES = ["hard", "soft"] as const;
+export type MilestoneCapMode = (typeof MILESTONE_CAP_MODES)[number];
+export const MILESTONE_CAP_KINDS = ["deposit", "progress", "final", "variation"] as const;
+export type MilestoneCapKind = (typeof MILESTONE_CAP_KINDS)[number];
+
+/**
+ * The organisation's milestone rules (step 4c, #29): one row per band of
+ * contract value in one region. A job takes its default milestones from the
+ * band its contract value falls in, for the most specific region that has
+ * one (its state, else its country, else every region). The caps of that
+ * band apply to every invoice the job issues, whatever its schedule.
+ * Nothing about a jurisdiction is in code: the operator enters these.
+ */
+export const milestoneRules = pgTable(
+  "milestone_rules",
+  {
+    /** `mrl_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    name: text("name").notNull(),
+    /** ISO 3166-1 alpha-2 ("AU"); null for every region. */
+    country: text("country"),
+    /** A state or province code within the country ("SA"); null for the whole country. */
+    region: text("region"),
+    /** The band starts at this contract value (inclusive). */
+    minValue: numeric("min_value", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** The band ends below this contract value; null for no upper end. */
+    maxValue: numeric("max_value", { precision: 12, scale: 2 }),
+    valueBasis: text("value_basis").$type<MilestoneRuleValueBasis>().notNull().default("inc-gst"),
+    /** Why the rule exists, for example the regulation it follows. Shown in Settings and in cap messages. */
+    note: text("note"),
+    sortOrder: integer("sort_order").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => [
+    uniqueIndex("milestone_rules_org_uid_key").on(t.orgUid, t.uid),
+    check("milestone_rules_uid_check", sql`${t.uid} ~ '^mrl_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("milestone_rules_name_check", sql`length(btrim(${t.name})) > 0`),
+    check("milestone_rules_country_check", sql`${t.country} is null or ${t.country} ~ '^[A-Z]{2}$'`),
+    check("milestone_rules_region_check", sql`${t.region} is null or (${t.country} is not null and ${t.region} ~ '^[A-Z0-9]{1,3}$')`),
+    check("milestone_rules_band_check", sql`${t.minValue} >= 0 and (${t.maxValue} is null or ${t.maxValue} > ${t.minValue})`),
+    check("milestone_rules_value_basis_check", sql`${t.valueBasis} in ('inc-gst','ex-gst')`),
+    check("milestone_rules_sort_order_check", sql`${t.sortOrder} >= 0`),
+    tenantIsolation("milestone_rules"),
+  ],
+);
+
+/** A rule's default milestones, in order. None means Field's default schedule. */
+export const milestoneRuleMilestones = pgTable(
+  "milestone_rule_milestones",
+  {
+    /** `mrm_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    ruleUid: text("rule_uid").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    label: text("label").notNull(),
+    /** Percent of the contract (50 means 50 %). */
+    percent: numeric("percent", { precision: 7, scale: 3 }),
+    /** A fixed amount inc GST. */
+    amount: numeric("amount", { precision: 12, scale: 2 }),
+    dueDays: integer("due_days"),
+  },
+  (t) => [
+    uniqueIndex("milestone_rule_milestones_rule_sort_key").on(t.orgUid, t.ruleUid, t.sortOrder),
+    foreignKey({
+      name: "milestone_rule_milestones_rule_fk",
+      columns: [t.orgUid, t.ruleUid],
+      foreignColumns: [milestoneRules.orgUid, milestoneRules.uid],
+    }).onDelete("cascade"),
+    check("milestone_rule_milestones_uid_check", sql`${t.uid} ~ '^mrm_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("milestone_rule_milestones_label_check", sql`length(btrim(${t.label})) > 0`),
+    check("milestone_rule_milestones_share_check", sql`(${t.percent} is not null and ${t.percent} > 0 and ${t.percent} <= 100) or (${t.amount} is not null and ${t.amount} > 0)`),
+    check("milestone_rule_milestones_sort_order_check", sql`${t.sortOrder} >= 0`),
+    check("milestone_rule_milestones_due_days_check", sql`${t.dueDays} is null or ${t.dueDays} > 0`),
+    tenantIsolation("milestone_rule_milestones"),
+  ],
+);
+
+/**
+ * A rule's caps: at most one per milestone kind. The limit is the lower of
+ * `max_percent` of the contract value and `max_amount`, measured on the
+ * rule's value basis.
+ */
+export const milestoneRuleCaps = pgTable(
+  "milestone_rule_caps",
+  {
+    /** `mrc_` + ULID. */
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    ruleUid: text("rule_uid").notNull(),
+    kind: text("kind").$type<MilestoneCapKind>().notNull(),
+    maxPercent: numeric("max_percent", { precision: 7, scale: 3 }),
+    maxAmount: numeric("max_amount", { precision: 12, scale: 2 }),
+    mode: text("mode").$type<MilestoneCapMode>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("milestone_rule_caps_rule_kind_key").on(t.orgUid, t.ruleUid, t.kind),
+    foreignKey({
+      name: "milestone_rule_caps_rule_fk",
+      columns: [t.orgUid, t.ruleUid],
+      foreignColumns: [milestoneRules.orgUid, milestoneRules.uid],
+    }).onDelete("cascade"),
+    check("milestone_rule_caps_uid_check", sql`${t.uid} ~ '^mrc_[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check("milestone_rule_caps_kind_check", sql`${t.kind} in ('deposit','progress','final','variation')`),
+    check("milestone_rule_caps_mode_check", sql`${t.mode} in ('hard','soft')`),
+    check("milestone_rule_caps_limit_check", sql`(${t.maxPercent} is not null and ${t.maxPercent} > 0 and ${t.maxPercent} <= 100) or (${t.maxAmount} is not null and ${t.maxAmount} > 0)`),
+    tenantIsolation("milestone_rule_caps"),
+  ],
+);
+
 export type BusinessSettings = typeof businessSettings.$inferSelect;
+export type MilestoneRule = typeof milestoneRules.$inferSelect;
+export type MilestoneRuleMilestone = typeof milestoneRuleMilestones.$inferSelect;
+export type MilestoneRuleCap = typeof milestoneRuleCaps.$inferSelect;
 export type PaymentMilestone = typeof paymentMilestones.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceLine = typeof invoiceLines.$inferSelect;

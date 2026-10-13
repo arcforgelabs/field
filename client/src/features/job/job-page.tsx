@@ -13,6 +13,7 @@ import { Menu, type MenuItem } from "@/components/shell/menu";
 import { JOB_STATUS_LABEL, jobInvoices, jobPaid, jobRef, jobStatus, jobTitle, nextOpenInvoice } from "@/lib/job-status";
 import { QuoteEditor, type QuoteTotals, type SaveState } from "./quote-editor";
 import { JobInvoices, RecordPaymentDialog } from "./job-invoices";
+import { useJobMilestoneRules } from "@/features/job-detail/use-job-milestone-rules";
 import { JobActivity, JobNotes } from "./job-activity";
 import { JobEmails } from "@/features/job-detail/email-record";
 import { openDocumentPdf } from "@/lib/open-document";
@@ -78,6 +79,10 @@ export function JobPage() {
   const viewingLatest = detail?.versionView?.isLatest !== false;
   const draftAheadOfSent = Boolean(policy?.lastSentQuoteVersion && latestVersion && latestVersion > policy.lastSentQuoteVersion && viewingLatest && editable);
   const nextInvoice = meta ? nextOpenInvoice(meta) : null;
+  // A hard milestone cap (#29) blocks the next invoice: the header says so
+  // rather than offering to send it.
+  const milestoneRules = useJobMilestoneRules(meta?.id || "", JSON.stringify([meta?.paymentSchedule?.source?.at ?? null, (meta ? jobInvoices(meta) : []).map((invoice) => [invoice.status, invoice.total])]));
+  const nextBlocked = Boolean(nextInvoice && milestoneRules?.milestones.find((entry) => entry.milestoneIndex === nextInvoice.milestoneIndex)?.blocked);
   const priced = totals ? totals.subtotal > 0 : (meta?.quoteTotal || 0) > 0;
   const sendBlocked = detail?.quote?.pricing?.sendable === false ? detail.quote.pricing.blockingReason || "This quote can't be sent yet." : null;
   const sendable = priced && !sendBlocked;
@@ -172,7 +177,7 @@ export function JobPage() {
     primary = <button type="button" className="fx-btn fx-btn--primary" onClick={() => setConfirm("accept")} disabled={busy !== null}><Check aria-hidden />Mark accepted</button>;
   } else if (status === "invoicing" && nextInvoice) {
     primary = nextInvoice.status === "draft"
-      ? <button type="button" className="fx-btn fx-btn--primary" onClick={() => sendDocument("invoice", nextInvoice.milestoneIndex)}><Send aria-hidden />Send {nextInvoice.milestoneLabel.toLowerCase()} invoice</button>
+      ? <button type="button" className="fx-btn fx-btn--primary" disabled={nextBlocked} title={nextBlocked ? "A hard cap in the account's milestone rules blocks this invoice: see Invoices" : undefined} onClick={() => sendDocument("invoice", nextInvoice.milestoneIndex)}><Send aria-hidden />Send {nextInvoice.milestoneLabel.toLowerCase()} invoice</button>
       : <button type="button" className="fx-btn fx-btn--primary" onClick={() => setPaying(nextInvoice.milestoneIndex)}><Wallet aria-hidden />Record payment</button>;
   } else if (status === "invoicing" && invoices.length === 0) {
     primary = <button type="button" className="fx-btn fx-btn--primary" onClick={() => setTab("invoices")}>Set up invoices</button>;

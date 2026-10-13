@@ -197,6 +197,23 @@ export const TOOL_DEFINITIONS = [
     }, ["jobId", "patch"]),
   },
   {
+    name: "field_milestone_rules_list",
+    description: "Read the organisation's milestone rules (#29): default milestones and caps by region (every region, a country, or a state) and contract value band, and the business's region. A hard cap refuses an invoice issue; a soft cap alerts and is recorded with the invoice. Only an owner changes rules, in Settings or with the owner's CLI key; a job's own schedule (field_quote_draft_update patch.paymentSchedule) is an override and never lifts a cap.",
+    inputSchema: objectSchema({}),
+    outputSchema: objectSchema({
+      rules: { type: "array", items: { type: "object" } },
+      version: { type: "string" },
+      businessRegion: { type: "object" },
+    }, ["rules", "version"]),
+  },
+  {
+    name: "field_milestone_check",
+    description: "Check one job against the milestone rules before issuing: the region Field reads for it, the rule that applies and its contract value, whether the schedule is the account rule's or an override, and for each milestone its kind and the caps it is over (blocked: true means a hard cap refuses its issue).",
+    inputSchema: objectSchema({
+      jobId: { type: "string", minLength: 1 },
+    }, ["jobId"]),
+  },
+  {
     name: "field_quote_recalculate",
     description: "Dry-run or apply guarded quote pricing recalculation.",
     inputSchema: objectSchema({
@@ -223,6 +240,8 @@ export const TOOL_SCOPES = Object.freeze({
   field_quote_draft_create: ["quote.read", "quote.draft"],
   field_quote_draft_update: ["quote.read", "quote.draft"],
   field_quote_recalculate: ["quote.read", "quote.draft"],
+  field_milestone_rules_list: ["quote.read"],
+  field_milestone_check: ["quote.read"],
 });
 
 const definitionsByName = new Map(TOOL_DEFINITIONS.map((tool) => [tool.name, tool]));
@@ -388,6 +407,8 @@ export function createFieldMcpService({
   updateChild,
   removeChild,
   getCatalogVersion = null,
+  listMilestoneRules = null,
+  checkJobMilestones = null,
 }) {
   // Re-read, compare, write. The store re-checks inside its write transaction
   // (the item's version, or the catalogue version for structure changes), so a
@@ -562,6 +583,15 @@ export function createFieldMcpService({
             return catalogStructureCollection(params);
           },
         });
+      }
+      if (name === "field_milestone_rules_list") {
+        if (!listMilestoneRules) throw Object.assign(new Error("Milestone rules need the database"), { code: "unavailable" });
+        const { rules, version, businessRegion } = await listMilestoneRules();
+        return { rules, version, businessRegion: businessRegion || null };
+      }
+      if (name === "field_milestone_check") {
+        if (!checkJobMilestones) throw Object.assign(new Error("Milestone rules need the database"), { code: "unavailable" });
+        return { jobId: params.jobId, ...(await checkJobMilestones(params.jobId)) };
       }
       if (name === "field_quote_list") return { quotes: await listQuotes(params) };
       if (name === "field_quote_get") {

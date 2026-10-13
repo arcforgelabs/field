@@ -213,6 +213,41 @@ export function normalizeInvoiceRevision(entry = null) {
     // replaced, and on the replacement the note that made way for it.
     ...(normalizeCreditNote(entry.creditNote) ? { creditNote: normalizeCreditNote(entry.creditNote) } : {}),
     ...(cleanText(entry.creditNoteNumber) ? { creditNoteNumber: cleanText(entry.creditNoteNumber) } : {}),
+    // Step 4c (#29): the account rule in force when it was issued, whether
+    // the job's schedule was that rule's or an override of it, and the soft
+    // caps it was issued over. Only on invoices issued under milestone rules.
+    ...(normalizeMilestoneRuleRecord(entry.milestoneRule) ? { milestoneRule: normalizeMilestoneRuleRecord(entry.milestoneRule) } : {}),
+  };
+}
+
+function normalizeCapAlert(alert = null) {
+  if (!alert || typeof alert !== "object" || !cleanText(alert.message)) return null;
+  const number = (value) => (value == null || !Number.isFinite(Number(value)) ? null : Number(value));
+  return {
+    kind: cleanText(alert.kind),
+    mode: alert.mode === "hard" ? "hard" : "soft",
+    ruleUid: cleanText(alert.ruleUid),
+    ruleName: cleanText(alert.ruleName),
+    valueBasis: cleanText(alert.valueBasis),
+    contractValue: number(alert.contractValue),
+    amount: number(alert.amount),
+    limit: number(alert.limit),
+    message: cleanText(alert.message),
+  };
+}
+
+export function normalizeMilestoneRuleRecord(record = null) {
+  if (!record || typeof record !== "object") return null;
+  const scheduleSource = ["rule", "override"].includes(record.scheduleSource) ? record.scheduleSource : null;
+  const capAlerts = (Array.isArray(record.capAlerts) ? record.capAlerts : []).map(normalizeCapAlert).filter(Boolean);
+  const ruleName = cleanText(record.ruleName);
+  if (!scheduleSource && !ruleName && !capAlerts.length) return null;
+  return {
+    ruleUid: cleanText(record.ruleUid),
+    ruleName,
+    ...(cleanText(record.band) ? { band: cleanText(record.band) } : {}),
+    scheduleSource,
+    capAlerts,
   };
 }
 

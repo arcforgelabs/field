@@ -817,10 +817,18 @@ export const api = {
       { method: "DELETE" },
     );
   },
+  /**
+   * With a schedule: an override of the account rule (#29). With
+   * `{ applyAccountRule: true }`: the rule's schedule back. With neither:
+   * the job's own schedule, or the rule's the first time.
+   */
   generateMilestones(
     id: string,
-    paymentSchedule: import("./types.ts").PaymentSchedule,
+    paymentSchedule: import("./types.ts").PaymentSchedule | { applyAccountRule: true } | null = null,
   ) {
+    const body = paymentSchedule && "applyAccountRule" in paymentSchedule
+      ? { applyAccountRule: true }
+      : paymentSchedule ? { paymentSchedule } : {};
     return request<{
       ok: boolean;
       paymentSchedule: import("./types.ts").PaymentSchedule | null;
@@ -828,7 +836,21 @@ export const api = {
       detail: import("./types.ts").RecordingDetail;
     }>(`/api/jobs/${id}/milestones/generate`, {
       method: "POST",
-      body: JSON.stringify({ paymentSchedule }),
+      body: JSON.stringify(body),
+    });
+  },
+  /** What the account's milestone rules say about a job, before issuing (#29). */
+  jobMilestoneRules(id: string) {
+    return request<import("./types.ts").JobMilestoneRules>(`/api/jobs/${id}/milestone-rules`);
+  },
+  milestoneRules() {
+    return request<import("./types.ts").MilestoneRulesResponse>("/api/settings/milestone-rules");
+  },
+  /** Owner only. Replaces every rule; `expectedVersion` refuses it if they changed since read. */
+  saveMilestoneRules(rules: import("./types.ts").MilestoneRule[], expectedVersion: string) {
+    return request<import("./types.ts").MilestoneRulesResponse>("/api/settings/milestone-rules", {
+      method: "PUT",
+      body: JSON.stringify({ rules, expectedVersion }),
     });
   },
   updateMilestone(
@@ -1091,7 +1113,7 @@ export const api = {
   invoicingSettings() {
     return request<import("./types.ts").InvoicingSettings>("/api/settings/invoicing");
   },
-  updateInvoicingSettings(settings: { creditNoteOnReissue: import("./types.ts").CreditNoteOnReissue }) {
+  updateInvoicingSettings(settings: { creditNoteOnReissue?: import("./types.ts").CreditNoteOnReissue; country?: string | null; region?: string | null }) {
     return request<import("./types.ts").InvoicingSettings>("/api/settings/invoicing", {
       method: "PUT",
       body: JSON.stringify(settings),

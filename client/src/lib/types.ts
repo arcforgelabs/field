@@ -87,8 +87,104 @@ export interface PaymentScheduleMilestone {
   dueDays?: number | null;
 }
 
+/** Where a job's schedule came from (#29). Absent before milestone rules, or with none. */
+export interface PaymentScheduleSource {
+  kind: "rule" | "override";
+  ruleUid: string | null;
+  ruleName: string | null;
+  country?: string;
+  region?: string;
+  band?: string;
+  /** The rule gives no milestones of its own: Field's default schedule, under its caps. */
+  milestonesFrom?: "default";
+  at: string | null;
+  by: string | null;
+}
+
 export interface PaymentSchedule {
   milestones: PaymentScheduleMilestone[];
+  source?: PaymentScheduleSource | null;
+}
+
+export type MilestoneCapKind = "deposit" | "progress" | "final" | "variation";
+export type MilestoneCapMode = "hard" | "soft";
+export type MilestoneRuleValueBasis = "inc-gst" | "ex-gst";
+
+export interface MilestoneRuleCap {
+  kind: MilestoneCapKind;
+  mode: MilestoneCapMode;
+  maxPercent: number | null;
+  maxAmount: number | null;
+}
+
+/** One band of contract value in one region, with its default milestones and caps (#29). */
+export interface MilestoneRule {
+  uid?: string | null;
+  name: string;
+  country: string | null;
+  region: string | null;
+  minValue: number;
+  maxValue: number | null;
+  valueBasis: MilestoneRuleValueBasis;
+  note: string | null;
+  milestones: PaymentScheduleMilestone[];
+  caps: MilestoneRuleCap[];
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+}
+
+export interface RegionReading {
+  country: string | null;
+  region: string | null;
+  from: "settings" | "business-address" | "site-address" | "business" | null;
+}
+
+export interface MilestoneRulesResponse {
+  ok: boolean;
+  rules: MilestoneRule[];
+  version: string;
+  businessRegion: RegionReading;
+  options: {
+    valueBases: MilestoneRuleValueBasis[];
+    capModes: MilestoneCapMode[];
+    capKinds: MilestoneCapKind[];
+    regions: Record<string, Array<{ code: string; name: string }>>;
+  };
+}
+
+/** A cap a milestone is over: hard refuses its issue, soft alerts and is recorded with it. */
+export interface MilestoneCapFinding {
+  milestoneIndex?: number;
+  kind: MilestoneCapKind;
+  mode: MilestoneCapMode;
+  ruleUid: string | null;
+  ruleName: string;
+  valueBasis: MilestoneRuleValueBasis;
+  contractValue: number;
+  amount: number;
+  limit: number;
+  message: string;
+}
+
+export interface JobMilestoneRules {
+  ok: boolean;
+  hasRules: boolean;
+  region: RegionReading | null;
+  rule: MilestoneRule | null;
+  contractValue: number | null;
+  scheduleSource: PaymentScheduleSource | null;
+  proposedSchedule?: PaymentSchedule;
+  milestones: Array<{
+    milestoneIndex: number;
+    label: string;
+    kind: MilestoneCapKind;
+    status: string;
+    invoiceNumber: string;
+    total: number;
+    issued: boolean;
+    findings: MilestoneCapFinding[];
+    blocked: boolean;
+  }>;
 }
 
 export interface MilestonePayment {
@@ -143,6 +239,14 @@ export interface InvoiceRevision {
   creditNote?: CreditNote | null;
   /** On a replacement: the credit note that made way for it. */
   creditNoteNumber?: string | null;
+  /** Issued under milestone rules (#29): the rule, whether the schedule was the rule's or an override, and soft caps it was over. */
+  milestoneRule?: {
+    ruleUid: string | null;
+    ruleName: string | null;
+    band?: string;
+    scheduleSource: "rule" | "override" | null;
+    capAlerts: MilestoneCapFinding[];
+  } | null;
   current?: boolean;
 }
 
@@ -152,6 +256,9 @@ export type CreditNoteOnReissue = "when-emailed" | "always" | "never";
 export interface InvoicingSettings {
   ok: boolean;
   creditNoteOnReissue: CreditNoteOnReissue;
+  /** Where the business is (#29); null reads it from the business address. */
+  country?: string | null;
+  region?: string | null;
   updatedAt: string | null;
   updatedBy: string | null;
   choices: Array<{ value: CreditNoteOnReissue; label: string; description: string }>;

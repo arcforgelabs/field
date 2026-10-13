@@ -33,6 +33,8 @@ import { adjustmentNoteValues, buildEmailMergeValues } from "./email-merge-field
 import { PENDING_NUMBER_TEXT, isDraftInvoice, jobQuoteForEmail, readEmailDocumentView, registerEmailComposeRoutes, withPendingNumber } from "./email-compose-routes.js";
 import { resolveReplyThread } from "./email-threads.js";
 import { CREDIT_NOTE_ON_REISSUE_CHOICES, createBusinessSettingsService } from "./invoices/business-settings.js";
+import { createMilestoneRuleService, installMilestoneRules, MILESTONE_CAP_KINDS, MILESTONE_CAP_MODES, MILESTONE_RULE_VALUE_BASES, resolveBusinessRegion } from "./invoices/milestone-rules.js";
+import { AU_REGIONS } from "../shared/regions.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
 // A job detail's quote read from its rows (#10), kept beside the detail object.
@@ -134,6 +136,7 @@ import { buildReviewState, findReviewItem, restoreStatusForResolvedGap } from ".
 import {
   applyJobQuoteCatalogChanges,
   generateJobMilestones,
+  readJobMilestoneRules,
   markJobLanded,
   markJobMilestoneUnsent,
   markJobMilestoneUnpaid,
@@ -1116,8 +1119,8 @@ app.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
     const user = await createUser({ email, name, password, role, kind: resolvedKind, settings, permissions });
     res.status(201).json({ ok: true, user });
   } catch (err) {
-    if (err.code === "EEXISTS") return res.status(409).json({ error: err.message });
-    res.status(400).json({ error: err.message });
+    if (err.code === "EEXISTS") return res.status(409).json(errorBody(err));
+    res.status(400).json(errorBody(err));
   }
 });
 
@@ -1199,7 +1202,7 @@ app.put("/api/email-templates/:documentType/:templateId", requireAuth, async (re
     );
     res.json({ ok: true, template });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -1322,7 +1325,7 @@ app.get("/api/settings/invoicing", requireAuth, async (_req, res) => {
   try {
     res.json({ ok: true, ...(await businessSettings.get()), choices: CREDIT_NOTE_ON_REISSUE_CHOICES });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -1330,9 +1333,55 @@ app.put("/api/settings/invoicing", requireAuth, requireAdmin, async (req, res) =
   if (!businessSettings) return res.status(503).json({ error: "business settings need the database, which this server does not have" });
   try {
     const actor = req.caller?.id || req.caller?.email || req.caller?.name || null;
-    res.json({ ok: true, ...(await businessSettings.update({ creditNoteOnReissue: req.body?.creditNoteOnReissue }, { actor })), choices: CREDIT_NOTE_ON_REISSUE_CHOICES });
+    const patch = Object.fromEntries(["creditNoteOnReissue", "country", "region"]
+      .filter((key) => Object.hasOwn(req.body || {}, key))
+      .map((key) => [key, req.body[key]]));
+    res.json({ ok: true, ...(await businessSettings.update(patch, { actor })), choices: CREDIT_NOTE_ON_REISSUE_CHOICES });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
+  }
+});
+
+// Milestone rules (#29, step 4c): the organisation's default milestones and
+// caps by region and contract value, as rows. Everyone can read them; only
+// an owner changes them, and only here (Settings, the CLI as an owner). A
+// job's own schedule can depart from them, but never from their caps.
+const milestoneRuleService = deploymentOrg ? createMilestoneRuleService({ db: getDb(), orgUid: deploymentOrg.uid }) : null;
+installMilestoneRules(milestoneRuleService);
+
+async function milestoneRulesBody() {
+  const listed = await milestoneRuleService.list();
+  const business = await resolveBusinessRegion({ service: milestoneRuleService, businessAddress: getQuoteCatalog()?.businessProfile?.address || config?.businessProfile?.address || null });
+  return {
+    ok: true,
+    ...listed,
+    businessRegion: business,
+    options: {
+      valueBases: MILESTONE_RULE_VALUE_BASES,
+      capModes: MILESTONE_CAP_MODES,
+      capKinds: MILESTONE_CAP_KINDS,
+      regions: { AU: AU_REGIONS },
+    },
+  };
+}
+
+app.get("/api/settings/milestone-rules", requireAuth, async (_req, res) => {
+  if (!milestoneRuleService) return res.status(503).json({ error: "milestone rules need the database, which this server does not have" });
+  try {
+    res.json(await milestoneRulesBody());
+  } catch (err) {
+    res.status(err.statusCode || 500).json(errorBody(err));
+  }
+});
+
+app.put("/api/settings/milestone-rules", requireAuth, requireAdmin, async (req, res) => {
+  if (!milestoneRuleService) return res.status(503).json({ error: "milestone rules need the database, which this server does not have" });
+  try {
+    const actor = req.caller?.id || req.caller?.email || req.caller?.name || null;
+    await milestoneRuleService.replace(req.body?.rules, { actor, expectedVersion: req.body?.expectedVersion ?? null });
+    res.json(await milestoneRulesBody());
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
   }
 });
 
@@ -1368,7 +1417,7 @@ app.post("/api/quote-catalogs/:id/defaults/:field/alternatives", requireAuth, as
     const alternatives = addQuoteCatalogAlternative(req.params.id, decodeURIComponent(req.params.field), req.body);
     res.json({ ok: true, alternatives });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json(errorBody(err));
   }
 });
 
@@ -1465,8 +1514,18 @@ async function sendTestCopy({ req, job, payload, documentType = null, loadedDocu
   return sendTestEmail({ config, user: req.caller, subject: built.subject, body: built.body, htmlBody: built.htmlBody, attachments });
 }
 
+// An error as the API returns it. A hard milestone cap (#29) also says which
+// rule refused the issue, and what it allows.
+function errorBody(err) {
+  return {
+    error: err.message,
+    ...(err?.code === "MILESTONE_CAP_EXCEEDED" ? { code: err.code, findings: err.findings || [] } : {}),
+  };
+}
+
 function sendErrorBody(err, isAuthExpired) {
   return {
+    ...(err?.code === "MILESTONE_CAP_EXCEEDED" ? { findings: err.findings || [] } : {}),
     error: err.message,
     ...(isAuthExpired ? { code: "gmail_auth_expired" } : err.code ? { code: err.code } : {}),
     // "unknown": Gmail may have sent it (a time-out, a reset, a 5xx), so the
@@ -1493,7 +1552,7 @@ app.post("/api/jobs/manual", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[manual-job] failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(errorBody(err));
   }
 });
 
@@ -1630,7 +1689,7 @@ app.get("/api/jobs/:id", requireAuth, async (req, res) => {
     if (rowsTag && (!detail.versionView || detail.versionView.isLatest)) res.setHeader("X-Field-Quote-Rows-Version", rowsTag);
     res.json(buildClientJobDetail(detail));
   } catch (err) {
-    res.status(err.statusCode || 400).json({ error: err.message });
+    res.status(err.statusCode || 400).json(errorBody(err));
   }
 });
 
@@ -1665,7 +1724,7 @@ app.patch("/api/jobs/:id/details", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[job-detail] ${job.meta.id} failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(errorBody(err));
   }
 });
 
@@ -1727,7 +1786,7 @@ app.post("/api/jobs/:id/notes", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[job-note] ${job.meta.id} failed: ${err.message}`);
-    res.status(err.message === "note text required" ? 400 : 500).json({ error: err.message });
+    res.status(err.message === "note text required" ? 400 : 500).json(errorBody(err));
   }
 });
 
@@ -1878,7 +1937,7 @@ app.post("/api/jobs/:id/gaps/:gapId/actions", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[gap-action] ${job.meta.id} failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(errorBody(err));
   }
 });
 
@@ -2196,7 +2255,7 @@ app.post("/api/jobs/:id/review/items/:itemId/actions", requireAuth, async (req, 
     return res.status(400).json({ error: "unsupported review item action" });
   } catch (err) {
     console.error(`[review-item-action] ${job.meta.id} failed: ${err.message}`);
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -2245,7 +2304,7 @@ app.post("/api/jobs/:id/archive", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[archive] ${job.meta.id} failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(errorBody(err));
   }
 });
 
@@ -2324,7 +2383,7 @@ app.get("/api/jobs/:id/quote", requireAuth, async (req, res) => {
     res.setHeader("Content-Type", "text/markdown; charset=utf-8");
     res.end(exactIssuedMarkdown || artifacts.quoteMarkdown);
   } catch (err) {
-    res.status(err.statusCode || 400).json({ error: err.message });
+    res.status(err.statusCode || 400).json(errorBody(err));
   }
 });
 
@@ -2442,7 +2501,7 @@ app.get("/api/jobs/:id/quote-pdf", requireAuth, async (req, res) => {
     res.setHeader("Content-Disposition", pdf.filename === "issued-quote.pdf" ? "inline; filename=issued-quote.pdf" : `inline; filename="${pdf.filename}"`);
     res.end(pdf.bytes);
   } catch (err) {
-    res.status(err.statusCode || 400).json({ error: err.message });
+    res.status(err.statusCode || 400).json(errorBody(err));
   }
 });
 
@@ -2608,7 +2667,7 @@ app.post("/api/jobs/:id/quote-pdf-preview", requireAuth, async (req, res) => {
       }),
     });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -2688,7 +2747,7 @@ app.get("/api/jobs/:id/milestones/:index/pdf", requireAuth, async (req, res) => 
     res.setHeader("Cache-Control", "no-store");
     res.end(pdfBuffer);
   } catch (err) {
-    res.status(err.statusCode || 400).json({ error: err.message });
+    res.status(err.statusCode || 400).json(errorBody(err));
   }
 });
 
@@ -2739,7 +2798,7 @@ app.get("/api/jobs/:id/internal-breakdown", requireAuth, async (req, res) => {
       quote: visibleDetail.quote,
     }));
   } catch (err) {
-    res.status(err.statusCode || 400).json({ error: err.message });
+    res.status(err.statusCode || 400).json(errorBody(err));
   }
 });
 
@@ -2853,7 +2912,7 @@ app.post("/api/jobs/:id/versions", requireAuth, async (req, res) => {
     ));
     res.json({ ok: true, ...result });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -2865,7 +2924,7 @@ app.delete("/api/jobs/:id/versions/:version", requireAuth, async (req, res) => {
     await deleteQuoteVersion(job.dir, req.params.version);
     res.json({ ok: true });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -2957,7 +3016,7 @@ app.post("/api/jobs/:id/versions/:version/promote", requireAuth, async (req, res
     res.json({ ok: true, currentVersion, previousVersion, sourceVersion });
   } catch (err) {
     console.error(`[promote-version] Error: job=${jobId} version=${version} (${Date.now() - startTime}ms)`, err.message);
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3614,7 +3673,7 @@ app.post("/api/jobs/:id/email-drafts", requireAuth, emailUploads, async (req, re
     res.json({ ok: true, scheduledEmail });
   } catch (err) {
     if (err instanceof EmailAttachmentError) return res.status(err.statusCode).json(emailAttachmentErrorBody(err));
-    res.status(err.statusCode || (err.code === "ENOENT" ? 404 : 500)).json({ error: err.message });
+    res.status(err.statusCode || (err.code === "ENOENT" ? 404 : 500)).json(errorBody(err));
   }
 });
 
@@ -3624,7 +3683,7 @@ app.delete("/api/jobs/:id/email-drafts/:draftId", requireAuth, async (req, res) 
   try {
     res.json({ ok: true, scheduledEmail: await discardEmailDraft({ dataDir: DATA_DIR, jobId: job.meta.id, id: req.params.draftId, updatedBy: scheduledEmailActor(req.caller) }) });
   } catch (err) {
-    res.status(err.statusCode || (err.code === "ENOENT" ? 404 : 500)).json({ error: err.message });
+    res.status(err.statusCode || (err.code === "ENOENT" ? 404 : 500)).json(errorBody(err));
   }
 });
 
@@ -3634,7 +3693,7 @@ app.get("/api/jobs/:id/sent-emails", requireAuth, async (req, res) => {
   try {
     res.json({ ok: true, sentEmails: await readSentEmailArchive(job.dir) });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3644,7 +3703,7 @@ app.get("/api/jobs/:id/scheduled-emails", requireAuth, async (req, res) => {
   try {
     res.json({ ok: true, scheduledEmails: await listScheduledEmails({ dataDir: DATA_DIR, jobId: job.meta.id }) });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3660,7 +3719,7 @@ app.delete("/api/jobs/:id/scheduled-emails/:scheduledEmailId", requireAuth, asyn
     });
     res.json({ ok: true, scheduledEmail });
   } catch (err) {
-    res.status(err.statusCode || (err.code === "ENOENT" ? 404 : 500)).json({ error: err.message });
+    res.status(err.statusCode || (err.code === "ENOENT" ? 404 : 500)).json(errorBody(err));
   }
 });
 
@@ -3676,7 +3735,7 @@ app.get("/api/jobs/:id/milestones", requireAuth, async (req, res) => {
       milestones: detail.meta?.milestoneInvoices || [],
     });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3691,6 +3750,7 @@ app.post("/api/jobs/:id/milestones/generate", requireAuth, async (req, res) => {
         meta: await readNormalizedJobMeta(stagedJobDir) || normalizeJobMeta(job.meta),
         config,
         paymentSchedule: req.body?.paymentSchedule || null,
+        applyAccountRule: req.body?.applyAccountRule === true,
         actor: getRequestActor(req),
       }),
       {
@@ -3705,7 +3765,20 @@ app.post("/api/jobs/:id/milestones/generate", requireAuth, async (req, res) => {
       detail,
     });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
+  }
+});
+
+// What the account's milestone rules say about one job (#29): its region,
+// the rule that applies, where its schedule came from, and the caps each
+// milestone is over. Read before issuing; it changes nothing.
+app.get("/api/jobs/:id/milestone-rules", requireAuth, async (req, res) => {
+  const job = await findJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "not found" });
+  try {
+    res.json({ ok: true, ...(await readJobMilestoneRules({ jobDir: job.dir, meta: job.meta, config })) });
+  } catch (err) {
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3728,7 +3801,7 @@ app.get("/api/jobs/:id/milestones/:index/revisions", requireAuth, async (req, re
       revisions: getMilestoneInvoiceRevisions(milestoneInvoice),
     });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3765,7 +3838,7 @@ async function creditAndReissueRoute(req, res) {
       detail,
     });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 }
 app.post("/api/jobs/:id/milestones/:index/credit-and-reissue", requireAuth, creditAndReissueRoute);
@@ -3803,7 +3876,7 @@ app.post("/api/jobs/:id/milestones/migrate", requireAuth, async (req, res) => {
       detail,
     });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3836,7 +3909,7 @@ app.put("/api/jobs/:id/milestones/:index", requireAuth, async (req, res) => {
       detail,
     });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3872,7 +3945,7 @@ app.post("/api/jobs/:id/milestones/:index/payment", requireAuth, async (req, res
       detail,
     });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3904,7 +3977,7 @@ app.post("/api/jobs/:id/milestones/:index/payments/:paymentId/void", requireAuth
       detail,
     });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3933,7 +4006,7 @@ app.post("/api/jobs/:id/milestones/:index/unpaid", requireAuth, async (req, res)
       detail,
     });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3962,7 +4035,7 @@ app.post("/api/jobs/:id/milestones/:index/unsent", requireAuth, async (req, res)
       detail,
     });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -4111,7 +4184,7 @@ app.post("/api/jobs/:id/landed", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[mark-landed] ${job.meta.id} failed: ${err.message}`);
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -4136,7 +4209,7 @@ app.post("/api/jobs/:id/pipeline-stage", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[pipeline-stage] ${job.meta.id} failed: ${err.message}`);
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -4225,7 +4298,7 @@ app.post("/api/jobs/:id/moasure-upload", requireAuth, upload.array("files", 12),
     });
   } catch (err) {
     console.error(`[moasure-upload] ${job.meta.id} failed: ${err.message}`);
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -4307,7 +4380,7 @@ app.post("/api/jobs/:id/moasure-scan", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[moasure-scan] ${job.meta.id} failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(errorBody(err));
   }
 });
 
@@ -4379,7 +4452,7 @@ app.delete("/api/jobs/:id/moasure-files/:batchId/:fileName", requireAuth, async 
     });
   } catch (err) {
     console.error(`[moasure-remove] ${job.meta.id} failed: ${err.message}`);
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -4419,7 +4492,7 @@ app.put("/api/jobs/:id/quote-inputs", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[set-quote-inputs] ${job.meta.id} failed: ${err.message}`);
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -4585,7 +4658,7 @@ app.get("/api/jobs/:id/quote-snapshots", requireAuth, async (req, res) => {
   try {
     res.json({ ok: true, snapshots: await config.quoteSnapshots.listForJob(job.meta.id) });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -4616,7 +4689,7 @@ app.post("/api/jobs/:id/quote-regenerate", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[quote-regenerate] ${job.meta.id} failed: ${err.message}`);
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -5452,7 +5525,7 @@ app.put("/api/jobs/:id/wall-design", requireAuth, async (req, res) => {
     });
     res.json({ ok: true });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -5509,7 +5582,7 @@ app.post("/api/jobs/:id/wall-measurement", requireAuth, async (req, res) => {
     });
     res.json({ data: response });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -5722,7 +5795,7 @@ app.post("/api/jobs/:id/wall-build", requireAuth, async (req, res) => {
     });
     res.json(response);
   } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -5789,7 +5862,7 @@ app.get("/api/jobs/:id/wall-zones", requireAuth, async (req, res) => {
   try {
     res.json({ data: await readWallZones(job.dir) });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json(errorBody(err));
   }
 });
 
@@ -5867,7 +5940,7 @@ app.get("/api/jobs/:id/wall-zones/:zoneId/render", requireAuth, async (req, res)
     }
     res.json({ data: visiblePayload });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json(errorBody(err));
   }
 });
 
@@ -5964,6 +6037,14 @@ if (remoteMcpRuntime.enabled) {
       ...guard,
     }),
     getCatalogVersion: async () => requireCatalogStore().catalogVersion(),
+    ...(milestoneRuleService ? {
+      listMilestoneRules: async () => milestoneRulesBody(),
+      checkJobMilestones: async (id) => {
+        const job = await findJob(id);
+        if (!job) throw Object.assign(new Error("Quote not found"), { code: "not_found" });
+        return readJobMilestoneRules({ jobDir: job.dir, meta: job.meta, config });
+      },
+    } : {}),
     getQuote: async (id, version = null) => {
       const job = await findJob(id);
       if (!job) throw Object.assign(new Error("Quote not found"), { code: "not_found" });

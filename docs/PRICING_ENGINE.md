@@ -25,7 +25,9 @@ payments and receipts are also written as rows and checked against what was
 issued. Step 4b parts one and two are built too (#28): invoices are issued from
 the issue service, with `INV-YYYY-M-N` numbers allocated in the issue
 transaction, and an issued invoice is corrected by a credit note and a new
-invoice (see "Phase 3, step by step").
+invoice (see "Phase 3, step by step"). Step 4c is built too (#29):
+milestone defaults and caps come from the organisation's milestone rules,
+as rows ("Invoices and payments").
 
 The owner's six decisions of 2026-10-12 (from the document audit) are
 recorded where they change the design: credit notes ("Invoices and
@@ -626,6 +628,51 @@ differences:**
 - `receipts` are one per payment. Today a receipt is issued for a milestone
   once it is paid in full. Its row is for the payment that cleared it, with
   the amount it acknowledges, and is voided if that payment is.
+**Built (step 4c, #29, migration `0017_milestone_rules`): milestone
+rules.** The owner's decisions (2026-10-13): rules are settings, never
+code, so Field gives no legal or business advice; a rule set for a region is
+the organisation's and only an owner changes it, in Settings; a job's own
+schedule is an override; each cap is hard (blocks issuing) or soft
+(alerts).
+
+- `milestone_rules`: one row per band of contract value in one region:
+  `country` (ISO 3166-1, null for every region) and `region` (a state or
+  province, null for the whole country), `min_value` (inclusive) and
+  `max_value` (exclusive, null for no upper end), `value_basis`
+  (`inc-gst`, the default, or `ex-gst`), `name`, `note` (why, shown in
+  cap messages) and `sort_order`. Two bands in one region may not overlap.
+  `milestone_rule_milestones` are its default milestones (label, percent
+  or amount, due days); none means Field's default schedule.
+  `milestone_rule_caps` are at most one per milestone kind (`deposit`,
+  `progress`, `final`, `variation`, as `invoiceKind` names an invoice):
+  `max_percent` of the contract value and/or `max_amount`, the lower
+  applying, and `mode` `hard` or `soft`. `business_settings` gains
+  `country` and `region`.
+- **Which rule.** A job's region is its site address when that names a
+  state (`shared/regions.js`), else the business region (Settings, else the
+  business address). Of the rules whose band holds the contract value (the
+  quote total with or without GST, as the rule says), the most specific
+  region's applies: the state, then the country, then every region.
+- **When it applies.** The first time a job's milestones are created (the
+  job lands, or "Set up invoices") with no schedule of its own, the rule's
+  milestones become its schedule, marked `source.kind: "rule"` beside it
+  (and `payment_milestones.is_default_schedule`). A schedule set on the job
+  (the quote editor, `generate`, MCP `patch.paymentSchedule`) is an
+  override, `source.kind: "override"`, naming the rule it departs from;
+  `applyAccountRule` puts the rule's schedule back. A schedule from before
+  rules, or with none, has no source and is never re-marked.
+- **Caps at issue.** Before an invoice is issued (authorised, sent,
+  credited and reissued), the caps of the rule that applies to the job now
+  are checked against what it issues. A hard cap refuses the issue, before
+  any number is allocated, with a message that names the rule and what it
+  allows (409 `MILESTONE_CAP_EXCEEDED`, with `findings`). A soft cap issues
+  it, and the alert is kept with the invoice: on its revision in the files
+  (`milestoneRule`, with whether the schedule was the rule's or an
+  override) and in its issued document's `details`. `GET
+  /api/jobs/:id/milestone-rules` shows all of it before issue. An invoice
+  already issued keeps what it was issued with: rules that change later
+  never touch it.
+
 - **Issued never changes, in the database.** Once an invoice or credit note
   has an issue time, triggers refuse any change to its number, money, lines
   or issue time, setting it back to draft, and deleting it, for the table
@@ -963,7 +1010,7 @@ then jobs and the rest. Work starts now, beside the catalogue work.
 | 3, part three | The editor edits rows (with the engine gone, phase 4); quote numbers from `document_number_counters`; the quote files go | Next |
 | 4a | Invoices, payments and receipts as rows (#27): `payment_milestones`, `invoices`, `invoice_lines`, `payments`, `receipts`, and the shape of `credit_notes` (migration 0013); dual-write after every committed milestone change; a backfill verified against what was issued | Built |
 | 4b | The issue service for invoices (#28): `INV-YYYY-M-N` numbers from `document_number_counters` at issue, with the job reference; credit notes replace in-place revisions (revisions made in place before them stay as issued); issue separate from email; claim-line invoice documents | Built (issue service, migration 0014; credit notes, migrations 0015 and 0016; claim-line documents) |
-| 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Later |
+| 4c | Milestone defaults from account rules by contract value (#29), with visibly marked per-job overrides and caps that warn or block | Built (migration 0017) |
 | 5 | Jobs and the rest (phase 3b) | Later |
 
 How step 2 fills the tables:

@@ -222,9 +222,9 @@ export function mapMilestoneState({ meta, basis = null, jobNumber = null, issueT
       percent,
       amount,
       dueDays: positiveInt(scheduleMilestones[index]?.dueDays),
-      // Today's schedules are set on the job (or copied from config); none is
-      // known to come from account rules, which arrive with step 4c (#29).
-      isDefaultSchedule: false,
+      // From the account's milestone rules (step 4c, #29) until the job
+      // overrides them; a schedule from before rules was set on the job.
+      isDefaultSchedule: meta?.paymentSchedule?.source?.kind === "rule",
       quoteVersion: basis?.version || null,
     });
 

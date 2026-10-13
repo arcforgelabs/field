@@ -13,8 +13,14 @@
 //
 // "Credit and reissue" always credits, whatever this says: that action is
 // the operator saying the customer has the invoice.
+//
+// country, region (step 4c, #29): where the business is, as an ISO country
+// code and a state or province code. Milestone rules for a region apply to
+// jobs whose site address does not say where they are. Null reads it from
+// the business address.
 import { schema } from "../db-runtime/index.js";
 import { orgScope } from "../db-runtime/tenancy.js";
+import { normalizeCountryCode, normalizeRegionCode } from "../../shared/regions.js";
 
 const { businessSettings, CREDIT_NOTE_ON_REISSUE } = schema;
 
@@ -57,6 +63,8 @@ export async function readCreditNoteOnReissue(tx) {
 function settingsFromRow(row) {
   return {
     creditNoteOnReissue: row?.creditNoteOnReissue || DEFAULT_CREDIT_NOTE_ON_REISSUE,
+    country: row?.country || null,
+    region: row?.region || null,
     updatedAt: row?.updatedAt ? new Date(row.updatedAt).toISOString() : null,
     updatedBy: row?.updatedBy || null,
   };
@@ -69,15 +77,30 @@ export function createBusinessSettingsService({ db, orgUid = undefined, now = ()
     async get() {
       return scope.transaction(async (tx) => settingsFromRow((await tx.select().from(businessSettings))[0]));
     },
-    async update({ creditNoteOnReissue }, { actor = null } = {}) {
-      if (!CREDIT_NOTE_ON_REISSUE.includes(creditNoteOnReissue)) {
-        throw new BusinessSettingsError(`creditNoteOnReissue must be one of ${CREDIT_NOTE_ON_REISSUE.join(", ")}`);
+    /** Changes the settings it is given; a setting left out keeps its value. */
+    async update(patch = {}, { actor = null } = {}) {
+      const set = {};
+      if (Object.hasOwn(patch, "creditNoteOnReissue")) {
+        if (!CREDIT_NOTE_ON_REISSUE.includes(patch.creditNoteOnReissue)) {
+          throw new BusinessSettingsError(`creditNoteOnReissue must be one of ${CREDIT_NOTE_ON_REISSUE.join(", ")}`);
+        }
+        set.creditNoteOnReissue = patch.creditNoteOnReissue;
       }
+      if (Object.hasOwn(patch, "country") || Object.hasOwn(patch, "region")) {
+        const country = patch.country == null || patch.country === "" ? null : normalizeCountryCode(patch.country);
+        if (patch.country && !country) throw new BusinessSettingsError("country must be a two-letter country code, such as AU");
+        const region = patch.region == null || patch.region === "" ? null : normalizeRegionCode(patch.region);
+        if (patch.region && !region) throw new BusinessSettingsError("region must be a state or province code, such as SA");
+        if (region && !country) throw new BusinessSettingsError("a region needs its country");
+        set.country = country;
+        set.region = region;
+      }
+      if (!Object.keys(set).length) throw new BusinessSettingsError("nothing to change: send creditNoteOnReissue, or country and region");
       return scope.transaction(async (tx) => {
         const at = now();
         const [row] = await tx.insert(businessSettings)
-          .values({ creditNoteOnReissue, createdAt: at, updatedAt: at, updatedBy: actor })
-          .onConflictDoUpdate({ target: businessSettings.orgUid, set: { creditNoteOnReissue, updatedAt: at, updatedBy: actor } })
+          .values({ ...set, createdAt: at, updatedAt: at, updatedBy: actor })
+          .onConflictDoUpdate({ target: businessSettings.orgUid, set: { ...set, updatedAt: at, updatedBy: actor } })
           .returning();
         return settingsFromRow(row);
       });
