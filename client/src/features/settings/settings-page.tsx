@@ -1,5 +1,6 @@
 // Settings: your account (Clerk's own screens, in Field's theme), the team,
-// the terms printed on quotes, and how Field looks.
+// the terms printed on quotes, integrations (Xero, owners only) and how Field
+// looks.
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { LogOut, Plus, Trash2 } from "lucide-react";
@@ -10,11 +11,12 @@ import { AppearanceSection } from "./appearance-section";
 import { PeopleSection } from "./people-section";
 import { InvoicingPanel } from "./invoicing-panel";
 import { EmailSignaturePanel } from "./email-signature-panel";
+import { XeroPanel } from "./xero-panel";
 import "./settings-page.css";
 
 const ClerkAccount = lazy(() => import("./clerk-account"));
 
-type Section = "account" | "team" | "documents" | "email" | "appearance";
+type Section = "account" | "team" | "documents" | "email" | "integrations" | "appearance";
 
 export function SettingsPage() {
   const { logout, user, mode, isOwner } = useAuth();
@@ -24,6 +26,7 @@ export function SettingsPage() {
     { id: "team", label: "Team", show: mode === "clerk" && isOwner },
     { id: "documents", label: "Quotes and invoices", show: true },
     { id: "email", label: "Email", show: true },
+    { id: "integrations", label: "Integrations", show: isOwner },
     { id: "appearance", label: "Appearance", show: true },
   ];
   const requested = params.get("section") as Section | null;
@@ -83,6 +86,7 @@ export function SettingsPage() {
             </>
           )}
           {active === "email" && <EmailSignaturePanel />}
+          {active === "integrations" && <XeroPanel />}
           {active === "appearance" && (
             <Panel title="Appearance" description="Saved in this browser. Clerk's account screens follow the same choice.">
               <AppearanceSection />

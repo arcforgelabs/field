@@ -33,6 +33,10 @@ import { adjustmentNoteValues, buildEmailMergeValues } from "./email-merge-field
 import { PENDING_NUMBER_TEXT, isDraftInvoice, jobQuoteForEmail, readEmailDocumentView, registerEmailComposeRoutes, withPendingNumber } from "./email-compose-routes.js";
 import { resolveReplyThread } from "./email-threads.js";
 import { CREDIT_NOTE_ON_REISSUE_CHOICES, createBusinessSettingsService } from "./invoices/business-settings.js";
+import { createXeroHttp } from "./xero/client.js";
+import { fakeXeroBaseUrl, readXeroSecrets, xeroEndpoints } from "./xero/config.js";
+import { createXeroConnectionService } from "./xero/connection.js";
+import { registerXeroRoutes } from "./xero/routes.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
 
 // A job detail's quote read from its rows (#10), kept beside the detail object.
@@ -1337,6 +1341,20 @@ app.put("/api/settings/invoicing", requireAuth, requireAdmin, async (req, res) =
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
+});
+
+// Xero (#93, docs/XERO.md): the owner's own Xero app, its client id and
+// secret from deployment secrets (XERO_CLIENT_ID, XERO_CLIENT_SECRET); the
+// connection and its encrypted tokens in PostgreSQL. Owners only.
+const xeroSecrets = readXeroSecrets(process.env);
+const xeroHttpFor = (secrets) => createXeroHttp({ clientId: secrets.clientId, clientSecret: secrets.clientSecret, endpoints: xeroEndpoints(fakeXeroBaseUrl()) });
+const xeroConnection = deploymentOrg ? createXeroConnectionService({ db: getDb(), orgUid: deploymentOrg.uid, secrets: xeroSecrets, http: xeroHttpFor }) : null;
+registerXeroRoutes(app, {
+  requireAuth,
+  requireOwner: requireAdmin,
+  connection: () => xeroConnection,
+  publicUrl: () => config.publicUrl || null,
+  actorOf: (req) => req.caller?.name || req.caller?.email || req.caller?.id || null,
 });
 
 app.get("/api/terms", requireAuth, async (_req, res) => {

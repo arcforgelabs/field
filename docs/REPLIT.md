@@ -30,6 +30,7 @@ Secrets, which reach the app as environment variables:
 | `FIELD_CONFIG_JSON` | The whole config object as one JSON value, shaped like `config.json.example`: `authToken`, `publicUrl`, `mail` (sender and `deliveryPolicy`), `googleOAuth` (`clientId`, `clientSecret`), `googleDriveFolderId`, `bootstrapUsers`, `mcp`, and `businessProfile` (your trading name, ABN, address, contact details and bank account; README "Business profile"). Leave out `port` and `dataDir`. When it is set, `FIELD_CONFIG` and `config.json` are ignored, and invalid JSON stops Field at boot. |
 | `FIELD_TOKEN` | Optional. Overrides `authToken`. |
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | Optional. The service account key JSON itself (paste the whole file). A file path still works elsewhere, and `googleServiceAccountKey` in config can hold either. |
+| `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET` | Optional. Your own Xero app's client id and client secret, to create Field's invoices in your Xero organisation (`docs/XERO.md`). Settings, Integrations, Xero shows only whether each is set. Republish after setting them. |
 
 Every value in `FIELD_CONFIG_JSON` is treated as secret, so keep it a Secret,
 never a plain env var or a file in the repo. Field never writes config back:

@@ -1097,6 +1097,23 @@ export const api = {
       body: JSON.stringify(settings),
     });
   },
+  /** Owner only (#93): the Xero connection and settings. Never a token or a secret. */
+  xeroIntegration() {
+    return request<import("./types.ts").XeroIntegration>("/api/integrations/xero");
+  },
+  /** Owner only: Xero's sign-in address for Connect. */
+  connectXero() {
+    return request<{ ok: boolean; url: string }>("/api/integrations/xero/connect", { method: "POST" });
+  },
+  chooseXeroOrganisation(tenantId: string) {
+    return request<{ ok: boolean; status: string }>("/api/integrations/xero/organisation", { method: "POST", body: JSON.stringify({ tenantId }) });
+  },
+  disconnectXero() {
+    return request<{ ok: boolean; status: string }>("/api/integrations/xero/disconnect", { method: "POST" });
+  },
+  updateXeroSettings(settings: Partial<Pick<import("./types.ts").XeroSettings, "createMode" | "salesAccountCode" | "taxType">>) {
+    return request<{ ok: boolean; settings: import("./types.ts").XeroSettings }>("/api/integrations/xero/settings", { method: "PUT", body: JSON.stringify(settings) });
+  },
   /** Owner only. Read-only; it can take 15 s or more (409 while another runs, 504 out of time). */
   invoiceAmountDisagreements() {
     return request<import("./types.ts").InvoiceAmountReport>("/api/admin/invoices/amount-disagreements");

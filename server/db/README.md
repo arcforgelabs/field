@@ -355,6 +355,16 @@ invoice returned to draft and issued again with different content is
 credited first: `when-emailed` (the default), `always` or `never`. Run
 `rollback/0016_business_settings.down.sql` before 0015's.
 
+### Xero
+
+`0017_xero_connection` (#93) adds `xero_connections`, one row per
+organisation: the Xero organisation Field writes to, the OAuth tokens
+encrypted with AES-256-GCM (`server/xero/token-crypto.js`), the sign-in in
+progress (its state only as a hash) and the owner's Xero settings. The Xero
+app's client id and secret stay deployment secrets. `field_app` may read,
+insert and update. Run `rollback/0017_xero_connection.down.sql` before
+0016's. Operating it: `docs/XERO.md`.
+
 ### Adding tables
 
 A tenant table gets `orgUid: orgUid()` and `tenantIsolation("<table>")` in
