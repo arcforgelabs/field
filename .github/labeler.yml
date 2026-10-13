@@ -8,6 +8,15 @@
           - server/quote-*.js
           - server/generate-evidence-quote.js
           - server/legacy-sent-quote.js
+          - server/job-actions.js
+          - server/pipeline.js
+          - server/clarification-notes.js
+          - server/evidence-index.js
+          - server/ingestion-ledger.js
+          - server/reconcile-baseline-scope.js
+          - shared/money.js
+          - shared/source-label-disambiguation.js
+          - scripts/export-quote-proof-bundle.js
           - server/local-pricing.js
           - server/assembly-modes.js
           - server/retaining-wall-*.js
@@ -24,6 +33,7 @@
       - any-glob-to-any-file:
           - server/invoices/**
           - server/invoice-*.js
+          - server/job-actions.js
           - client/src/features/invoices/**
           - scripts/quote-invoice-proof/**
 
@@ -33,6 +43,9 @@
           - server/documents/**
           - server/storage/**
           - server/job-documents.js
+          - server/job-generation.js
+          - scripts/documents-verify-r2.js
+          - scripts/find-quarantined-generations.js
           - server/job-document-context.js
           - server/sent-email-archive.js
 
@@ -44,6 +57,12 @@
           - quote-catalogs/**
           - client/src/features/catalogue/**
           - client/src/features/pricing/**
+          - shared/catalog-*.js
+          - shared/disposal-basis.js
+          - shared/dumping.js
+          - scripts/catalog-*.js
+          - server/test-price-catalog.js
+          - server/test-pricing-fixtures.js
 
 "area: database":
   - changed-files:
@@ -51,11 +70,17 @@
           - server/db/**
           - server/db-runtime/**
           - server/data-migrations/**
+          - server/field-db.js
+          - scripts/backfill-*.js
+          - scripts/migrate-*.js
+          - scripts/data-migrations-cli.js
+          - scripts/db-smoke.js
 
 "area: auth":
   - changed-files:
       - any-glob-to-any-file:
           - server/auth/**
+          - server/users.js
           - client/src/features/login/**
 
 "area: integrations":
@@ -69,14 +94,44 @@
           - server/scheduled-email-queue.js
           - server/google-*.js
           - server/drive-upload.js
+          - shared/email-templates.js
+          - server/moasure.js
+          - scripts/setup-gmail-oauth.js
           - docs/XERO.md
           - docs/REMOTE_MCP.md
           - docs/GMAIL_SENDING.md
+
+"area: jobs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/job-*.js
+          - server/stale-detection.js
+          - server/review-state.js
+          - client/src/features/jobs/**
+
+"area: observability":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/observability/**
+          - shared/sentry-scrub.js
+          - client/src/instrument.ts
+
+"area: server":
+  - changed-files:
+      - any-glob-to-any-file:
+          - server/index.js
+          - server/runtime-config.js
+          - server/config-guard.js
+          - server/api-cache-policy.js
+          - server/business-profile.js
 
 "area: client":
   - changed-files:
       - any-glob-to-any-file:
           - client/**
+          - shared/themes.js
+          - shared/theme-palettes.js
+          - shared/color-contrast.js
 
 "area: cli":
   - changed-files:
@@ -93,17 +148,29 @@
           - .replit
           - scripts/replit-*
           - docs/REPLIT.md
+          - scripts/deploy-checks.js
+          - server/deployed-build.js
+          - scripts/demo-fixtures.js
+          - scripts/staging-fixtures.js
+          - scripts/reset-staging-baseline.js
 
+# CI and the test tooling it runs.
 "area: ci":
   - changed-files:
       - any-glob-to-any-file:
           - .github/**
+          - e2e/**
+          - scripts/surveyor/**
+          - scripts/verification/**
+          - scripts/quote-invoice-proof/**
+          - scripts/dependency-audit.mjs
 
 "area: docs":
   - changed-files:
       - any-glob-to-any-file:
           - docs/**
           - "*.md"
+          - scripts/generate-manual-pdf.js
 
 "area: dependencies":
   - changed-files:
