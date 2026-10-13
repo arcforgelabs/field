@@ -10,13 +10,14 @@
 // rewritten in free text (error messages, URLs, paths, breadcrumbs, log
 // lines): email addresses, document numbers, money amounts, Australian phone
 // numbers, BSBs, query strings, credentials (a bearer token, a JSON web token,
-// an OAuth token or code after its name, as Xero's are), and job folder or
+// an OAuth token or code after its name, as Xero's are), anything shaped like
+// a FIELD_SECRETS_KEY (32 bytes in base64 or hex), and job folder or
 // job route segments that are
 // not UUIDs, route parameters or single words (older job folders were named
 // after the site address). Long strings are cut short.
 
 const SENSITIVE_KEY =
-  /email|phone|mobile|address|customer|client|contact|recipient|attention|site|title|subject|notes?$|body$|html$|pdf|attachment|abn|bsb|bank|account.?(number|name)|password|passphrase|token|secret|authorization|cookie|api.?key|dsn|query$/i;
+  /email|phone|mobile|address|customer|client|contact|recipient|attention|site|title|subject|notes?$|body$|html$|pdf|attachment|abn|bsb|bank|account.?(number|name)|password|passphrase|token|secret|authorization|cookie|api.?key|dsn|query$|^key$|key.?(text|value|bytes)$/i;
 
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 // Australian numbers: +61 or 0, then 9 digits, with optional spaces, dashes
@@ -46,6 +47,10 @@ const UI_ATTRIBUTE = /(\[[\w-]+=)"[^"]*"\]/g;
 // "access_token": "...", client_secret, code).
 const BEARER = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi;
 const JWT = /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/g;
+// A FIELD_SECRETS_KEY as the Connect wizard makes it (32 bytes in base64:
+// 43 characters and one "="), or as 64 hex characters. The wizard never puts
+// it in a breadcrumb, a log line or an error; this is the net under that.
+const SECRETS_KEY_TEXT = /(?<![A-Za-z0-9+/=_-])(?:[A-Za-z0-9+/]{43}=|[0-9a-fA-F]{64})(?![A-Za-z0-9+/=_-])/g;
 const OAUTH_VALUE = /\b(access_token|refresh_token|id_token|client_secret|code_verifier|code)("?\s*[:=]\s*"?)[^\s"&,;}]{6,}/gi;
 
 const MAX_TEXT = 1000;
@@ -56,6 +61,7 @@ export function scrubText(value, max = MAX_TEXT) {
   let text = value
     .replace(BEARER, "$1 [token]")
     .replace(JWT, "[token]")
+    .replace(SECRETS_KEY_TEXT, "[key]")
     .replace(OAUTH_VALUE, "$1$2[token]")
     .replace(EMAIL, "[email]")
     .replace(QUERY, "$1?[query]")

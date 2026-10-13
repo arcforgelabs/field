@@ -5,12 +5,12 @@
 // integration's own server code reads a value (`read`). Every change writes an
 // integration_audit_events row with who and when, never the value.
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { schema } from "../db-runtime/index.js";
 import { orgScope } from "../db-runtime/tenancy.js";
 import { createSecretBox, sealedKeyId } from "./box.js";
 
-const { integrationCredentials, integrationAuditEvents } = schema;
+const { integrationCredentials, integrationAuditEvents, integrationSetup } = schema;
 
 export function createCredentialStore({ db, orgUid = undefined, keyring, now = () => new Date(), logger = console }) {
   if (!db || !keyring) throw new Error("the credential store needs a database and the secrets keyring");
@@ -23,6 +23,17 @@ export function createCredentialStore({ db, orgUid = undefined, keyring, now = (
 
   async function audit(tx, integration, action, actor, details = {}) {
     await tx.insert(integrationAuditEvents).values({ uid: `iae_${randomUUID()}`, integration, action, actor, at: now(), details });
+  }
+
+  // Credentials entered or removed now supersede any pending credentials the
+  // Connect wizard stored for a key not yet deployed (setup.js): in the same
+  // transaction, so a later promotion can never overwrite these.
+  async function supersedePending(tx, integration, actor, reason) {
+    const cleared = await tx.update(integrationSetup)
+      .set({ pendingValues: null, pendingKeyId: null, pendingAt: null, pendingBy: null, updatedAt: now(), updatedBy: actor })
+      .where(and(eq(integrationSetup.integration, integration), isNotNull(integrationSetup.pendingKeyId)))
+      .returning({ integration: integrationSetup.integration });
+    if (cleared.length) await audit(tx, integration, "pending_credentials_discarded", actor, { reason });
   }
 
   return {
@@ -63,12 +74,14 @@ export function createCredentialStore({ db, orgUid = undefined, keyring, now = (
         }
         const fields = encrypted.map((entry) => entry.field);
         await audit(tx, integration, before.some((row) => fields.includes(row.field)) ? "credentials_replaced" : "credentials_set", actor, { fields });
+        await supersedePending(tx, integration, actor, "credentials_entered");
       });
     },
 
     /** Remove an integration's credentials, with an audit event. */
     async remove(integration, { actor = null } = {}) {
       await scope.transaction(async (tx) => {
+        await supersedePending(tx, integration, actor, "credentials_removed");
         const before = await rows(tx, integration);
         if (!before.length) return;
         await tx.delete(integrationCredentials).where(eq(integrationCredentials.integration, integration));

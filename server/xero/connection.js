@@ -295,7 +295,12 @@ export function createXeroConnectionService({
             ? (await credentialStore.status(XERO_INTEGRATION, CREDENTIAL_FIELDS).then((fields) => ({ clientId: fields.client_id, clientSecret: fields.client_secret })))
             : { clientId: { set: false, setAt: null, setBy: null }, clientSecret: { set: false, setAt: null, setBy: null } },
         },
-        history: credentialStore ? await credentialStore.history(XERO_INTEGRATION, 8) : [],
+        // Xero's own events, and the key's (generated in the Connect wizard).
+        history: credentialStore
+          ? [...await credentialStore.history(XERO_INTEGRATION, 8), ...await credentialStore.history("secrets_key", 8)]
+            .sort((x, y) => (x.at < y.at ? 1 : x.at > y.at ? -1 : 0))
+            .slice(0, 8)
+          : [],
         scopes: [...scopes],
         connection: connectionOf(row),
         settings: settingsOf(row),

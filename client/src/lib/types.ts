@@ -184,6 +184,21 @@ export interface XeroIntegration {
   };
   settings: XeroSettings;
   choices: { createMode: Array<{ value: XeroCreateMode; label: string; description: string }> };
+  /** This installation's address (publicUrl), for the Xero app's company or application URL. */
+  appUrl?: string | null;
+  /** The Connect wizard, for owners (null for everyone else). */
+  setup?: XeroSetup | null;
+}
+
+/** Where an owner is in the Connect Xero wizard. Never a key or a value. */
+export interface XeroSetup {
+  /** The organisation the browser binds encrypted credentials to. */
+  orgUid: string;
+  step: "app" | "credentials" | "key" | "connect" | null;
+  /** Credentials encrypted in the browser, waiting for FIELD_SECRETS_KEY. */
+  pending: { keyId: string; fields: string[]; storedAt: string | null; storedBy: string | null } | null;
+  /** PENDING_KEY_MISMATCH: the deployment has another key. PENDING_UNREADABLE: they do not open with it. */
+  problem: "PENDING_KEY_MISMATCH" | "PENDING_UNREADABLE" | null;
 }
 
 /** One invoice's way to Xero, on the job's Invoices tab. */

@@ -38,6 +38,8 @@ import { fakeXeroBaseUrl, readXeroSecrets, xeroEndpoints } from "./xero/config.j
 import { createXeroConnectionService } from "./xero/connection.js";
 import { loadSecretsKeyring } from "./secrets/keyring.js";
 import { createCredentialStore } from "./secrets/credentials.js";
+import { createIntegrationSetup } from "./secrets/setup.js";
+import { registerSecretsKeyRoutes } from "./secrets/routes.js";
 import { createXeroInvoiceSync } from "./xero/invoice-sync.js";
 import { registerXeroRoutes } from "./xero/routes.js";
 import { assertQuoteRowsIfMatch, currentQuoteRowsTag } from "./quotes/concurrency.js";
@@ -553,6 +555,13 @@ const secretsKeyring = loadSecretsKeyring(process.env);
 if (secretsKeyring.problem) console.warn(`[secrets] ${secretsKeyring.problem}: integration credentials and tokens cannot be stored or read (docs/INTEGRATIONS.md)`);
 const integrationCredentials = deploymentOrg ? createCredentialStore({ db: getDb(), orgUid: deploymentOrg.uid, keyring: secretsKeyring }) : null;
 if (integrationCredentials) await integrationCredentials.rewrap().catch((error) => console.warn(`[secrets] re-encrypting with the current key failed (${error?.code || "error"})`));
+// The Connect wizard (docs/XERO.md): where the owner is, and credentials the
+// browser encrypted with a key it generated before the deployment had it.
+// Once FIELD_SECRETS_KEY is that key, boot stores them as the credentials.
+const xeroSetup = deploymentOrg
+  ? createIntegrationSetup({ db: getDb(), orgUid: deploymentOrg.uid, keyring: secretsKeyring, integration: "xero", fields: ["client_id", "client_secret"], valid: (values) => /^\S{8,200}$/.test(values.client_id) && /^\S{8,200}$/.test(values.client_secret) })
+  : null;
+if (xeroSetup) await xeroSetup.promote();
 
 // Xero (#93, docs/XERO.md): the owner's own Xero app. Its client id and
 // secret are entered in Settings (stored as above); XERO_CLIENT_ID and
@@ -1399,7 +1408,17 @@ registerXeroRoutes(app, {
   }),
   connection: () => xeroConnection,
   sync: () => xeroInvoiceSync,
+  setup: () => xeroSetup,
   publicUrl: () => config.publicUrl || null,
+  actorOf: (req) => req.caller?.name || req.caller?.email || req.caller?.id || null,
+});
+
+// The browser generated a FIELD_SECRETS_KEY (owners): an audit event only.
+// The key never reaches the server.
+registerSecretsKeyRoutes(app, {
+  requireAuth,
+  requireOwner: requireAdmin,
+  credentialStore: () => integrationCredentials,
   actorOf: (req) => req.caller?.name || req.caller?.email || req.caller?.id || null,
 });
 

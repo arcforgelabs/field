@@ -1,15 +1,18 @@
-// Settings > Integrations > Xero (#93, owners only): install the owner's own
-// Xero app, connect it, choose the organisation, and say what Field creates
-// in Xero for each invoice it issues. The screen shows this installation's
-// real redirect address and whether each secret is set; never a secret.
+// Settings > Integrations > Xero (#93, owners only): Connect Xero opens a
+// 4-step wizard (xero-connect-wizard.tsx) that installs the owner's own Xero
+// app, takes its credentials, sets up FIELD_SECRETS_KEY when it is missing,
+// and connects. Then the screen says what Field creates in Xero for each
+// invoice it issues. It shows this installation's real addresses and whether
+// each secret is set; never a secret. Everyone else sees the status only.
 import { useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Check, ChevronDown, Copy, ExternalLink, KeyRound, Link2, Trash2, Unlink } from "lucide-react";
+import { Check, KeyRound, Link2, Plug, Trash2, Unlink } from "lucide-react";
 import { api } from "@/lib/api";
 import type { XeroCodes, XeroCreateMode, XeroIntegration } from "@/lib/types";
 import { useShell } from "@/components/shell/shell-context";
 import { shortDate } from "@/lib/job-status";
 import { XeroPushDialog } from "@/features/job/xero-invoice-status";
+import { XeroConnectWizard } from "./xero-connect-wizard";
 
 /** What the owner reads for a code from the callback (docs/XERO.md "When connecting fails"). */
 const CALLBACK_MESSAGES: Record<string, string> = {
@@ -50,6 +53,8 @@ export function XeroPanel() {
   const [earlierDays, setEarlierDays] = useState(30);
   const [codes, setCodes] = useState<XeroCodes | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardClosed, setWizardClosed] = useState(false);
 
   async function load() {
     try {
@@ -111,15 +116,6 @@ export function XeroPanel() {
     }
   }
 
-  async function copy(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      shell.toast("Copied.");
-    } catch {
-      shell.toast("Select the address and copy it.");
-    }
-  }
-
   if (error) return <Section><div className="fx-notice fx-notice--bad" style={{ margin: 0 }}><span>{error}</span></div></Section>;
   if (!data) return <Section><p className="fx-dim" style={{ margin: 0 }}>Loading…</p></Section>;
 
@@ -130,6 +126,19 @@ export function XeroPanel() {
   const status = STATUS_LABEL[connection.status];
   const dirty = mode !== settings.createMode || account.trim() !== settings.salesAccountCode || taxType.trim().toUpperCase() !== settings.taxType;
   const connected = connection.status === "connected";
+  // The wizard: opened with Connect Xero, and reopened by itself while a
+  // setup is under way (after a republish, or after Xero's sign-in).
+  const wizardActive = canManage && !wizardClosed && (wizardOpen || Boolean(data.setup?.step));
+  const keyLine = data.secretsKey.configured ? `Encryption key: set${canManage && data.secretsKey.keyId ? ` (id ${data.secretsKey.keyId})` : ""}` : "Encryption key: not set";
+
+  if (wizardActive) {
+    return (
+      <Section>
+        {notice && <div className={`fx-notice ${notice.tone === "bad" ? "fx-notice--bad" : ""}`} role="status" style={{ margin: 0 }}><span>{notice.text}</span></div>}
+        <XeroConnectWizard data={data} onChanged={load} busy={busy === "connect"} onConnect={connect} onClose={() => { setWizardOpen(false); setWizardClosed(true); }} />
+      </Section>
+    );
+  }
 
   return (
     <Section>
@@ -138,9 +147,9 @@ export function XeroPanel() {
           <span>Only an owner can change the Xero connection and its settings. You can see how it is set up.</span>
         </div>
       )}
-      {!data.secretsKey.configured && (
+      {canManage && !data.secretsKey.configured && (
         <div className="fx-notice fx-notice--bad" role="alert" style={{ margin: 0 }}>
-          <span>{data.secretsKey.problem === "SECRETS_KEY_INVALID" ? "FIELD_SECRETS_KEY is not a 32-byte key" : data.secretsKey.problem === "SECRETS_KEY_PREVIOUS_INVALID" ? "FIELD_SECRETS_KEY_PREVIOUS holds a value that is not a 32-byte key" : "FIELD_SECRETS_KEY is not set"}, so Field cannot store or read the Xero credentials and sign-in, and sends nothing to Xero. Set it in the deployment's secrets and restart Field (docs/INTEGRATIONS.md).</span>
+          <span>{data.secretsKey.problem === "SECRETS_KEY_INVALID" ? "FIELD_SECRETS_KEY is too short to be a key" : data.secretsKey.problem === "SECRETS_KEY_PREVIOUS_INVALID" ? "FIELD_SECRETS_KEY_PREVIOUS holds a value that is too short to be a key" : "FIELD_SECRETS_KEY, the encryption key, is not set"}, so Field cannot store or read the Xero credentials and sign-in, and sends nothing to Xero. {connection.status === "disconnected" ? "Press Connect Xero: it makes the key in this browser and shows where to put it." : "Set it in the deployment's secrets and republish (docs/INTEGRATIONS.md)."}</span>
         </div>
       )}
       {!data.publicUrlConfigured && (
@@ -163,14 +172,18 @@ export function XeroPanel() {
               {connection.tenantName && connection.status !== "choose_organisation" && <b className="xero__org">{connection.tenantName}</b>}
             </div>
             <p className="fx-dim xero__meta">
+              {!canManage ? <>{keyLine}. </> : null}
               {connected && connection.connectedAt ? `Connected ${shortDate(connection.connectedAt)}${connection.connectedBy ? ` by ${connection.connectedBy}` : ""}. Field refreshes the sign-in by itself.` : null}
               {connection.status === "needs_reconnect" ? connection.reconnectMessage : null}
-              {connection.status === "disconnected" ? (canConnect ? "Connect to choose the Xero organisation Field writes to." : "Set up your Xero app first (below).") : null}
+              {connection.status === "disconnected" ? (canManage ? "Connect Xero walks you through it in four steps." : "An owner connects Xero.") : null}
             </p>
           </div>
           <div className="xero__actions">
-            {canManage && (connection.status === "disconnected" || connection.status === "needs_reconnect") && (
-              <button type="button" className="fx-btn fx-btn--primary" disabled={!canConnect || busy !== null} onClick={connect}><Link2 aria-hidden />{busy === "connect" ? "Opening Xero…" : connection.status === "needs_reconnect" ? "Connect again" : "Connect to Xero"}</button>
+            {canManage && connection.status === "disconnected" && (
+              <button type="button" className="fx-btn fx-btn--primary" disabled={busy !== null} onClick={() => { setWizardClosed(false); setWizardOpen(true); }}><Plug aria-hidden />Connect Xero</button>
+            )}
+            {canManage && connection.status === "needs_reconnect" && (
+              <button type="button" className="fx-btn fx-btn--primary" disabled={!canConnect || busy !== null} onClick={connect}><Link2 aria-hidden />{busy === "connect" ? "Opening Xero…" : "Connect again"}</button>
             )}
             {canManage && connection.status !== "disconnected" && (
               <button type="button" className="fx-btn" disabled={busy !== null} onClick={() => setConfirmDisconnect(true)}><Unlink aria-hidden />Disconnect</button>
@@ -198,7 +211,7 @@ export function XeroPanel() {
         <div className="xero__row">
           <div style={{ minWidth: 0 }}>
             <div className="xero__title"><b className="xero__org">App credentials</b></div>
-            <p className="fx-dim xero__meta">The client id and client secret of your Xero app. Field stores them encrypted and never shows them again.</p>
+            <p className="fx-dim xero__meta">The client id and client secret of your Xero app. Field stores them encrypted and never shows them again.{canManage ? ` ${keyLine}.` : ""}</p>
           </div>
           {canManage && !editing && (
             <div className="xero__actions">
@@ -341,8 +354,6 @@ export function XeroPanel() {
         />
       )}
 
-      <SetupSteps data={data} open={!secretsReady || connection.status === "disconnected"} onCopy={copy} />
-
       {confirmRemove && (
         <div className="fx-scrim" onMouseDown={() => setConfirmRemove(false)}>
           <div className="fx-dialog" role="dialog" aria-modal="true" aria-labelledby="xero-remove-title" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Escape") setConfirmRemove(false); }}>
@@ -396,6 +407,11 @@ const HISTORY_LABEL: Record<string, string> = {
   disconnected: "Disconnected",
   tokens_rewrapped: "Sign-in re-encrypted",
   tokens_unreadable: "Sign-in could not be read",
+  setup_step: "Connect wizard step finished",
+  secrets_key_generated: "Encryption key generated in the browser",
+  pending_credentials_stored: "Credentials saved, waiting for the key",
+  pending_credentials_promoted: "Credentials stored with the key",
+  pending_credentials_discarded: "Wizard started again",
 };
 
 function CredentialState({ label, state }: { label: string; state: { set: boolean; setAt: string | null; setBy: string | null } }) {
@@ -407,43 +423,6 @@ function CredentialState({ label, state }: { label: string; state: { set: boolea
           ? <><span className="fx-status fx-status--paid">Set</span> <span className="fx-dim">last changed{state.setBy ? ` by ${state.setBy}` : ""}{state.setAt ? ` on ${shortDate(state.setAt)}` : ""}</span></>
           : <span className="fx-status fx-status--draft">Not set</span>}
       </dd>
-    </div>
-  );
-}
-
-function SetupSteps({ data, open, onCopy }: { data: XeroIntegration; open: boolean; onCopy: (text: string) => void }) {
-  const [expanded, setExpanded] = useState(open);
-  const { redirectUri } = data;
-  return (
-    <div className="fx-acc">
-      <div className="fx-acc__item">
-        <button type="button" className="fx-acc__trigger" aria-expanded={expanded} aria-controls="xero-setup" onClick={() => setExpanded((value) => !value)}>
-          Set up your Xero app <ChevronDown aria-hidden />
-        </button>
-        <div className="fx-acc__panel" id="xero-setup" data-open={expanded}>
-          <div>
-            <div className="fx-acc__body xero__steps">
-              <p style={{ margin: "0 0 10px" }}>Field connects through a Xero app that you create, so your Xero sign-in stays with your installation.</p>
-              <ol>
-                <li>Sign in at <a href="https://developer.xero.com/app/manage" target="_blank" rel="noreferrer" className="xero__link">developer.xero.com/app/manage<ExternalLink aria-hidden /></a> with your Xero login, and create a new app.</li>
-                <li>Choose <b>Web app</b>, the authorization code flow (not PKCE, and not a custom connection). Give it a name, for example “Field”, and your company's website.</li>
-                <li>
-                  Paste this installation's redirect address:
-                  <div className="xero__copy">
-                    <code>{redirectUri || "https://<your-field-host>/api/integrations/xero/callback"}</code>
-                    {redirectUri && <button type="button" className="fx-btn fx-btn--sm" onClick={() => onCopy(redirectUri)}><Copy aria-hidden />Copy</button>}
-                  </div>
-                  {!data.publicUrlConfigured && <span className="xero__warn">publicUrl is not set, so Field cannot show this installation's address yet.</span>}
-                </li>
-                <li>In the app's configuration, copy the client id and generate a client secret. Xero shows the secret once.</li>
-                <li>Under <b>App credentials</b> above, press <b>Enter credentials</b> and paste both. (A self-hoster can instead set <code>XERO_CLIENT_ID</code> and <code>XERO_CLIENT_SECRET</code> in the deployment environment; those then win.)</li>
-                <li>Press <b>Connect to Xero</b> above, sign in, and allow access for your organisation.</li>
-              </ol>
-              <p className="fx-mute" style={{ margin: "10px 0 0" }}>Field asks Xero for: {data.scopes.join(", ")}. A new Xero app starts on Xero's free Starter plan, which allows this one connection.</p>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
