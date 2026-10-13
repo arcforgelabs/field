@@ -391,6 +391,15 @@ Nothing else about an issued invoice may change. Run
 `rollback/0018_xero_invoice_sync.down.sql` before 0017's: it restores 0013's
 function before it drops the columns.
 
+`0021_integration_setup` adds `integration_setup`, the Connect wizard's
+place per organisation and integration, and pending credentials: `fs1`
+values the browser encrypted with a `FIELD_SECRETS_KEY` it generated, with
+that key's id, never the key or a plain value (`server/secrets/setup.js`).
+It lets `integration_audit_events` record the wizard's steps. `field_app`
+may read, insert, update and delete it. Run
+`rollback/0021_integration_setup.down.sql` before 0020's: it drops the table
+and the wizard's audit events.
+
 ### Default organisation
 
 `0005_tenancy` seeded the default organisation (`DEFAULT_ORG_UID`) with the

@@ -51,15 +51,46 @@ deployment secret `FIELD_SECRETS_KEY`.
 - It is its own secret: never `SESSION_SECRET`, and never derived from an
   integration's credentials. Rotating a Xero app's client secret therefore
   loses nothing.
-- **Make it with your password manager.** In Bitwarden, open the password
-  generator and make a password of 40 characters or more, with upper case,
-  lower case and numbers. Any random string of at least 40 characters works;
-  Field turns it into its 32-byte key with HKDF-SHA256. Use a generated
-  string, never a phrase you made up: the key is only as strong as the
-  string. Leave commas out, because `FIELD_SECRETS_KEY_PREVIOUS` separates
-  keys with commas.
-- A key of 32 random bytes in base64, or 64 hex characters, also works, and
-  is used as it is. To make one on a computer with Node.js:
+- In a hosted Field, the hosting provider sets this key automatically at
+  provisioning.
+- **Make it in Field (the default).** Settings, Integrations, Xero, **Connect
+  Xero**. When the key is not set, step 3 of the wizard, "Your encryption
+  key", makes it in your browser and shows it once, with **Copy**:
+
+  1. Press **Generate key**. The browser makes 32 random bytes with
+     `crypto.getRandomValues` and shows them in base64 (44 characters).
+  2. Under "Where does this go?", choose your host. On Replit: Publishing,
+     Adjust settings, Production app secrets, Add deployment secret, name
+     `FIELD_SECRETS_KEY`, paste the key, Republish. On any other host: save
+     it as the environment variable `FIELD_SECRETS_KEY` wherever your Field
+     server keeps its secrets, then restart Field. **Copy setup prompt**
+     copies the same instructions for an assistant; it names the secret and
+     never holds the key.
+  3. Save the key in your password manager too, tick the box and press
+     **Done**. The key leaves the screen and the browser's memory.
+
+  The key never reaches Field's server: the server cannot store, log or send
+  to Sentry what it never receives. Generate key records only an audit event
+  (`POST /api/integrations/secrets-key/generated`, no body: who and when).
+  The browser also encrypts the Xero app's client id and client secret with
+  the new key, in the same `fs1` format as `server/secrets/box.js`
+  (`shared/secrets-web.js`), and sends only those encrypted values. Field
+  keeps them as pending credentials (`integration_setup`) until it is
+  republished with the key; then it stores them as the credentials, with an
+  audit event, and the wizard goes on at step 4. If the deployed key is
+  another one, the wizard says so and offers to start again.
+
+  The key's element is inside Sentry's replay block (`sentry-block`), and the
+  "Report a problem" button is hidden while the key shows, so neither a
+  replay nor a feedback screenshot holds it.
+- **Fallbacks for self-hosters.** In Bitwarden, open the password generator
+  and make a password of 40 characters or more, with upper case, lower case
+  and numbers. Any random string of at least 40 characters works; Field
+  turns it into its 32-byte key with HKDF-SHA256. Use a generated string,
+  never a phrase you made up: the key is only as strong as the string. Leave
+  commas out, because `FIELD_SECRETS_KEY_PREVIOUS` separates keys with
+  commas. A key of 32 random bytes in base64, or 64 hex characters, also
+  works, and is used as it is. To make one on a computer with Node.js:
 
   ```bash
   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
@@ -68,10 +99,11 @@ deployment secret `FIELD_SECRETS_KEY`.
 - Anything shorter than 40 characters that is not such a key is refused
   (`SECRETS_KEY_INVALID`), and the screen says so.
 
-  Put the key in the deployment's secrets (on Replit, Secrets), then restart or
-  republish Field. Never paste it into chat, an issue, a pull request or a
-  file in the repository. Keep a copy in your password manager: without it,
-  the stored credentials and tokens cannot be read.
+  Put the key in the deployment's secrets (on Replit, Publishing, Adjust
+  settings, Production app secrets), then restart or republish Field. Never
+  paste it into chat, an issue, a pull request or a file in the repository.
+  Keep a copy in your password manager: without it, the stored credentials
+  and tokens cannot be read.
 - Field uses AES-256-GCM with a fresh nonce for every value, and binds each
   value to its organisation, integration and field. Each value records the
   id of the key that wrote it (a hash of the key, never the key).
@@ -82,6 +114,12 @@ deployment secret `FIELD_SECRETS_KEY`.
   connected integration shows "Connect again". Field does not store that
   state: once the key is fixed, the integration is connected again by
   itself.
+
+Who sees it: owners see "Encryption key: set (id <key id>)" or the wizard;
+everyone else sees only "Encryption key: set" or "not set". Every wizard step
+writes an audit event without a value (`setup_step`,
+`secrets_key_generated`, `pending_credentials_stored`, `_promoted`,
+`_discarded`). API and MCP tokens get a 403 on every wizard route.
 
 ## Rotating the key
 

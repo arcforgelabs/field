@@ -25,6 +25,17 @@
 //   POST /api/integrations/xero/push             { invoiceUids }: send them
 //   POST /api/integrations/xero/invoices/:uid/retry
 //
+//   The Connect wizard (docs/XERO.md "Connect Xero"), owners only, no-store:
+//   POST /api/integrations/xero/setup/step       { step: app | credentials | done }:
+//        the step the owner finished, with an audit event. `done` ends it.
+//   PUT  /api/integrations/xero/pending-credentials  { keyId, clientId, clientSecret }:
+//        while FIELD_SECRETS_KEY is not usable, the Xero app's credentials as
+//        `fs1` values the browser encrypted with the key it generated
+//        (shared/secrets-web.js). Anything else in the body, or a value that
+//        is not a well-formed fs1 value of that key id, is refused. No key,
+//        no plain value ever reaches this route.
+//   DELETE /api/integrations/xero/pending-credentials  forget them (start again)
+//
 //   GET  /api/jobs/:id/xero                      each invoice's Xero state, for the
 //        job's Invoices tab. Any signed-in person may read it; Retry and Send
 //        are the owner routes above.
@@ -34,6 +45,7 @@
 // screen and a job's Xero state are read-only for everyone else. The callback
 // needs the state an owner's Connect recorded.
 import { XERO_CALLBACK_PATH, xeroRedirectUri } from "./config.js";
+import { INTEGRATIONS_READ_PERMISSION, hasBody, isMachine, machineGate } from "../secrets/routes.js";
 
 export const XERO_STATUS_PATH = "/api/integrations/xero";
 export const XERO_CONNECT_PATH = `${XERO_STATUS_PATH}/connect`;
@@ -50,27 +62,13 @@ export { XERO_CALLBACK_PATH };
 
 const SCREEN = "/#/settings?section=integrations";
 
+export const XERO_SETUP_STEP_PATH = `${XERO_STATUS_PATH}/setup/step`;
+export const XERO_PENDING_CREDENTIALS_PATH = `${XERO_STATUS_PATH}/pending-credentials`;
+
 /** The permission that lets an API or MCP token read the Xero status (never change it). */
-export const INTEGRATIONS_READ_PERMISSION = "integrations:read";
+export { INTEGRATIONS_READ_PERMISSION };
 
-// An API or MCP token (a service account, or a person's token with Clerk
-// sign-in), not a person in the browser. The break-glass key is the owner's.
-function isMachine(caller) {
-  if (!caller) return false;
-  if (caller.via === "break-glass") return false;
-  return caller.kind === "service" || caller.via === "token";
-}
-
-// Integration settings are not for machine tokens: never their changes, and
-// their status only with the integrations:read permission.
-function machineGate({ read = false } = {}) {
-  return (req, res, next) => {
-    const caller = req.caller;
-    if (!isMachine(caller)) return next();
-    if (read && Array.isArray(caller.permissions) && caller.permissions.includes(INTEGRATIONS_READ_PERMISSION)) return next();
-    return res.status(403).json({ error: "API and MCP tokens cannot use integration settings.", code: "INTEGRATIONS_FORBIDDEN" });
-  };
-}
+const PENDING_BODY_KEYS = ["clientId", "clientSecret", "keyId"];
 
 // What someone who is not an owner may see: the status, never who changed
 // what, when, or the audit history.
@@ -85,6 +83,7 @@ function forReader(status) {
     },
     history: [],
     connection: { ...status.connection, connectedBy: null },
+    setup: null,
   };
 }
 
@@ -96,8 +95,9 @@ function codeOf(error, fallback) {
 /**
  * `connection()` returns the connection service (connection.js) or null when
  * the server has no database. `publicUrl()` the configured public address.
+ * `setup()` the Connect wizard's state (server/secrets/setup.js), or null.
  */
-export function registerXeroRoutes(app, { requireAuth, requireOwner, isOwner = async () => false, connection, sync = () => null, publicUrl = () => null, actorOf = () => null, logger = console }) {
+export function registerXeroRoutes(app, { requireAuth, requireOwner, isOwner = async () => false, connection, sync = () => null, setup = () => null, publicUrl = () => null, actorOf = () => null, logger = console }) {
   const service = (res) => {
     const found = connection();
     if (!found) res.status(503).json({ error: "Xero needs the database, which this server does not have.", code: "XERO_NO_DATABASE" });
@@ -116,11 +116,66 @@ export function registerXeroRoutes(app, { requireAuth, requireOwner, isOwner = a
     try {
       const { redirectUri, configured } = redirect();
       const owner = !isMachine(req.caller) && Boolean(await isOwner(req));
+      // The wizard first: it moves pending credentials in once the key is set.
+      const wizard = owner && setup() ? await setup().state() : null;
       const status = await xero.status();
       res.setHeader("Cache-Control", "no-store");
-      res.json({ ok: true, canManage: owner, redirectUri, publicUrlConfigured: configured, ...(owner ? status : forReader(status)) });
+      const appUrl = configured ? String(publicUrl()).trim().replace(/\/+$/, "") : null;
+      res.json({ ok: true, canManage: owner, redirectUri, appUrl, publicUrlConfigured: configured, ...(owner ? { ...status, setup: wizard } : forReader(status)) });
     } catch (error) {
       fail(res, error, "status");
+    }
+  });
+
+  const wizardService = (res) => {
+    const found = setup();
+    if (!found) res.status(503).json({ error: "The wizard needs the database, which this server does not have.", code: "XERO_NO_DATABASE" });
+    return found;
+  };
+
+  app.post(XERO_SETUP_STEP_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const wizard = wizardService(res);
+    if (!wizard) return;
+    try {
+      const body = req.body || {};
+      if (Object.keys(body).some((key) => key !== "step")) return res.status(400).json({ error: "Send only the step.", code: "SETUP_INVALID" });
+      res.json({ ok: true, setup: await wizard.recordStep(String(body.step || ""), { actor: actorOf(req) }) });
+    } catch (error) {
+      fail(res, error, "recording the step");
+    }
+  });
+
+  app.put(XERO_PENDING_CREDENTIALS_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const wizard = wizardService(res);
+    const xero = wizard && service(res);
+    if (!xero) return;
+    try {
+      const body = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+      const keys = Object.keys(body).sort();
+      if (keys.join(",") !== PENDING_BODY_KEYS.join(",")) {
+        return res.status(400).json({ error: "Send only the key id and the two encrypted credentials. The key stays in your browser.", code: "PENDING_INVALID" });
+      }
+      if ((await xero.status()).credentials.environmentOverride) {
+        return res.status(409).json({ error: "XERO_CLIENT_ID and XERO_CLIENT_SECRET are set in the deployment, so Field uses those.", code: "XERO_ENVIRONMENT_OVERRIDE" });
+      }
+      const state = await wizard.storePending({ keyId: body.keyId, values: { client_id: body.clientId, client_secret: body.clientSecret } }, { actor: actorOf(req) });
+      res.json({ ok: true, setup: state });
+    } catch (error) {
+      fail(res, error, "storing the pending credentials");
+    }
+  });
+
+  app.delete(XERO_PENDING_CREDENTIALS_PATH, requireAuth, machineGate(), requireOwner, async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const wizard = wizardService(res);
+    if (!wizard) return;
+    if (hasBody(req.body)) return res.status(400).json({ error: "This takes no body.", code: "SETUP_INVALID" });
+    try {
+      res.json({ ok: true, setup: await wizard.discardPending({ actor: actorOf(req) }) });
+    } catch (error) {
+      fail(res, error, "starting again");
     }
   });
 

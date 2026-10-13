@@ -65,7 +65,10 @@ credential value anywhere public.
   deployment secret of its own; a missing or wrong key fails closed
   (`docs/INTEGRATIONS.md`). They are write-only in Settings: never sent to
   the browser, a log, Sentry or MCP output. Every change is an audit event
-  without the value.
+  without the value. When the Connect wizard makes `FIELD_SECRETS_KEY`, it
+  makes it in the owner's browser and never sends it to the server; the
+  credentials entered before the key is deployed reach the server only
+  encrypted with it.
 - Surveyor artifacts (`.artifacts/`) are customer data. Never commit them, and
   never attach raw evidence to an issue.
 - Errors, traces and logs sent to Sentry pass through `shared/sentry-scrub.js`

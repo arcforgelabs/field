@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createEventThrottle, scrubBreadcrumb, scrubEvent, scrubLog, scrubText, scrubValue } from "./sentry-scrub.js";
+import { generateSecretsKey } from "./secrets-web.js";
+
+test("anything shaped like a FIELD_SECRETS_KEY is cut from free text, breadcrumbs and values", () => {
+  const key = generateSecretsKey().text;
+  const hex = Buffer.from(generateSecretsKey().bytes).toString("hex");
+  assert.equal(scrubText(`pasted ${key} here`), "pasted [key] here");
+  assert.equal(scrubText(`hex ${hex}`), "hex [key]");
+  const click = scrubBreadcrumb({ category: "ui.click", message: `div.xwiz__key.sentry-block > input.fx-input[value="${key}"]` });
+  assert.ok(!click.message.includes(key));
+  const crumb = scrubBreadcrumb({ category: "fetch", data: { url: `/api/x?k=${key}`, key, keyText: key, note: key } });
+  assert.ok(!JSON.stringify(crumb).includes(key));
+  assert.ok(!JSON.stringify(scrubEvent({ message: key, extra: { generated: key } })).includes(key));
+  // A release or a UUID is not a key.
+  assert.equal(scrubText("release 2026.10.13 3f2b8c1e-9a4d-4e6f-8b2a-1c3d5e7f9a0b"), "release 2026.10.13 3f2b8c1e-9a4d-4e6f-8b2a-1c3d5e7f9a0b");
+});
 
 const JOB_UUID = "3f2b8c1e-9a4d-4e6f-8b2a-1c3d5e7f9a0b";
 

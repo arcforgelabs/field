@@ -1102,6 +1102,26 @@ export const api = {
   setXeroCredentials(credentials: { clientId: string; clientSecret: string }) {
     return request<{ ok: boolean }>("/api/integrations/xero/credentials", { method: "PUT", body: JSON.stringify(credentials) });
   },
+  /** Owner only: the Connect wizard step the owner finished (app, credentials), or done. An audit event, never a value. */
+  xeroSetupStep(step: "app" | "credentials" | "done") {
+    return request<{ ok: boolean; setup: import("./types.ts").XeroSetup }>("/api/integrations/xero/setup/step", { method: "POST", body: JSON.stringify({ step }), cache: "no-store" });
+  },
+  /**
+   * Owner only, while FIELD_SECRETS_KEY is not set: the Xero app's credentials,
+   * already encrypted in this browser with the key it generated (fs1 values).
+   * The key itself is never sent.
+   */
+  storeXeroPendingCredentials(sealed: { keyId: string; clientId: string; clientSecret: string }) {
+    return request<{ ok: boolean; setup: import("./types.ts").XeroSetup }>("/api/integrations/xero/pending-credentials", { method: "PUT", body: JSON.stringify(sealed), cache: "no-store" });
+  },
+  /** Owner only: forget the pending credentials and start the wizard again. */
+  discardXeroPendingCredentials() {
+    return request<{ ok: boolean; setup: import("./types.ts").XeroSetup }>("/api/integrations/xero/pending-credentials", { method: "DELETE", cache: "no-store" });
+  },
+  /** Owner only: record that this browser generated a FIELD_SECRETS_KEY. No body: the key stays here. */
+  secretsKeyGenerated() {
+    return request<{ ok: boolean }>("/api/integrations/secrets-key/generated", { method: "POST", cache: "no-store" });
+  },
   /** Owner only: remove the stored credentials (disconnects first). */
   removeXeroCredentials() {
     return request<{ ok: boolean; removed: boolean }>("/api/integrations/xero/credentials", { method: "DELETE" });
