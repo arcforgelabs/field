@@ -43,3 +43,11 @@ export function useJobs() {
   const refresh = useCallback(() => refreshJobs(), []);
   return { ...state, refresh };
 }
+
+/** The job list only if something already loaded it: never fetches. */
+export function useLoadedJobs(): RecordingMeta[] | null {
+  return useSyncExternalStore(
+    (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+    () => snapshot,
+  ).jobs;
+}

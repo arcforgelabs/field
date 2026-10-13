@@ -157,6 +157,69 @@ export interface InvoicingSettings {
   choices: Array<{ value: CreditNoteOnReissue; label: string; description: string }>;
 }
 
+/**
+ * Legacy invoices whose milestone record and PDFs disagree (#60), from
+ * GET /api/admin/invoices/amount-disagreements (server/invoices/amount-evidence.js).
+ * Amounts are decimal strings with two places ("3960.00").
+ */
+export type InvoiceAmountSource = "milestone-record" | "stored-pdf" | "sent-copy";
+
+export type InvoiceAmountState =
+  | "needs-owner-decision"
+  | "recorded-matches-sent"
+  | "sent-differs-from-recorded"
+  | "sent-copies-differ"
+  | "settled";
+
+export interface InvoiceAmountSet {
+  subtotal: string;
+  taxTotal: string;
+  total: string;
+}
+
+export interface InvoiceAmountOption extends InvoiceAmountSet {
+  choose: InvoiceAmountSource;
+}
+
+export interface InvoiceAmountEntry {
+  jobId: string;
+  invoiceNumber: string;
+  milestone: number;
+  revision: number;
+  /** The milestone's status, or "superseded" for an earlier revision. */
+  status: string;
+  state: InvoiceAmountState;
+  issuedAt: string | null;
+  recorded: InvoiceAmountSet & { quoteVersion: number | null; quoteVersionInferred: boolean; frozen: boolean };
+  storedPdf: (Partial<InvoiceAmountSet> & { contractValue?: string | null; drawnFromVersions?: number[]; unreadable?: string }) | null;
+  sentCopy: (InvoiceAmountSet & { source?: string; sentAt?: string | null; contractValue?: string | null; drawnFromVersions?: number[] }) | null;
+  emails: Array<{ sentAt: string | null; quoteVersion: number | null; hashed: boolean }>;
+  /** Each quote version's customer total, by version number. */
+  quoteVersionTotals: Record<string, string>;
+  paid: string;
+  settlement: { source: InvoiceAmountSource; total: string; recordedTotal: string | null; decidedAt: string | null } | null;
+  /** The sets the owner may choose; empty once settled. */
+  options: InvoiceAmountOption[];
+  note: string | null;
+}
+
+export interface InvoiceAmountReport {
+  ok: boolean;
+  wroteNothing: true;
+  durationMs: number;
+  summary: { jobs: number; issuedInvoices: number; disagreeing: number; byState: Partial<Record<InvoiceAmountState, number>>; errors: number };
+  invoices: InvoiceAmountEntry[];
+}
+
+export interface InvoiceAmountSettleInput {
+  jobId: string;
+  invoiceNumber: string;
+  choose: InvoiceAmountSource;
+  /** The chosen set's total, exactly as the report gave it. */
+  total: string;
+  reason: string;
+}
+
 /** A credit (adjustment) note against an issued invoice, as the job records it. */
 export interface CreditNote {
   number: string;

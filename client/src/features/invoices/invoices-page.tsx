@@ -2,8 +2,8 @@
 // what's been paid. Record a payment straight from the row; open the job for
 // anything else.
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Search, Wallet } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { AlertTriangle, Search, Wallet } from "lucide-react";
 import type { MilestoneInvoice, RecordingMeta } from "@/lib/types";
 import { api } from "@/lib/api";
 import { openDocumentPdf } from "@/lib/open-document";
@@ -11,6 +11,8 @@ import { useJobs, refreshJobs } from "@/lib/use-jobs";
 import { useShell } from "@/components/shell/shell-context";
 import { INVOICE_STATE_LABEL, INVOICE_STATE_TONE, invoiceState, jobCustomer, jobInvoices, jobTitle, money, moneyRound, shortDate, type InvoiceState } from "@/lib/job-status";
 import { RecordPaymentDialog } from "@/features/job/job-invoices";
+import { useAuth } from "@/contexts/auth-context";
+import { useAmountDecisionCount } from "./invoice-amounts-model";
 
 type Filter = "open" | "overdue" | "not-sent" | "paid" | "all";
 type Row = { job: RecordingMeta; invoice: MilestoneInvoice; state: InvoiceState };
@@ -37,6 +39,8 @@ export function InvoicesPage() {
   const [query, setQuery] = useState("");
   const [paying, setPaying] = useState<Row | null>(null);
   const [now] = useState(() => Date.now());
+  const { isOwner } = useAuth();
+  const decisions = useAmountDecisionCount(isOwner);
 
   useEffect(() => { void refreshJobs(); }, []);
 
@@ -77,6 +81,14 @@ export function InvoicesPage() {
           <input id="invoices-filter" placeholder="Invoice number, job or customer" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setQuery(""); }} />
         </label>
       </header>
+
+      {decisions > 0 && (
+        <div className="fx-notice fx-notice--warn" role="status">
+          <AlertTriangle aria-hidden />
+          <span>{decisions === 1 ? "1 old invoice shows" : `${decisions} old invoices show`} two different amounts. Choose the amounts the customer got.</span>
+          <Link className="fx-btn fx-btn--sm" to="/invoices/amounts">Choose amounts <span className="fx-badge fx-badge--solid">{decisions}</span></Link>
+        </div>
+      )}
 
       <div className="fx-strip">
         <button type="button" className="fx-strip__item" aria-pressed={filter === "open"} onClick={() => setFilter("open")}>

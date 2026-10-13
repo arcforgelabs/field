@@ -223,7 +223,12 @@ The invoice rows backfill uses what was emailed:
 - **Field holds no such copy.** The job is refused. Invoices emailed before
   the issuance ledger have no such copy.
 
-To see every affected invoice, sign in as an owner and open this route:
+To see and settle every affected invoice, sign in as an owner and open
+Invoices › Choose amounts (`/#/invoices/amounts`). The Invoices page shows
+the notice while an invoice is not settled. The screen uses the two
+routes below; you can also call them directly.
+
+The report route:
 
 ```text
 GET /api/admin/invoices/amount-disagreements
@@ -238,7 +243,7 @@ with the quote version that each was built against.
 Each entry has a note that says what Field bills now. Use the archived
 email to decide which set the customer received, and the payments to
 support it. When Field holds the emailed copy, `sent-copy` is the only
-choice. Then record your choice:
+choice. Then record your choice on the screen, or with the settle route:
 
 ```text
 POST /api/admin/invoices/amount-disagreements/settle
