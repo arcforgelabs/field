@@ -6,23 +6,23 @@
       - any-glob-to-any-file:
           - server/quotes/**
           - server/quote-*.js
-          - server/generate-evidence-quote.js
-          - server/legacy-sent-quote.js
-          - server/job-actions.js
-          - server/pipeline.js
-          - server/clarification-notes.js
-          - server/evidence-index.js
-          - server/ingestion-ledger.js
-          - server/reconcile-baseline-scope.js
-          - shared/money.js
-          - shared/source-label-disambiguation.js
-          - scripts/export-quote-proof-bundle.js
-          - server/local-pricing.js
-          - server/assembly-modes.js
+          - server/generate-evidence-quote*.js
+          - server/legacy-sent-quote{,.test}.js
+          - server/job-actions{,.test}.js
+          - server/pipeline{,.test}.js
+          - server/clarification-notes{,.test}.js
+          - server/evidence-index{,.test}.js
+          - server/ingestion-ledger{,.test}.js
+          - server/reconcile-baseline-scope{,.test}.js
+          - shared/money.*
+          - shared/source-label-disambiguation.*
+          - scripts/export-quote-proof-bundle{,.test}.js
+          - server/local-pricing{,.test}.js
+          - server/assembly-modes{,.test}.js
           - server/retaining-wall-*.js
           - server/wall-*.js
-          - shared/quote-*.js
-          - shared/retaining-wall-render.js
+          - shared/quote-*
+          - shared/retaining-wall-render.*
           - client/src/features/job/**
           - client/src/features/job-detail/**
           - generate-landscaping-quote.js
@@ -33,7 +33,7 @@
       - any-glob-to-any-file:
           - server/invoices/**
           - server/invoice-*.js
-          - server/job-actions.js
+          - server/job-actions{,.test}.js
           - client/src/features/invoices/**
           - scripts/quote-invoice-proof/**
 
@@ -42,12 +42,12 @@
       - any-glob-to-any-file:
           - server/documents/**
           - server/storage/**
-          - server/job-documents.js
-          - server/job-generation.js
-          - scripts/documents-verify-r2.js
-          - scripts/find-quarantined-generations.js
-          - server/job-document-context.js
-          - server/sent-email-archive.js
+          - server/job-documents{,.test}.js
+          - server/job-generation{,.test}.js
+          - scripts/documents-verify-r2{,.test}.js
+          - scripts/find-quarantined-generations{,.test}.js
+          - server/job-document-context{,.test}.js
+          - server/sent-email-archive{,.test}.js
 
 "area: catalogue":
   - changed-files:
@@ -57,12 +57,14 @@
           - quote-catalogs/**
           - client/src/features/catalogue/**
           - client/src/features/pricing/**
-          - shared/catalog-*.js
-          - shared/disposal-basis.js
-          - shared/dumping.js
+          - shared/catalog-*
+          - shared/disposal-basis.*
+          - shared/dumping.*
+          - server/dumping.test.js
+          - server/single-price-source.test.js
           - scripts/catalog-*.js
-          - server/test-price-catalog.js
-          - server/test-pricing-fixtures.js
+          - server/test-price-catalog{,.test}.js
+          - server/test-pricing-fixtures{,.test}.js
 
 "area: database":
   - changed-files:
@@ -70,17 +72,17 @@
           - server/db/**
           - server/db-runtime/**
           - server/data-migrations/**
-          - server/field-db.js
+          - server/field-db{,.test}.js
           - scripts/backfill-*.js
           - scripts/migrate-*.js
-          - scripts/data-migrations-cli.js
-          - scripts/db-smoke.js
+          - scripts/data-migrations-cli{,.test}.js
+          - scripts/db-smoke{,.test}.js
 
 "area: auth":
   - changed-files:
       - any-glob-to-any-file:
           - server/auth/**
-          - server/users.js
+          - server/users{,.test}.js
           - client/src/features/login/**
 
 "area: integrations":
@@ -88,15 +90,15 @@
       - any-glob-to-any-file:
           - server/xero/**
           - server/mcp/**
-          - server/gmail-oauth-store.js
+          - server/gmail-oauth-store{,.test}.js
           - server/email-*.js
-          - server/send-quote-email.js
-          - server/scheduled-email-queue.js
+          - server/send-quote-email{,.test}.js
+          - server/scheduled-email-queue{,.test}.js
           - server/google-*.js
-          - server/drive-upload.js
-          - shared/email-templates.js
-          - server/moasure.js
-          - scripts/setup-gmail-oauth.js
+          - server/drive-upload{,.test}.js
+          - shared/email-templates.*
+          - server/moasure{,.test}.js
+          - scripts/setup-gmail-oauth{,.test}.js
           - docs/XERO.md
           - docs/REMOTE_MCP.md
           - docs/GMAIL_SENDING.md
@@ -105,39 +107,44 @@
   - changed-files:
       - any-glob-to-any-file:
           - server/job-*.js
-          - server/stale-detection.js
-          - server/review-state.js
+          - server/stale-detection{,.test}.js
+          - server/review-state{,.test}.js
           - client/src/features/jobs/**
 
 "area: observability":
   - changed-files:
       - any-glob-to-any-file:
           - server/observability/**
-          - shared/sentry-scrub.js
+          - shared/sentry-scrub.*
           - client/src/instrument.ts
 
 "area: server":
   - changed-files:
       - any-glob-to-any-file:
-          - server/index.js
-          - server/runtime-config.js
-          - server/config-guard.js
-          - server/api-cache-policy.js
-          - server/business-profile.js
+          - server/index{,.test}.js
+          - server/runtime-config{,.test}.js
+          - server/config-guard{,.test}.js
+          - server/api-cache-policy{,.test}.js
+          - server/business-profile{,.test}.js
+          - dev.sh
+          - config.json.example
+          - config.local.example.json
+          - .gitignore
 
 "area: client":
   - changed-files:
       - any-glob-to-any-file:
           - client/**
-          - shared/themes.js
-          - shared/theme-palettes.js
-          - shared/color-contrast.js
+          - shared/themes.*
+          - shared/theme-palettes.*
+          - shared/color-contrast.*
+          - scripts/port-openclaw-themes{,.test}.mjs
 
 "area: cli":
   - changed-files:
       - any-glob-to-any-file:
-          - scripts/field-cli.js
-          - scripts/install-field-cli.js
+          - scripts/field-cli{,.test}.js
+          - scripts/install-field-cli{,.test}.js
           - skills/**
 
 "area: deploy":
@@ -148,11 +155,15 @@
           - .replit
           - scripts/replit-*
           - docs/REPLIT.md
-          - scripts/deploy-checks.js
-          - server/deployed-build.js
-          - scripts/demo-fixtures.js
-          - scripts/staging-fixtures.js
-          - scripts/reset-staging-baseline.js
+          - scripts/deploy-checks{,.test}.js
+          - server/deployed-build{,.test}.js
+          - scripts/demo-fixtures{,.test}.js
+          - scripts/staging-fixtures{,.test}.js
+          - scripts/reset-staging-baseline{,.test}.js
+          - scripts/verify-local-image.sh
+          - scripts/github-sync.sh
+          - scripts/git-credential-github.sh
+          - .agents/**
 
 # CI and the test tooling it runs.
 "area: ci":
@@ -162,15 +173,18 @@
           - e2e/**
           - scripts/surveyor/**
           - scripts/verification/**
+          - server/verification-runtime.test.js
+          - scripts/undefined-names.test.js
           - scripts/quote-invoice-proof/**
-          - scripts/dependency-audit.mjs
+          - scripts/dependency-audit{,.test}.mjs
 
 "area: docs":
   - changed-files:
       - any-glob-to-any-file:
           - docs/**
           - "*.md"
-          - scripts/generate-manual-pdf.js
+          - LICENSE
+          - scripts/generate-manual-pdf{,.test}.js
 
 "area: dependencies":
   - changed-files:
@@ -179,3 +193,4 @@
           - package-lock.json
           - client/package.json
           - client/package-lock.json
+          - .npmrc
