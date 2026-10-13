@@ -270,7 +270,10 @@ jobs:
             cat "$RUNNER_TEMP/npm-signatures.json" >&2; exit 1; }
           npm view "${PACKAGE}@${VERSION}" dist --json > "$RUNNER_TEMP/npm-dist.json"
           jq -e '.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1"' "$RUNNER_TEMP/npm-dist.json" >/dev/null
-          gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo "$GITHUB_REPOSITORY" --format json > "$RUNNER_TEMP/image-attestation.json"
+          # Both attestations: build provenance (gh's default) and the SBOM.
+          for type in https://slsa.dev/provenance/v1 https://spdx.dev/Document/v2.3; do
+            gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo "$GITHUB_REPOSITORY" --predicate-type "$type" --format json
+          done | jq -s 'add' > "$RUNNER_TEMP/image-attestation.json"
           mkdir -p "$RUNNER_TEMP/evidence"
           jq -n \
             --arg tag "$TAG" --arg checkedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
