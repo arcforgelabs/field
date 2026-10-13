@@ -211,3 +211,29 @@ test("generation staging rejects root and nested symlinks without following them
     await rm(nestedLinkJob, { recursive: true, force: true });
   }
 });
+
+test("reading a job with a long history stays fast: committed generations are not re-hashed on every read", async () => {
+  // Regression for the 2026-10-13 jobs-board outage (docs/lessons-learned.md):
+  // every read used to hash every file of every generation, so a job's read
+  // cost grew with its whole history. 20 reads of 60 generations, each adding
+  // a 200 KB PDF, took minutes that way; with the verification remembered
+  // they take well under a second.
+  const jobDir = await mkdtemp(join(tmpdir(), "field-generation-history-"));
+  try {
+    await writeFile(join(jobDir, "meta.json"), JSON.stringify({ version: 0 }));
+    const pdf = Buffer.alloc(200_000, 7);
+    for (let index = 0; index < 60; index += 1) {
+      await runAtomicJobGeneration(jobDir, async (stage) => {
+        await writeFile(join(stage, "meta.json"), JSON.stringify({ version: index + 1 }));
+        await writeFile(join(stage, `quote-v${index}.pdf`), pdf);
+      });
+    }
+    await resolveActiveJobGeneration(jobDir);
+    const started = Date.now();
+    for (let read = 0; read < 20; read += 1) await resolveActiveJobGeneration(jobDir);
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 10_000, `20 reads of a 60-generation job took ${elapsed} ms`);
+  } finally {
+    await rm(jobDir, { recursive: true, force: true });
+  }
+});
