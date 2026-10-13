@@ -79,7 +79,9 @@ test("readers ignore and quarantine an uncommitted generation instead of choosin
 });
 
 test("readers quarantine a committed generation whose critical bytes were modified, deleted, or added", async () => {
-  for (const mutation of ["modified", "deleted", "extra"]) {
+  // Each mutation happens after a read has verified (and remembered) the
+  // generation: "same-size" keeps the length, so only the change time tells.
+  for (const mutation of ["modified", "same-size", "deleted", "extra"]) {
     const jobDir = await mkdtemp(join(tmpdir(), `field-generation-manifest-${mutation}-`));
     try {
       await writeFile(join(jobDir, "meta.json"), JSON.stringify({ version: 1 }));
@@ -89,6 +91,7 @@ test("readers quarantine a committed generation whose critical bytes were modifi
       });
       const active = await resolveActiveJobGeneration(jobDir);
       if (mutation === "modified") await writeFile(join(active, "meta.json"), JSON.stringify({ version: 99 }));
+      if (mutation === "same-size") await writeFile(join(active, "meta.json"), JSON.stringify({ version: 3 }));
       if (mutation === "deleted") await rm(join(active, "meta.json"));
       if (mutation === "extra") await writeFile(join(active, "unexpected-critical.txt"), "unexpected");
 
