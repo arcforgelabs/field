@@ -112,7 +112,7 @@ export function xeroStateLabel(row) {
   if (!row) return "Not sent to Xero";
   if (row.state === "pending") return ["XERO_NOT_CONNECTED", "XERO_CODES_INVALID", "XERO_CREATE_OFF"].includes(row.lastErrorCode) ? "Waiting for Xero" : "Sending to Xero";
   if (row.state === "failed") return "Xero failed";
-  if (row.state === "skipped") return "Not sent to Xero";
+  if (row.state === "skipped") return row.lastErrorCode === "XERO_VOIDED_IN_XERO" ? "Voided in Xero" : "Not sent to Xero";
   if (row.state === "held") return "Held: another Xero organisation";
   if (row.state === "mismatch") return "In Xero, totals differ";
   switch (row.xeroStatus) {
@@ -409,13 +409,19 @@ export function createXeroInvoiceSync({
         let replacing = null;
         let xeroInvoice = known ? await getInvoice(client, token, known) : null;
         if (xeroInvoice && GONE_IN_XERO.includes(xeroInvoice.Status)) {
-          // Voided or deleted in Xero by the owner: a new draft replaces it.
           if (!await recordGone(invoiceUid, row.tenantId, xeroInvoice)) return { lost: true };
+          // Credited or voided in Field too: both agree now, and nothing is created.
+          if (GONE_IN_FIELD.includes(invoice.status)) return { settled: true };
+          // Voided or deleted in Xero by the owner: a new draft replaces it.
           logger.warn?.(`[xero] invoice ${invoiceUid}: its Xero invoice was voided or deleted there; a new draft replaces it`);
           replacing = xeroInvoice.InvoiceID;
           xeroInvoice = null;
           attached = false;
         }
+        // Credited or voided in Field, and Xero still has it: Field never
+        // creates, attaches or approves anything for it. The owner voids it in
+        // Xero (the job says so); phase 2 does that itself.
+        if (GONE_IN_FIELD.includes(invoice.status)) return { voidNeeded: true };
         if (!xeroInvoice) xeroInvoice = await findByNumber(client, token, invoice.number);
         let contact = row.xeroContactId || null;
         if (!xeroInvoice) ({ xeroInvoice, contactId: contact } = await createDraft({ client, token, row, loaded, state, replacing }));
@@ -442,6 +448,14 @@ export function createXeroInvoiceSync({
       });
 
       if (outcome.lost) return { invoiceUid, outcome: "not-claimed" };
+      if (outcome.settled) {
+        await finish(invoiceUid, { state: "skipped", lastErrorCode: "XERO_VOIDED_IN_XERO", lastErrorReason: `It was ${invoice.status === "void" ? "voided" : "credited"} in Field and voided in Xero. Nothing more to do.`, nextAttemptAt: null });
+        return { invoiceUid, outcome: "skipped" };
+      }
+      if (outcome.voidNeeded) {
+        await finish(invoiceUid, { state: "skipped", lastErrorCode: "XERO_VOID_NEEDED", lastErrorReason: `It was ${invoice.status === "void" ? "voided" : "credited"} in Field after it reached Xero, and Xero still has it. Void it, or credit it, in Xero.`, nextAttemptAt: null });
+        return { invoiceUid, outcome: "skipped" };
+      }
       const { xeroInvoice, matches } = outcome;
       if (matches) {
         await finish(invoiceUid, { state: "created", fieldTotal: invoice.total, lastErrorCode: null, lastErrorReason: null, nextAttemptAt: null });
@@ -551,6 +565,11 @@ export function createXeroInvoiceSync({
         await queueNewlyIssued(state);
         if (state.status !== "connected" || !state.tenantId) return results;
         await holdOtherOrganisations(state);
+        // Not checked yet (Xero could not be read when it was connected): try again.
+        if (state.codesProblem === "XERO_CODES_UNCHECKED") {
+          await connection.checkCodes?.();
+          Object.assign(state, await connection.state());
+        }
         if (state.codesProblem) return results;
         for (const { uid } of await due(state)) {
           if (stopped) break;
@@ -738,7 +757,8 @@ export function createXeroInvoiceSync({
           ...entry,
           xeroStatus,
           nextAttemptAt: here?.state === "pending" ? iso(here.nextAttemptAt) : null,
-          canRetry: Boolean(here && ["failed", "mismatch"].includes(here.state)),
+          // Nothing to retry once Field has credited or voided it.
+          canRetry: Boolean(here && ["failed", "mismatch"].includes(here.state)) && !GONE_IN_FIELD.includes(invoice.status),
           canSend: Boolean(tenantId) && state.status === "connected" && sendable({ invoice, sync }, tenantId),
         };
       }

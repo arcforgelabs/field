@@ -44,7 +44,7 @@ describe("XeroInvoiceStatus", () => {
   });
 
   it("credited in Field after it reached Xero: says to void it in Xero, with the reason, and no Retry", () => {
-    render(<XeroInvoiceStatus entry={entry({ state: "void-in-xero", label: "Void this in Xero", xeroStatus: "AUTHORISED", reason: "It was credited in Field after it reached Xero, and Xero still has it. Void it, or credit it, in Xero." })} isOwner onRetry={() => {}} onSend={() => {}} />);
+    render(<XeroInvoiceStatus entry={entry({ state: "void-in-xero", label: "Void this in Xero", xeroStatus: "AUTHORISED", reason: "It was credited in Field after it reached Xero, and Xero still has it. Void it, or credit it, in Xero.", canRetry: true })} isOwner onRetry={() => {}} onSend={() => {}} />);
     expect(screen.getByText("Void this in Xero").className).toMatch(/fx-status--overdue/);
     expect(screen.getByText(/credited in Field after it reached Xero/).className).toMatch(/fx-xero__why--bad/);
     expect(screen.queryByRole("button")).toBeNull();

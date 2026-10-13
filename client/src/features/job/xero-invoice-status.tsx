@@ -30,7 +30,7 @@ export function XeroInvoiceStatus({ entry, isOwner, onRetry, onSend }: {
   return (
     <div className="fx-xero" data-state={entry.state}>
       <span className={`fx-status fx-status--${TONE[entry.state]}`}>{entry.label}</span>
-      {isOwner && entry.canRetry && (
+      {isOwner && entry.canRetry && entry.state !== "void-in-xero" && (
         <button type="button" className="fx-btn fx-btn--ghost fx-btn--sm" onClick={() => onRetry(entry)}><RotateCw aria-hidden />Retry</button>
       )}
       {isOwner && entry.canSend && (

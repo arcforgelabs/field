@@ -77,9 +77,11 @@ the owner on the server.
   account Xero would refuse is caught here, not on an invoice. When Field
   cannot read them, the screen says so and the codes are typed; they are then
   saved with a warning. When the owner connects, or connects another
-  organisation, Field checks the saved codes against it. If one is not the
-  organisation's, the screen says which, and invoices wait (they show
-  "Waiting for Xero") until the owner chooses codes it has. Lines without GST use `EXEMPTOUTPUT` ("GST Free
+  organisation, Field checks the saved codes against it, and invoices wait
+  until the check has run. If one is not the organisation's, the screen says
+  which, and invoices wait (they show "Waiting for Xero") until the owner
+  chooses codes it has. If Xero cannot be read for the check, invoices keep
+  waiting, the screen says so, and Field checks again on each pass. Lines without GST use `EXEMPTOUTPUT` ("GST Free
   Income").
 
 Only invoices issued after Create in Xero is turned on go to Xero by
@@ -147,6 +149,11 @@ shows "Xero already has an invoice numbered …" and creates nothing. Rename
 or remove that invoice in Xero, then press Retry. Whether Xero lets a voided
 invoice's number be used again is not confirmed in its documentation.
 
+An invoice that is credited or voided in Field is never created, approved or
+replaced in Xero again. While Xero still has it, the job shows **Void this in
+Xero** with no Retry. Once the owner voids it there, the next Retry records
+that, and the invoice shows **Voided in Xero**: nothing more to do.
+
 ### Two servers at once
 
 A server claims an invoice with a five-minute lease before it sends it,
@@ -182,6 +189,7 @@ Each issued invoice shows its Xero state:
 | Not sent to Xero | Issued before Xero was connected, or credited before it reached Xero |
 | Held: another Xero organisation, In another Xero organisation | Queued for, or created in, the organisation connected before (above) |
 | Void this in Xero | Credited or voided in Field after it reached Xero. Void or credit it in Xero; phase 2 does this itself |
+| Voided in Xero | Credited or voided in Field, and voided in Xero. Nothing more to do |
 
 Everyone signed in sees the state. Owners also get **Retry**, and **Send to
 Xero** for an invoice that was not sent.

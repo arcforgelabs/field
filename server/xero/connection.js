@@ -141,6 +141,7 @@ export function createXeroConnectionService({
     const where = row.tenantName || "your Xero organisation";
     if (row.codesProblem === "XERO_ACCOUNT_CODE_UNKNOWN") return `Sales account ${row.salesAccountCode} is not an active revenue account in ${where}. Choose one below; invoices wait until then.`;
     if (row.codesProblem === "XERO_TAX_TYPE_UNKNOWN") return `GST tax type ${row.taxType} is not an active tax rate for sales in ${where}. Choose one below; invoices wait until then.`;
+    if (row.codesProblem === "XERO_CODES_UNCHECKED") return `Field has not been able to check the sales account and the GST tax type against ${where} yet. Invoices wait; Field checks again by itself, or save the codes below.`;
     return `The saved codes are not ones ${where} has. Choose them below; invoices wait until then.`;
   }
 
@@ -287,6 +288,9 @@ export function createXeroConnectionService({
           availableTenants: [],
           connectedAt: at,
           connectedBy: pending.pendingBy,
+          // Sends wait until the codes are checked against this organisation.
+          codesProblem: "XERO_CODES_UNCHECKED",
+          codesCheckedAt: null,
           // The same organisation again (after a reconnect) keeps its start;
           // a new one starts now: earlier invoices are never pushed by themselves.
           autoFrom: kept && previous?.autoFrom ? previous.autoFrom : ((previous?.createMode || XERO_DEFAULTS.createMode) === "off" ? null : at),
@@ -316,6 +320,8 @@ export function createXeroConnectionService({
           availableTenants: [],
           connectedAt: at,
           connectedBy: row.connectedBy || actor,
+          codesProblem: "XERO_CODES_UNCHECKED",
+          codesCheckedAt: null,
           autoFrom: row.createMode === "off" ? null : at,
           updatedBy: actor,
         });
@@ -422,9 +428,10 @@ export function createXeroConnectionService({
         const row = await scope.transaction(read);
         if (row?.status !== "connected") return null;
         const codes = await this.codes();
-        const result = codes.available ? { codesProblem: codesProblemFor(row, codes), codesCheckedAt: now() } : { codesProblem: null, codesCheckedAt: null };
+        // Xero could not be read: sends keep waiting, with that reason.
+        const result = codes.available ? { codesProblem: codesProblemFor(row, codes), codesCheckedAt: now() } : { codesProblem: "XERO_CODES_UNCHECKED", codesCheckedAt: null };
         await scope.transaction((tx) => upsert(tx, result));
-        if (result.codesProblem) logger.warn?.(`[xero] the saved codes are not the connected organisation's (${result.codesProblem}); invoices wait`);
+        if (result.codesProblem) logger.warn?.(`[xero] the saved codes are not confirmed for the connected organisation (${result.codesProblem}); invoices wait`);
         return result;
       } catch (error) {
         logger.warn?.(`[xero] the saved codes could not be checked (${/^[A-Z0-9_]{1,64}$/.test(String(error?.code || "")) ? error.code : "XERO_ERROR"})`);

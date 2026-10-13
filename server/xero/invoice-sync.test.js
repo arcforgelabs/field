@@ -704,3 +704,69 @@ test("connecting another organisation checks the saved codes; invoices wait unti
   assert.equal((await row(result.invoiceUid)).state, "created");
   assert.equal(xero.state.invoices[0].LineItems[0].AccountCode, "260");
 });
+
+for (const mode of ["draft", "authorised"]) {
+  test(`${mode} mode: an invoice credited in Field after it reached Xero is never created again; voided in Xero it is settled`, async () => {
+    await connect();
+    if (mode === "authorised") await connection.updateSettings({ createMode: "authorised" });
+    advance(1000);
+    xero.state.ignoreTaxAmount = true;
+    const result = await issue({ subtotal: "333.33", gst: "33.34", total: "366.67" });
+    await sync.tick();
+    assert.equal((await row(result.invoiceUid)).state, "mismatch");
+    // Credited in Field: the job says to void it in Xero, with no Retry.
+    await withOrg(testDb.db, DEFAULT_ORG_UID, (tx) => tx.execute(sql`update invoices set status = 'credited' where uid = ${result.invoiceUid}`));
+    let shown = (await sync.jobStatus("job-xero")).invoices[result.number];
+    assert.equal(shown.label, "Void this in Xero");
+    assert.equal(shown.canRetry, false);
+    assert.equal(shown.canSend, false);
+
+    // A Retry before the owner voids it in Xero changes nothing in Xero.
+    xero.state.ignoreTaxAmount = false;
+    await sync.retry({ invoiceUid: result.invoiceUid, actor: "Owner" });
+    await sync.tick();
+    assert.equal(xero.state.invoices.length, 1);
+    assert.equal(xero.state.invoices[0].Status, "DRAFT", "never approved");
+    assert.equal((await row(result.invoiceUid)).last_error_code, "XERO_VOID_NEEDED");
+
+    // The owner voids it in Xero, as told, and presses Retry: nothing new is made.
+    xero.state.invoices[0].Status = "VOIDED";
+    await sync.retry({ invoiceUid: result.invoiceUid, actor: "Owner" });
+    await sync.tick();
+    const writes = xero.state.calls.filter((call) => call.method !== "GET" && /\/Invoices$|\/Invoices\/[^/]+$/.test(call.path));
+    assert.equal(writes.length, 1, "only the first draft was ever created; no new draft and no approval");
+    assert.equal(xero.state.invoices.length, 1);
+    const settled = await row(result.invoiceUid);
+    assert.equal(settled.state, "skipped");
+    assert.equal(settled.last_error_code, "XERO_VOIDED_IN_XERO");
+    assert.equal(settled.invoice_xero_status, "VOIDED");
+    shown = (await sync.jobStatus("job-xero")).invoices[result.number];
+    assert.equal(shown.label, "Voided in Xero");
+    assert.equal(shown.canRetry, false);
+    assert.equal(shown.canSend, false);
+  });
+}
+
+test("a new organisation: sends wait until its codes are checked, and keep waiting while Xero cannot be read", async () => {
+  await connect();
+  advance(1000);
+  await connection.disconnect();
+  xero.state.connections = [{ id: "conn-b", tenantId: TENANT_B, tenantName: "Synthetic Holdings Pty Ltd", tenantType: "ORGANISATION" }];
+  // Xero's accounts cannot be read while connecting.
+  xero.failNext({ method: "GET", match: /\/Accounts$/, status: 503, times: 3 });
+  await connect();
+  const status = await connection.status();
+  assert.equal(status.connection.codesProblem, "XERO_CODES_UNCHECKED");
+  assert.match(status.connection.codesMessage, /has not been able to check/);
+  const result = await issue();
+  // The next pass checks again; Xero still cannot be read, so nothing goes.
+  await sync.tick();
+  assert.equal(xero.state.invoices.length, 0);
+  assert.equal((await sync.jobStatus("job-xero")).invoices[result.number].label, "Waiting for Xero");
+  // Once Xero can be read, the check passes and the invoice goes.
+  xero.state.failures.length = 0;
+  await sync.tick();
+  assert.equal((await connection.status()).connection.codesProblem, null);
+  await sync.tick();
+  assert.equal((await row(result.invoiceUid)).state, "created");
+});
