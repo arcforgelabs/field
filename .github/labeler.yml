@@ -5,7 +5,15 @@
   - changed-files:
       - any-glob-to-any-file:
           - server/quotes/**
+          - server/quote-*.js
+          - server/generate-evidence-quote.js
+          - server/legacy-sent-quote.js
+          - server/local-pricing.js
           - server/assembly-modes.js
+          - server/retaining-wall-*.js
+          - server/wall-*.js
+          - shared/quote-*.js
+          - shared/retaining-wall-render.js
           - client/src/features/job/**
           - client/src/features/job-detail/**
           - generate-landscaping-quote.js
@@ -15,6 +23,7 @@
   - changed-files:
       - any-glob-to-any-file:
           - server/invoices/**
+          - server/invoice-*.js
           - client/src/features/invoices/**
           - scripts/quote-invoice-proof/**
 
@@ -23,6 +32,9 @@
       - any-glob-to-any-file:
           - server/documents/**
           - server/storage/**
+          - server/job-documents.js
+          - server/job-document-context.js
+          - server/sent-email-archive.js
 
 "area: catalogue":
   - changed-files:
@@ -51,6 +63,12 @@
       - any-glob-to-any-file:
           - server/xero/**
           - server/mcp/**
+          - server/gmail-oauth-store.js
+          - server/email-*.js
+          - server/send-quote-email.js
+          - server/scheduled-email-queue.js
+          - server/google-*.js
+          - server/drive-upload.js
           - docs/XERO.md
           - docs/REMOTE_MCP.md
           - docs/GMAIL_SENDING.md
