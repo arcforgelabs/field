@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 
 const LEGACY_SCHEMA = readFileSync(new URL("./legacy-catalog-v21.sql", import.meta.url), "utf8");
 
-// The items the embark-default quote rules and recipes name, with the units
+// The items the default quote rules and recipes name, with the units
 // and statuses the production catalogue sells them in (names and prices are
 // synthetic). Shapes that matter: ADMIN-FEE and the irrigation controllers
 // are sold "each", not "job"; rock-wall is per m, concrete-removal per m2 and

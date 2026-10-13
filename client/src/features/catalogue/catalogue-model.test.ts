@@ -37,7 +37,7 @@ describe("URL state", () => {
 
   it("sends old item-editor and health links to the table, opening the named item", () => {
     expect(upgradeLegacyParams(new URLSearchParams("view=items"))?.toString()).toBe("");
-    expect(upgradeLegacyParams(new URLSearchParams("quoteCatalogId=embark-default&itemCode=MAT-SAND"))?.toString()).toBe("item=MAT-SAND");
+    expect(upgradeLegacyParams(new URLSearchParams("quoteCatalogId=default&itemCode=MAT-SAND"))?.toString()).toBe("item=MAT-SAND");
     expect(upgradeLegacyParams(new URLSearchParams("item=itm_1"))).toBeNull();
   });
 });

@@ -178,7 +178,7 @@ function createInvoiceQuoteFixture({ version = 1, summary = "Quote content" } = 
     updatedAt: "2026-01-01T00:00:00.000Z",
     summary,
     quoteCatalog: {
-      id: "embark-default",
+      id: "default",
       currency: "AUD",
       gstRate: 0.1,
       businessProfile: {

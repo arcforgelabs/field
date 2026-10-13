@@ -100,5 +100,5 @@ test("verification catalog is synthetic and covers the fixture pricing paths", (
   ]) {
     assert.ok(catalog.rules.some((rule) => rule.code === code), `missing verification rule ${code}`);
   }
-  assert.notEqual(catalog.businessProfile.email, getQuoteCatalog("embark-default").businessProfile.email, "verification never shares the sample catalogue identity");
+  assert.notEqual(catalog.businessProfile.email, getQuoteCatalog("default").businessProfile.email, "verification never shares the sample catalogue identity");
 });

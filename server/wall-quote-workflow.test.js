@@ -27,7 +27,7 @@ function wallQuoteFixture({ version, quoteNumber, jobNumber }) {
     recordingIntent: "job-scope",
     summary: "Retaining wall build",
     quoteCatalog: {
-      id: "embark-default",
+      id: "default",
       name: "Sample Catalogue",
       currency: "AUD",
       gstRate: 0.1,

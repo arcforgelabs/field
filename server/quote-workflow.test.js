@@ -31,7 +31,7 @@ function drainageFixture({ id, title, pipelineStage = "draft" }) {
       title,
       label: title,
       outputMode: "quote",
-      quoteCatalogId: "embark-default",
+      quoteCatalogId: "default",
       pipelineStage,
     },
     transcript: {
@@ -125,7 +125,7 @@ test("buildAndPersistQuote refreshes local price catalog authority and preserves
       title: "Workflow Authority Test",
       label: "Workflow Authority Test",
       outputMode: "quote",
-      quoteCatalogId: "embark-default",
+      quoteCatalogId: "default",
       pipelineStage: "draft",
     };
 
@@ -273,7 +273,7 @@ test("buildAndPersistQuote uses price catalog as the live pricing authority when
         title: "Workflow Catalog Test",
         label: "Workflow Catalog Test",
         outputMode: "quote",
-        quoteCatalogId: "embark-default",
+        quoteCatalogId: "default",
         pipelineStage: "draft",
       },
       transcript: {
@@ -363,7 +363,7 @@ test("buildAndPersistQuote refuses unavailable pricing before mutating an issued
           title: "Unavailable Landed Quote",
           label: "Unavailable Landed Quote",
           outputMode: "quote",
-          quoteCatalogId: "embark-default",
+          quoteCatalogId: "default",
           pipelineStage: "landed",
           quoteVersion: 1,
         },
@@ -472,7 +472,7 @@ test("buildAndPersistQuote refuses unavailable pricing for a fresh draft without
           title: "Unavailable Draft Quote",
           label: "Unavailable Draft Quote",
           outputMode: "quote",
-          quoteCatalogId: "embark-default",
+          quoteCatalogId: "default",
           pipelineStage: "draft",
         },
         transcript: { fullText: "Install drainage." },
@@ -633,7 +633,7 @@ test("buildAndPersistQuote leaves pending photo evidence uninterpreted and calls
         title: "Image Ingestion Quote",
         label: "Image Ingestion Quote",
         outputMode: "quote",
-        quoteCatalogId: "embark-default",
+        quoteCatalogId: "default",
         pipelineStage: "draft",
       },
       transcript,

@@ -52,7 +52,7 @@ function createQuote(meta, { version, total, deliveryStatus = "draft" }) {
     title: meta.title,
     summary: `Document context test v${version}`,
     quoteCatalog: {
-      id: "embark-default",
+      id: "default",
       name: "Sample Catalogue",
       currency: "AUD",
       gstRate: 0.1,

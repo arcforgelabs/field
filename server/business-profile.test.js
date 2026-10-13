@@ -66,17 +66,17 @@ test("configured fields win; fields left out keep the catalogue's; an empty stri
 });
 
 test("quote catalogues carry the configured profile, so every new quote snapshot does too", () => {
-  const before = serializeQuoteCatalog("embark-default").businessProfile;
+  const before = serializeQuoteCatalog("default").businessProfile;
   assert.equal(before.tradingName, undefined, "the sample names no trading name");
   assert.equal(before.legalName, "Your Business Pty Ltd");
   configureBusinessProfile(CONFIGURED);
-  const catalog = getQuoteCatalog("embark-default");
+  const catalog = getQuoteCatalog("default");
   assert.deepEqual(catalog.businessProfile, { ...before, ...CONFIGURED });
   assert.equal(catalog.deliveryDefaults.issuerName, "Acme Landscapes", "the configured name is the issuer printed");
-  assert.equal(serializeQuoteCatalog("embark-default").businessProfile.abn, "11 222 333 444");
-  assert.equal(getQuoteCatalogsForAuthoritySnapshot()["embark-default"].businessProfile.tradingName, "Acme Landscapes");
+  assert.equal(serializeQuoteCatalog("default").businessProfile.abn, "11 222 333 444");
+  assert.equal(getQuoteCatalogsForAuthoritySnapshot()["default"].businessProfile.tradingName, "Acme Landscapes");
   configureBusinessProfile(null);
-  assert.deepEqual(serializeQuoteCatalog("embark-default").businessProfile, before, "clearing it restores the catalogue's");
+  assert.deepEqual(serializeQuoteCatalog("default").businessProfile, before, "clearing it restores the catalogue's");
 });
 
 test("PDFs and issued-document records use the configured profile, bank details included, over an older quote's snapshot", async () => {
@@ -86,7 +86,7 @@ test("PDFs and issued-document records use the configured profile, bank details 
     version: 1,
     quoteNumber: "EQ-2501-01",
     title: "Profile test",
-    quoteCatalog: { id: "embark-default", currency: "AUD", gstRate: 0.1, businessProfile: { tradingName: "Your Business", abn: "" } },
+    quoteCatalog: { id: "default", currency: "AUD", gstRate: 0.1, businessProfile: { tradingName: "Your Business", abn: "" } },
     lineItems: [{ code: "wall", label: "Retaining wall", quantity: 1, unit: "lot", unitPrice: 100, totalPrice: 100, customerVisible: true }],
     presentation: { scopeText: "Wall", scheduleItems: [{ code: "wall", label: "Retaining wall", quantity: 1, unit: "lot", unitPrice: 100, totalPrice: 100, sourceLineItemCodes: ["wall"] }] },
     totals: { subtotal: 100, gst: 10, total: 110, currency: "AUD" },
@@ -103,7 +103,7 @@ test("PDFs and issued-document records use the configured profile, bank details 
 });
 
 test("the plain-text email and stock signatures speak for the profile's trading name", () => {
-  const quote = { delivery: { status: "final" }, quoteCatalog: { id: "embark-default", businessProfile: { tradingName: "Catalogue Name" } } };
+  const quote = { delivery: { status: "final" }, quoteCatalog: { id: "default", businessProfile: { tradingName: "Catalogue Name" } } };
   const meta = { title: "Back yard" };
   const catalogueText = buildDocumentEmailText({ meta, quote, documentType: "quote" });
   assert.match(catalogueText, /Please find the quote from Catalogue Name attached as a PDF\./);
@@ -135,7 +135,7 @@ function quoteWithProfile(businessProfile) {
     version: 1,
     quoteNumber: "EQ-2501-02",
     title: "Legal name test",
-    quoteCatalog: { id: "embark-default", currency: "AUD", gstRate: 0.1, businessProfile },
+    quoteCatalog: { id: "default", currency: "AUD", gstRate: 0.1, businessProfile },
     lineItems: [{ code: "wall", label: "Retaining wall", quantity: 1, unit: "lot", unitPrice: 100, totalPrice: 100, customerVisible: true }],
     presentation: { scopeText: "Wall", scheduleItems: [{ code: "wall", label: "Retaining wall", quantity: 1, unit: "lot", unitPrice: 100, totalPrice: 100, sourceLineItemCodes: ["wall"] }] },
     totals: { subtotal: 100, gst: 10, total: 110, currency: "AUD" },
@@ -155,13 +155,13 @@ test("one helper decides the printed name: trading name, else legal name, else a
 test("with no tradingName configured, the legal name is used everywhere and nothing prints a placeholder name", async () => {
   configureBusinessProfile(LEGAL_ONLY);
   // The catalogue served to quote builds, and so every new quote's snapshot and issuer.
-  const catalog = getQuoteCatalog("embark-default");
+  const catalog = getQuoteCatalog("default");
   assert.equal(catalog.businessProfile.tradingName, undefined);
   assert.equal(businessDisplayName(catalog.businessProfile), "Acme Landscapes Pty Ltd");
   assert.equal(catalog.deliveryDefaults.issuerName, "Acme Landscapes Pty Ltd");
   assert.equal(installationBusinessName(), "Acme Landscapes Pty Ltd");
   // A new quote's PDF: author, header issuer, footer, bank account name.
-  const quote = quoteWithProfile(serializeQuoteCatalog("embark-default").businessProfile);
+  const quote = quoteWithProfile(serializeQuoteCatalog("default").businessProfile);
   const business = resolveDocumentBusiness(quote);
   assert.equal(businessDisplayName(business), "Acme Landscapes Pty Ltd");
   assert.equal(business.paymentMethods.bankTransfer.accountName, "", "the account name falls back to the legal name when printed");
@@ -179,7 +179,7 @@ test("with no tradingName configured, the legal name is used everywhere and noth
 
 test("a configured tradingName still wins over the legal name", () => {
   configureBusinessProfile({ ...LEGAL_ONLY, tradingName: "Acme Landscapes" });
-  const catalog = getQuoteCatalog("embark-default");
+  const catalog = getQuoteCatalog("default");
   assert.equal(catalog.deliveryDefaults.issuerName, "Acme Landscapes");
   assert.equal(businessDisplayName(resolveDocumentBusiness(quoteWithProfile(catalog.businessProfile))), "Acme Landscapes");
   assert.equal(installationBusinessName(), "Acme Landscapes");
@@ -191,7 +191,7 @@ test("an empty tradingName clears the catalogue's back to the legal name", () =>
   const quote = quoteWithProfile({ tradingName: "Catalogue Name", legalName: "Catalogue Pty Ltd" });
   assert.equal(businessDisplayName(resolveDocumentBusiness(quote)), "Acme Landscapes Pty Ltd");
   assert.match(buildDocumentEmailText({ meta: {}, quote, documentType: "invoice" }), /from Acme Landscapes Pty Ltd attached/);
-  assert.equal(getQuoteCatalog("embark-default").deliveryDefaults.issuerName, "Acme Landscapes Pty Ltd");
+  assert.equal(getQuoteCatalog("default").deliveryDefaults.issuerName, "Acme Landscapes Pty Ltd");
 });
 
 test("a profile with neither name falls back to the neutral default, never a placeholder business", () => {

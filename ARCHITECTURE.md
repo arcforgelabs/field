@@ -139,7 +139,7 @@ The quote pipeline has four distinct compile stages, each with its own authority
 flowchart LR
     QI[("quote-inputs.json<br/>manual or external agent")] -->|"lineItemCandidates[]"| BL["generate-evidence-quote.js<br/>buildLineItems()"]
     OVR(("Manual overrides<br/>from editor")) -->|"lineItemOverrides"| BL
-    CAT[("quote-catalogs/<br/>embark-default.json5")] -->|"rules + assemblies"| BL
+    CAT[("quote-catalogs/<br/>default.json5")] -->|"rules + assemblies"| BL
     BL -->|"raw line items"| CC["quote-commercial-compiler.js<br/>recipes + rate lookup"]
     PC[("price catalogue<br/>PostgreSQL")] -->|"buy + sell rates, units"| CC
     RW["retaining-wall-engine.js<br/>bay model"] -->|"priced resource lines"| CC
@@ -203,8 +203,8 @@ flowchart LR
     LINE["quote.json<br/>lineItems[]<br/>(unitCost + unitPrice)"]
 
     CAT[("price catalogue<br/>PostgreSQL<br/>items + components")] -->|"every rate and unit"| LINE
-    QCR["quote-catalog rules<br/>embark-default.json5<br/>workDomain + quantityRule"] -->|"quantity"| LINE
-    RECIPE["assemblies<br/>embark-default.json5<br/>(lawn, irrigation, drainage)"] -->|"component quantities"| LINE
+    QCR["quote-catalog rules<br/>default.json5<br/>workDomain + quantityRule"] -->|"quantity"| LINE
+    RECIPE["assemblies<br/>default.json5<br/>(lawn, irrigation, drainage)"] -->|"component quantities"| LINE
     RWE["retaining-wall-engine.js<br/>+ retaining-wall-commercial.js<br/>+ retaining-wall-steel.js"] -->|"bay model →<br/>priced resource lines"| LINE
 
     MANUAL(("Quote editor<br/>quote-editor.tsx")) -->|"organizer rows:<br/>quantity, rates, fixed prices"| LINE
@@ -215,8 +215,8 @@ flowchart LR
 | Source | Lives in | Covers | Shape |
 |---|---|---|---|
 | Price catalogue | `server/catalog/` (PostgreSQL) | Any item with a manual, markup or rolled-up buy/sell rate | Recursive item tree |
-| Quote-catalog rules | `quote-catalogs/embark-default.json5` | All 15+ work domains by rule code, with quantity rules | Flat list of rules keyed by `code`, tagged with `workDomain` and the `quantityUnit` it measures in; no prices or sold units |
-| Assemblies | `quote-catalogs/embark-default.json5` `assemblies`, evaluated by `server/catalog/assemblies.js`, priced by `server/price-catalog/recipe-pricing.js` | Lawn bundle (turf, loam, prep, install), irrigation bundle (controller, pipe fixings, conduit, install hours) and drainage buildup (pipe, pits, gravel, spoil, excavator, labour) | Params, vars and per-component quantity expressions (safe evaluator: numbers, params, vars, `+ - * /`, parentheses, `ceil/floor/round/min/max`); golden fixtures prove the quantities match the hardcoded recipes they replaced |
+| Quote-catalog rules | `quote-catalogs/default.json5` | All 15+ work domains by rule code, with quantity rules | Flat list of rules keyed by `code`, tagged with `workDomain` and the `quantityUnit` it measures in; no prices or sold units |
+| Assemblies | `quote-catalogs/default.json5` `assemblies`, evaluated by `server/catalog/assemblies.js`, priced by `server/price-catalog/recipe-pricing.js` | Lawn bundle (turf, loam, prep, install), irrigation bundle (controller, pipe fixings, conduit, install hours) and drainage buildup (pipe, pits, gravel, spoil, excavator, labour) | Params, vars and per-component quantity expressions (safe evaluator: numbers, params, vars, `+ - * /`, parentheses, `ceil/floor/round/min/max`); golden fixtures prove the quantities match the hardcoded recipes they replaced |
 | Retaining wall engine | `server/retaining-wall-engine.js`, `retaining-wall-commercial.js`, `retaining-wall-measurement.js`, `retaining-wall-steel.js`, `wall-zones.js` | Retaining walls only; consumes `bayHeights`, `bayGeometry`, design spec, rate card | Purpose-built pipeline producing priced resource lines; its items are declared once (`server/retaining-wall-items.js`) and its rate card (`server/retaining-wall-rate-card.js`) has no default rates |
 | Quote editor | `client/src/features/job/quote-editor.tsx` → `POST /api/jobs/:id/quote-update` (`presentation.organizer`) | Catalogue items as rows (kits as their component rows), one-off lines, quantity and rate edits, fixed prices on any row or section | Organizer source nodes with `quantity`, `sellRate`, `buyRate`, `priceOverride` and the catalogue link fields |
 | Commercial adjustments | `server/quote-commercial-adjustments.js` (API, CLI, MCP) | Price and cost overrides on existing line items; adding manual lines by catalog-rule reference | `commercialAdjustments[]` with `unitPrice` + `unitCost` |
@@ -448,11 +448,14 @@ An issued invoice is a money document, not a projection of the current quote.
 Some names look specific to one business, but stored quotes, jobs and
 database rows refer to them, so they never change:
 
-- The sample quote catalogue keeps the id `embark-default`
-  (`quote-catalogs/embark-default.json5`), because stored quotes and job
-  records name it.
-- Migration `0005_tenancy` seeds the first organisation with the slug `embark`
-  (the `FIELD_ORG` default, `DEFAULT_ORG_UID`). Applied migrations never change.
+- The sample quote catalogue's id before #122, `embark-default`, is an alias
+  of its id now, `default` (`server/quote-catalog-ids.js`), because stored
+  quotes and job records name it.
+- The default organisation's uid, `DEFAULT_ORG_UID`: every tenant row of an
+  installation from before tenancy points at it, and without `FIELD_ORG` the
+  deployment finds its organisation by it. Its slug is `default` on a new
+  database and stays `embark` on an older one (`server/db/README.md`,
+  "Default organisation"). Applied migrations never change.
 - The `EQ`/`EI`/`ER` quote, invoice and receipt number prefixes, theme ids
   (including the legacy `gohub` alias), data-migration ids and storage paths.
 - The fixed domain of outgoing email Message-IDs

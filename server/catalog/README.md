@@ -64,7 +64,7 @@ code through the aliases):
 - quote rules carry `authorityItemUid` (the item the rule prices from),
   recipe and quantity-rule components `itemUid`, and quantity rules
   `outputItemUid`, all for the sample catalogue's items in
-  `quote-catalogs/embark-default.json5`;
+  `quote-catalogs/default.json5`;
 - the wall rate card declares `WALL_RATE_CARD_ITEM_UIDS` beside its codes
   (`server/retaining-wall-items.js`);
 - recipes are keyed by their kit's uid as well as its code
@@ -89,7 +89,7 @@ it is unaffected by codes retiring.
 ## Assemblies (recipes as data)
 
 The lawn, irrigation and drainage recipes are assemblies in the quote catalog
-(`assemblies` in `quote-catalogs/embark-default.json5`), in the shape of the
+(`assemblies` in `quote-catalogs/default.json5`), in the shape of the
 dropped `assembly_*` tables: typed `params` (a lawn's area, a controller option),
 `vars` computed from them (install hours per m2), and `components`: an item
 by code, the unit its quantity is in, and a quantity expression. A `balance`

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readQuoteCatalogReference } from "./quote-catalogs.js";
+import { getQuoteCatalog, hasQuoteCatalog, listQuoteCatalogs, readQuoteCatalogReference, serializeQuoteCatalog } from "./quote-catalogs.js";
+import { DEFAULT_QUOTE_CATALOG_ID, resolveQuoteCatalogIdFromMeta } from "./quote-catalog-ids.js";
 
 // formatMaybeMoney() re-coerced an already
 // null-or-number rate with Number(value) before checking Number.isFinite —
@@ -12,13 +13,13 @@ import { readQuoteCatalogReference } from "./quote-catalogs.js";
 // pricing context, so a disposal rule with no rate looked indistinguishable
 // from a rule that is genuinely free.
 test("readQuoteCatalogReference renders '-' for an unpriced disposal rule, never '$0.00'", async () => {
-  // embark-default's disposal rules (unclean-fill-disposal, clean-fill-
+  // The sample catalogue's disposal rules (unclean-fill-disposal, clean-fill-
   // disposal, concrete-waste-disposal, green-waste-disposal) carry no json5
   // unitPrice by design and no test in this file activates a
   // price-catalog authority, so the default "catalog" provider resolves
   // their sellRate/buyingRate to null via resolveRuleSellRate.
-  const reference = await readQuoteCatalogReference("embark-default");
-  assert.ok(reference, "embark-default reference should exist");
+  const reference = await readQuoteCatalogReference("default");
+  assert.ok(reference, "default reference should exist");
 
   const lines = reference.body.split("\n");
   const disposalLines = lines.filter((line) => /^\|\s*(unclean|clean|concrete-waste|green-waste)-.*disposal\s*\|/.test(line));
@@ -35,4 +36,20 @@ test("readQuoteCatalogReference renders '-' for an unpriced disposal rule, never
     assert.equal(sellCell, "-", `expected unpriced sell rate to render "-", got "${sellCell}" for: ${line}`);
     assert.equal(buyCell, "-", `expected unpriced buy rate to render "-", got "${buyCell}" for: ${line}`);
   }
+});
+
+// Stored quotes, jobs and links written before #122 name the sample
+// catalogue by its old id. A sent document never changes, so that id must
+// still find the same catalogue, while nothing new is written with it.
+test("the sample catalogue is \"default\", and its old id still resolves to it", () => {
+  assert.equal(DEFAULT_QUOTE_CATALOG_ID, "default");
+  assert.equal(getQuoteCatalog().id, "default");
+  assert.ok(listQuoteCatalogs().every((quoteCatalog) => quoteCatalog.id !== "embark-default"));
+
+  assert.ok(hasQuoteCatalog("embark-default"));
+  assert.equal(getQuoteCatalog("embark-default"), getQuoteCatalog("default"));
+  assert.equal(serializeQuoteCatalog("embark-default").id, "default");
+  assert.equal(resolveQuoteCatalogIdFromMeta({ quoteCatalogId: "embark-default" }), "default");
+  assert.equal(resolveQuoteCatalogIdFromMeta({ quoteCatalogId: "field-verification" }), "field-verification");
+  assert.equal(hasQuoteCatalog("someone-else"), false);
 });

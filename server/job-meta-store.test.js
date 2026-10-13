@@ -44,7 +44,7 @@ function createQuote(meta, overrides = {}) {
     title: meta.title,
     summary: "Milestone state store test",
     quoteCatalog: {
-      id: "embark-default",
+      id: "default",
       name: "Sample Catalogue",
       currency: "AUD",
       gstRate: 0.1,

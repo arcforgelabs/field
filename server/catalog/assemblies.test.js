@@ -84,8 +84,8 @@ test("an assembly must provide what its engine mode reads", () => {
   assert.doesNotThrow(() => assertAssemblyModeContract(normalizeAssemblyDefinition(base)));
 });
 
-test("the embark-default recipes are assemblies whose worked examples pass", () => {
-  const catalog = getQuoteCatalog("embark-default");
+test("the default recipes are assemblies whose worked examples pass", () => {
+  const catalog = getQuoteCatalog("default");
   assert.deepEqual(catalog.assemblies.map((assembly) => [assembly.code, assembly.mode]), [
     ["lawn-bundle", "lawn_bundle"],
     ["irrigation-bundle", "irrigation_bundle"],

@@ -62,7 +62,7 @@ test("catalog dependency closure includes candidate-stage indirect money and blo
   const catalog = await createTestPriceCatalog();
   try {
     await catalog.store.deleteItem("drain-pipe-m");
-    const snapshot = buildPriceCatalogSnapshot(await catalog.store.getState(), { quoteCatalogId: "embark-default" });
+    const snapshot = buildPriceCatalogSnapshot(await catalog.store.getState(), { quoteCatalogId: "default" });
     assert.throws(
       () => assertPriceCatalogSnapshotComplete(snapshot, { requiredCodes: ["DRAIN-PIPE-M"] }),
       /DRAIN-PIPE-M/,

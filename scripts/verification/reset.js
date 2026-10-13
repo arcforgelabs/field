@@ -204,7 +204,7 @@ export async function reset() {
   // the data directory, so clearing the directory does not clear it: replace
   // its contents with exactly the reviewed fixture items.
   await runMigrations();
-  // FIELD_ORG names the organisation whose catalogue is replaced (default embark).
+  // FIELD_ORG names the organisation whose catalogue is replaced (else the default one).
   const catalog = await openCatalogStore({ dataDir, orgUid: (await resolveDeploymentOrg(getDb())).uid });
   await replaceCatalogItems(catalog, VERIFICATION_CATALOG_ITEMS, { author: "field-verification-reset" });
 

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream, existsSync, readFileSync } from "../storage/fs.js";
 import { readdir, readFile, stat } from "../storage/fs-promises.js";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { DEFAULT_QUOTE_CATALOG_ID } from "../quote-catalog-ids.js";
 
 const APP_ROOT = resolve(import.meta.dirname, "..");
 const DEFAULT_CONFIG_PATH = join(APP_ROOT, "../config.json");
@@ -105,7 +106,7 @@ export async function mapRecordingDirectory({
     capture_mode: meta.captureMode || ((meta.audioFiles?.length || meta.audioFile) ? "recording" : "manual"),
     status: meta.status || null,
     job_number: meta.jobNumber || quote?.jobNumber || null,
-    quote_catalog_id: meta.quoteCatalogId || "embark-default",
+    quote_catalog_id: meta.quoteCatalogId || DEFAULT_QUOTE_CATALOG_ID,
     archived_at: details.archivedAt || meta.archivedAt || null,
     archived_reason: details.archivedReason || meta.archivedReason || null,
     created_at: meta.createdAt || importedAt,
@@ -362,7 +363,7 @@ export async function mapRecordingDirectory({
       job_id: jobId,
       source_capture_id: captureId,
       quote_number: quote?.quoteNumber || latestVersion?.quotePayload?.quoteNumber || meta.quoteNumber || null,
-      quote_catalog_id: quote?.quoteCatalog?.id || quote?.profile?.id || meta.quoteCatalogId || "embark-default",
+      quote_catalog_id: quote?.quoteCatalog?.id || quote?.profile?.id || meta.quoteCatalogId || DEFAULT_QUOTE_CATALOG_ID,
       status: quote?.status || latestVersion?.quotePayload?.status || null,
       review_status: quote?.review?.status || latestVersion?.quotePayload?.review?.status || meta.quoteReviewStatus || null,
       delivery_status: quote?.delivery?.status || latestVersion?.quotePayload?.delivery?.status || meta.quoteDeliveryStatus || null,

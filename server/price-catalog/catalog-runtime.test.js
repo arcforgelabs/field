@@ -146,7 +146,7 @@ test("data problems in a usable catalogue are logged and reported, not a reason 
   ] });
   t.after(() => catalog.close());
   const { logs, logger } = capture();
-  const config = { quoteCatalogId: "embark-default" };
+  const config = { quoteCatalogId: "default" };
   const result = await initializePriceCatalogRuntime({ config, policy: NO_OVERRIDE, openCatalogStore: async () => catalog.store, refreshQuoteCatalogAuthority, logger });
   assert.equal(result.priceCatalog, catalog.store);
   assert.equal(result.priceCatalogFailure, null);

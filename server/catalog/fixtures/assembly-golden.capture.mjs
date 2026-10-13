@@ -57,7 +57,7 @@ const landscapeRates = {
   },
 };
 
-const quoteCatalog = getQuoteCatalog("embark-default");
+const quoteCatalog = getQuoteCatalog("default");
 const golden = GOLDEN_CASES.map((testCase) => {
   const result = compileQuoteCommercialBreakdown({
     quote: { lineItems: [testCase.lineItem], summary: testCase.summary || null },

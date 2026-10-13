@@ -9,9 +9,9 @@ import { resolveDisposalBilledQuantity } from "../shared/disposal-basis.js";
 import { getQuoteCatalog } from "./quote-catalogs.js";
 import { buildTestRecipePricing } from "./test-pricing-fixtures.js";
 
-// Recipes are the embark-default quote catalog's assemblies, priced from
+// Recipes are the default quote catalog's assemblies, priced from
 // fixture catalogue rates (Field's code holds no prices).
-const SAMPLE = getQuoteCatalog("embark-default");
+const SAMPLE = getQuoteCatalog("default");
 const recipePricing = buildTestRecipePricing();
 
 test("commercial compilation blocks all pricing when the price catalog is unavailable", () => {

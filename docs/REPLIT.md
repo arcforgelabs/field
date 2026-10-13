@@ -64,6 +64,11 @@ boot, and an owner checks them with the dry-run route ("Data migrations").
   migrations from `server/db/drizzle` (log line `[db] postgres (DATABASE_URL):
   ...`). If the database is unreachable or a migration fails, Field exits
   instead of starting.
+- The next log line, `[db] organisation <slug> (<uid>)`, names the
+  organisation the installation serves. Leave `FIELD_ORG` unset: Field then
+  serves the default organisation, `default` on a new database. An
+  installation from before #122 keeps its slug and needs no change
+  (`server/db/README.md`, "Default organisation").
 - `npm run db:smoke` connects, runs `select 1` and reports applied and pending
   migrations without changing anything (exit 2 when migrations are pending).
 - Without `DATABASE_URL` Field does not start: the price catalogue needs it

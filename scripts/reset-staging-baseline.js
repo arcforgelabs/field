@@ -11,6 +11,7 @@ import { buildPriceCatalogSnapshot } from "../server/price-catalog/catalog-snaps
 import { closeDb, getDb, runMigrations } from "../server/db-runtime/index.js";
 import { resolveDeploymentOrg } from "../server/db-runtime/tenancy.js";
 import { openCatalogStore } from "../server/catalog/index.js";
+import { DEFAULT_QUOTE_CATALOG_ID } from "../server/quote-catalog-ids.js";
 
 const APP_ROOT = resolve(import.meta.dirname, "..");
 const CONFIG_PATH = process.env.FIELD_CONFIG || join(APP_ROOT, "config.json");
@@ -98,7 +99,7 @@ for (const fixture of fixtures) {
     title: fixture.title,
     label: fixture.title,
     outputMode: "quote",
-    quoteCatalogId: fixture.quoteCatalogId || "embark-default",
+    quoteCatalogId: fixture.quoteCatalogId || DEFAULT_QUOTE_CATALOG_ID,
     status: "processing",
     captureMode: "recording",
     audioFile: null,

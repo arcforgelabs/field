@@ -11,7 +11,7 @@
 // with FIELD_PGLITE=1 or FIELD_PGLITE_DIR) and its data directory (FIELD_DATA,
 // then config.json `dataDir`, then ./data). Refuses to run while migrations
 // are pending: boot the server once to apply them. The organisation is the
-// deployment's (FIELD_ORG, default embark). --dry-run writes nothing and
+// deployment's (FIELD_ORG, else the default organisation). --dry-run writes nothing and
 // reports what a run would record. The connection string is never printed.
 //
 // Exit codes: 0 done; 1 refused or failed; 2 done, with hash mismatches,

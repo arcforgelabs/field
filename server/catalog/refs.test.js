@@ -62,8 +62,8 @@ test("health counts items named only by code and uid/code conflicts", async (t) 
   assert.equal(report.summary.missingReferencedItemCount, 0);
 });
 
-test("embark-default and the wall engine declare a uid for every item production has", () => {
-  const references = catalogPricingReferences("embark-default");
+test("default and the wall engine declare a uid for every item production has", () => {
+  const references = catalogPricingReferences("default");
   const withoutUid = [...new Set(references.filter((ref) => !ref.uid).map((ref) => ref.code))].sort();
   // These have no production item (health already lists them as missing).
   assert.deepEqual(withoutUid, ["APC-DELIVERY-MINIMUM", "DRAIN-GRAVEL-M", "DRAIN-PIPE-M", "DRAIN-PIT", "concrete-demolition"]);

@@ -14,7 +14,7 @@
   // profile below is a placeholder. Replace both with your own before you
   // send a quote. The item uids (cat_...) name price-catalogue items your
   // installation creates; see README.md "Getting started".
-  "id": "embark-default",
+  "id": "default",
   "name": "Sample Catalogue",
   "status": "staging-placeholder",
   "currency": "AUD",

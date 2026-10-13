@@ -153,7 +153,7 @@ test("the quote-catalog overlay carries roll-up prices and flags inactive compon
   await store.addChild({ parentCode: "parent", childCode: "leaf", quantity: 1 });
   await store.archiveItem("leaf");
   const quoteCatalogs = {
-    "embark-default": {
+    "default": {
       rules: [
         { code: "site-levelling", authorityItemCode: "site-levelling" },
         { code: "parent", authorityItemCode: "parent" },
@@ -162,7 +162,7 @@ test("the quote-catalog overlay carries roll-up prices and flags inactive compon
     },
   };
   const { status } = overlayQuoteCatalogsFromPriceCatalog(quoteCatalogs, await store.getState());
-  const [siteLevelling, parent, missing] = quoteCatalogs["embark-default"].rules;
+  const [siteLevelling, parent, missing] = quoteCatalogs["default"].rules;
   assert.equal(siteLevelling.priceCatalog.sellPrice, 131.25);
   assert.equal(siteLevelling.authorityPricing.buyingRate, 78.75);
   assert.equal(parent.priceCatalog.inactiveComponentCount, 1);
