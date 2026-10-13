@@ -64,7 +64,8 @@ the record.
 A repository ruleset on `main` (`.github/rulesets/main.json`) requires a pull
 request, and requires the checks `test`, `client-build`, `docker-build`
 (CI), `gitleaks` (Secret Scan) and `context` (PR context) to pass on the
-pull request's latest commit. GitHub Actions must report them. It blocks
+pull request's latest commit. GitHub Actions must report them. `test` is
+CI's gate: it passes only when every test lane passed (`docs/CI.md`). It blocks
 force pushes and deletion of `main`. No approving review is required.
 
 The maintainer (the repository admin role) can bypass it for emergencies

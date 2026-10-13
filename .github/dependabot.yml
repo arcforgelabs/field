@@ -31,6 +31,16 @@ updates:
       client-minor-and-patch:
         update-types: [minor, patch]
 
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Australia/Adelaide
+    commit-message:
+      prefix: chore
+    open-pull-requests-limit: 1
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

@@ -1,20 +1,138 @@
 name: CI
 
+# One job per lane, so a failure names what broke. The `test` job at the end
+# is the gate: it passes only when every lane passed. The main ruleset
+# (.github/rulesets/main.json) and the Replit publish check
+# (scripts/deploy-checks.js) require `test`, `client-build` and
+# `docker-build` by name, so keep those three names. docs/CI.md describes
+# each lane and how to run it locally.
+
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
+  # release-checks.yml runs every lane on the exact commit it releases.
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to test
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: field-${{ github.ref }}
+  group: field-ci-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
 
+env:
+  CHECKOUT_REF: ${{ inputs.ref || '' }}
+
 jobs:
-  test:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      heavy: ${{ steps.filter.outputs.heavy }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          fetch-depth: 0
+
+      # Only a pull request that changes nothing but documentation (files
+      # under docs/ and Markdown files) skips the heavy lanes. Nothing in the
+      # server, the client bundle or the image reads those files. Pushes to
+      # main, manual runs and release checks always run every lane, because
+      # the Replit publish needs a passing `test` on every main commit.
+      - name: Decide whether the heavy lanes run
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          heavy=true
+          if [[ "$EVENT" == "pull_request" ]]; then
+            changed="$(git diff --name-only "$BASE...$HEAD")"
+            if [[ -n "$changed" ]] && ! grep -qvE '^docs/|\.md$' <<< "$changed"; then
+              heavy=false
+            fi
+          fi
+          echo "heavy=$heavy" >> "$GITHUB_OUTPUT"
+          echo "Heavy lanes run: $heavy" >> "$GITHUB_STEP_SUMMARY"
+
+  unit-server:
+    name: unit-server
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install server dependencies
+        run: npm ci
+
+      - name: Check data-layer types
+        run: npm run db:typecheck
+
+      - name: Build data-layer ESM
+        run: npm run db:build
+
+      - name: Check generated migration drift
+        run: npm run db:check:ci
+
+      # Without FIELD_DB_TEST_DATABASE_URL the tests that need a real
+      # PostgreSQL skip here; the postgres lane runs them.
+      - name: Run server, scripts and shared tests
+        run: npm test
+
+  unit-client:
+    name: unit-client
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client dependencies
+        run: npm ci
+        working-directory: client
+
+      - name: Run client typecheck
+        run: npm run typecheck
+        working-directory: client
+
+      - name: Run client tests
+        run: npm test
+        working-directory: client
+
+  postgres:
+    name: postgres
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -34,10 +152,12 @@ jobs:
           --health-retries 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
 
       - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
           cache: npm
@@ -45,27 +165,105 @@ jobs:
       - name: Install server dependencies
         run: npm ci
 
-      - name: Check data-layer types
-        run: npm run db:typecheck
+      - name: Build data-layer ESM
+        run: npm run db:build
+
+      # Every test file that opens a real PostgreSQL through the shared test
+      # helpers, found by name so a new one joins this lane by itself.
+      - name: Run PostgreSQL integration tests
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(grep -rlE "startTestPostgres|testPostgresMode|resolveDatabaseTestMode|data-layer-mode|FIELD_DB_TEST_" --include="*.test.js" server scripts shared | sort)
+          printf 'PostgreSQL test files (%s):\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
+          node --test --test-concurrency=4 "${files[@]}"
+
+  quote-invoice-proof:
+    name: quote-invoice-proof
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FIELD_DB_TEST_DATABASE_URL: postgres://postgres@127.0.0.1:5432/field_proof
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: field_proof
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d field_proof"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install server dependencies
+        run: npm ci
 
       - name: Build data-layer ESM
         run: npm run db:build
 
-      - name: Check generated migration drift
-        run: npm run db:check:ci
+      # The offline quote and invoice proof (README.md, "Development"), run
+      # three times: twice on PGlite and once with durable PostgreSQL storage.
+      # Every run must produce the same 25 PDFs, emails and API responses, so
+      # quote and invoice output is deterministic and does not depend on the
+      # storage mode.
+      - name: Run the proof on PGlite (first run)
+        run: npm run qa:quote-invoice-proof -- . "$RUNNER_TEMP/proof-a"
 
-      - name: Run server tests
-        run: npm test
+      - name: Run the proof on PGlite (second run)
+        run: npm run qa:quote-invoice-proof -- . "$RUNNER_TEMP/proof-b"
+
+      - name: Run the proof with PostgreSQL storage
+        env:
+          PROOF_STORAGE: postgres
+        run: npm run qa:quote-invoice-proof -- . "$RUNNER_TEMP/proof-postgres"
+
+      - name: Compare the two PGlite runs
+        run: node scripts/quote-invoice-proof/compare.mjs "$RUNNER_TEMP/proof-a" "$RUNNER_TEMP/proof-b" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Compare PGlite with PostgreSQL storage
+        run: node scripts/quote-invoice-proof/compare.mjs "$RUNNER_TEMP/proof-a" "$RUNNER_TEMP/proof-postgres" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Synthetic data only (scripts/verification/fixtures.js).
+      - name: Keep the proof output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: quote-invoice-proof
+          path: |
+            ${{ runner.temp }}/proof-a
+            ${{ runner.temp }}/proof-b
+            ${{ runner.temp }}/proof-postgres
+          retention-days: 14
+          if-no-files-found: ignore
 
   client-build:
+    name: client-build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
 
       - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
           cache: npm
@@ -75,31 +273,150 @@ jobs:
         run: npm ci
         working-directory: client
 
-      - name: Run client typecheck
-        run: npm run typecheck
-        working-directory: client
-
-      - name: Run client tests
-        run: npm test
-        working-directory: client
-
       - name: Build client
         run: npm run build
         working-directory: client
 
   docker-build:
+    name: docker-build
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
+      # The layer cache lets the smoke lane load this same build in seconds.
       - name: Build image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: false
           tags: field:ci
+          build-args: VCS_REF=${{ inputs.ref || github.sha }}
+          cache-from: type=gha,scope=field-image
+          cache-to: type=gha,scope=field-image,mode=max
+
+  smoke:
+    name: smoke
+    needs: [changes, docker-build]
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      REVISION: ${{ inputs.ref || github.sha }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Load the docker-build image from its layer cache
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          load: true
+          tags: field:ci
+          build-args: VCS_REF=${{ env.REVISION }}
+          cache-from: type=gha,scope=field-image
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install Playwright and Chromium
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # Synthetic data: a fixture operator and the verification catalogue.
+      - name: Run the Playwright smoke against the image
+        run: e2e/run-image-smoke.sh field:ci "$REVISION"
+
+      - name: Keep the Playwright report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-smoke
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      # Fails on a high or critical advisory that SECURITY.md does not accept,
+      # or one whose recheck date has passed.
+      - name: Audit dependencies against SECURITY.md
+        run: node scripts/dependency-audit.mjs | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Write SBOMs of what the server and the browser bundle run
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sbom"
+          npm sbom --package-lock-only --omit dev --sbom-format cyclonedx > "$RUNNER_TEMP/sbom/field-server.cdx.json"
+          npm --prefix client sbom --package-lock-only --omit dev --sbom-format cyclonedx > "$RUNNER_TEMP/sbom/field-client.cdx.json"
+          for file in "$RUNNER_TEMP"/sbom/*.json; do
+            printf '%s: %s components\n' "$(basename "$file")" "$(jq '.components | length' "$file")"
+          done | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the SBOMs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: ${{ runner.temp }}/sbom
+          retention-days: 30
+
+  test:
+    name: test
+    if: always()
+    needs: [changes, unit-server, unit-client, postgres, quote-invoice-proof, client-build, docker-build, smoke, audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # A lane may be skipped only when `changes` found a documentation-only
+      # pull request; any other skip, failure or cancellation fails the gate.
+      - name: Require every lane
+        env:
+          HEAVY: ${{ needs.changes.outputs.heavy }}
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          optional='["postgres","quote-invoice-proof","docker-build","smoke"]'
+          failed="$(jq -r --argjson optional "$optional" --arg heavy "$HEAVY" '
+            to_entries[]
+            | select(.value.result != "success")
+            | select(.value.result != "skipped" or $heavy == "true" or (.key as $k | $optional | index($k) | not))
+            | "\(.key): \(.value.result)"' <<< "$RESULTS")"
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$RESULTS" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [[ -n "$failed" ]]; then
+            printf '\nLanes that did not pass:\n%s\n' "$failed" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
