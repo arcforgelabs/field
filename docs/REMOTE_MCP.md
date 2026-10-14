@@ -69,8 +69,9 @@ List tools declare object output schemas and return records in both `structuredC
 - Authorization requires exact registered redirect URI, nonempty state, exact MCP resource, allowed scopes, and PKCE S256. Approval requests and codes expire and are one-time.
 - Refresh tokens rotate. Replaying a rotated refresh token revokes its whole family. Revocation also invalidates the family.
 - The approval POST uses a one-time request plus a separately generated CSRF secret; responses are `no-store`. Passwords and protocol credentials are never logged by this implementation.
-- Production should add edge request-size/rate controls for discovery/DCR/authorization/token endpoints and monitor generic failure counts without recording request bodies or URLs.
+- Field rate-limits the OAuth endpoints (`/oauth/register`, `/oauth/authorize`, `/oauth/approve`, `/oauth/token`, `/oauth/revoke`) to 60 requests in 15 minutes per address, and failed approvals to 20 in 15 minutes. Each installation has its own `/mcp` budget of 600 calls a minute, counted only after its token checks out. A spent budget answers `429` with `Retry-After` (`docs/RATE_LIMITS.md`). An MCP client refreshes about every 10 minutes, well inside the budget.
+- Production may also add edge request-size controls, and should monitor generic failure counts without recording request bodies or URLs.
 
 ## Deployment prerequisites
 
-An installation requires an explicit MCP enablement and public origin. Before calling it complete: verify the final HTTPS origin and unrewritten discovery/OAuth/MCP paths, ensure the data directory is private and backed up, apply edge rate limits, then connect an external MCP client and run an authenticated initialize/list/call smoke test. Use the installation routes to prove subject visibility and revocation.
+An installation requires an explicit MCP enablement and public origin. Before calling it complete: verify the final HTTPS origin and unrewritten discovery/OAuth/MCP paths, ensure the data directory is private and backed up, check `FIELD_TRUST_PROXY` matches the proxy hops in front of Field (rate limits count per address), then connect an external MCP client and run an authenticated initialize/list/call smoke test. Use the installation routes to prove subject visibility and revocation.

@@ -68,5 +68,10 @@
     }
   },
 
+  "_comment_rateLimits": "Optional. Field always rate-limits; this only changes budgets. Each budget is a limit of requests per windowSeconds. Budgets: address (every request, per client address), caller (per signed-in person, service key or MCP installation), sign-in (failed sign-ins, per address), token (minting tokens, changing passwords), oauth (MCP, Gmail and Xero connections), email-send, pdf-render, integration (Xero, Google Contacts, Drive). Leave out any budget, or either field, to keep its default (docs/RATE_LIMITS.md). An unknown name or a value that is not a positive whole number stops Field at boot.",
+  "rateLimits": {
+    "email-send": { "limit": 30, "windowSeconds": 300 }
+  },
+
   "_comment_pricing": "Field owns pricing locally. Do not add external pricing or CRM blocks unless the repo intent changes."
 }

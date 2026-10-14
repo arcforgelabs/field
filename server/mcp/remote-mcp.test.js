@@ -12,6 +12,7 @@ import {
   resolveRemoteMcpRuntimeConfig,
   TOOL_SCOPES,
 } from "./remote-mcp.js";
+import { createRateLimits, resolveRateLimitBudgets } from "../rate-limits.js";
 
 // Fake URL credentials are assembled at runtime so secret scanners do not flag the fixtures.
 const FAKE_USERINFO = ["user", "pass"].join(":") + "@";
@@ -107,6 +108,7 @@ async function fixture(t, overrides = {}) {
         return { ok: true };
       },
     },
+    ...(overrides.limitCaller ? { limitCaller: overrides.limitCaller } : {}),
   });
   app.use(built.router);
   const server = createServer(app);
@@ -565,4 +567,20 @@ test("a failed access check refuses the grant with 503, never trusts it", async 
     client_id: login.client.client_id,
     refresh_token: login.tokens.refresh_token,
   })).status, 503);
+});
+
+test("each MCP installation has its own caller budget, and an invalid token spends none of it", async (t) => {
+  const limits = createRateLimits(resolveRateLimitBudgets({ caller: { limit: 2, windowSeconds: 60 } }), { log: { warn() {}, error() {} } });
+  const f = await fixture(t, { limitCaller: limits.byCaller });
+  const first = await loginOn(f, { scope: "quote.read" });
+  const second = await loginOn(f, { scope: "quote.read", email: "other@example.invalid" });
+  for (let i = 0; i < 4; i += 1) assert.equal((await rpc(f, "forged-access-token", "ping", {})).status, 401);
+  assert.equal((await rpc(f, first.tokens.access_token, "ping", {})).status, 200);
+  assert.equal((await rpc(f, first.tokens.access_token, "tools/list", {})).status, 200);
+  const limited = await rpc(f, first.tokens.access_token, "ping", {});
+  assert.equal(limited.status, 429);
+  assert.ok(Number(limited.headers.get("retry-after")) > 0);
+  assert.equal((await limited.json()).code, "rate_limited");
+  // Another installation is not held back by the first one's traffic.
+  assert.equal((await rpc(f, second.tokens.access_token, "ping", {})).status, 200);
 });

@@ -69,6 +69,8 @@ import {
 } from "./auth/clerk-auth.js";
 import { createClerkFrontendApiProxy, resolveClerkProxyPath } from "./auth/clerk-proxy.js";
 import { resolveTrustProxy } from "./auth/trust-proxy.js";
+import rateLimit from "express-rate-limit";
+import { addressLimitOptions, createRateLimits, describeConfiguredBudgets, resolveRateLimitBudgets } from "./rate-limits.js";
 import multer from "multer";
 import { assertNoRemovedIntegrationConfig } from "./config-guard.js";
 import { loadFieldConfig, resolveFieldPort } from "./runtime-config.js";
@@ -287,8 +289,14 @@ setDataRoot(DATA_DIR);
 const VERIFICATION_DATA_DIR = resolve("/var/lib/field-verification/data");
 let VERIFICATION_IMAGE_DIGEST = null;
 let VERIFICATION_FIELD_REVISION = null;
+let RATE_LIMIT_BUDGETS;
 try {
   assertNoRemovedIntegrationConfig(config, CONFIG_SOURCE);
+  // Rate limit budgets (server/rate-limits.js): the defaults, or what
+  // config.rateLimits changes. A wrong value stops Field here.
+  RATE_LIMIT_BUDGETS = resolveRateLimitBudgets(config.rateLimits);
+  const tunedBudgets = describeConfiguredBudgets(RATE_LIMIT_BUDGETS);
+  if (tunedBudgets) console.log(`[field] rate limits from ${CONFIG_SOURCE}: ${tunedBudgets}`);
   if (IS_VERIFICATION_RUNTIME) {
     if (DATA_DIR !== VERIFICATION_DATA_DIR) throw new Error("field-verification data path must use the isolated container mount");
     assertVerificationConfig(config, { dataDir: VERIFICATION_DATA_DIR });
@@ -684,7 +692,7 @@ const priceCatalogRuntimeStatus = buildPriceCatalogRuntimeStatus({
 
 const app = express();
 // Behind Replit's proxy every request comes from the proxy's address; `trust
-// proxy` makes req.ip the client's (break-glass rate limiting is per client).
+// proxy` makes req.ip the client's (rate limits, break-glass's too, are per client).
 // See server/auth/trust-proxy.js for the choice and FIELD_TRUST_PROXY.
 let TRUST_PROXY;
 try {
@@ -697,6 +705,16 @@ if (TRUST_PROXY.value !== false) {
   app.set("trust proxy", TRUST_PROXY.value);
   console.log(`[field] trust proxy: ${TRUST_PROXY.value} (${TRUST_PROXY.source})`);
 }
+// Rate limits (server/rate-limits.js, #135), before everything else: every
+// request counts against its client address (req.ip, as `trust proxy` makes
+// it), and a route without a Field sign-in (password login, OAuth, the
+// Gmail and Xero callbacks) also against its class's budget for that
+// address. Signed-in callers get their own budgets in requireAuth below.
+// rateLimit() is called here, on the app, so code scanning (CodeQL
+// js/missing-rate-limiting) sees a rate limiter ahead of every route.
+const rateLimits = createRateLimits(RATE_LIMIT_BUDGETS);
+app.use(rateLimit(addressLimitOptions(RATE_LIMIT_BUDGETS)));
+app.use(rateLimits.byAddress);
 // First, so every 5xx answer below is reported (server/observability/sentry.js).
 app.use(sentryErrorResponseReporter());
 // Before durable storage and the body parsers: Clerk needs the raw request body.
@@ -785,15 +803,19 @@ function attachRequestOrg(req, res, next) {
   next();
 }
 
+// Once the caller is known, the request counts against that caller's budget
+// and its route's class budget (server/rate-limits.js), never before: an
+// unverified token must not spend anyone's budget.
 function requireAuth(req, res, next) {
-  if (clerkAuth) return clerkAuth.requireAuth(req, res, () => attachRequestOrg(req, res, next));
+  const limitCaller = () => rateLimits.byCaller(req, res, next);
+  if (clerkAuth) return clerkAuth.requireAuth(req, res, () => attachRequestOrg(req, res, limitCaller));
   const token = extractToken(req);
   if (!token) return res.status(401).json({ error: "unauthorized" });
   const caller = findUserByToken(token);
   if (!caller) return res.status(401).json({ error: "unauthorized" });
   recordTokenUse(token);
   req.caller = caller;
-  attachRequestOrg(req, res, next);
+  attachRequestOrg(req, res, limitCaller);
 }
 
 // With Clerk sign-in this is the owner gate: an owner signed in with Clerk and
@@ -1048,6 +1070,7 @@ if (clerkAuth) {
     },
     revokeMcpAccess: (subjects) => revokeMcpSubjects(subjects),
     accessAudit,
+    limitCaller: rateLimits.byCaller,
   }));
 }
 
@@ -6240,6 +6263,8 @@ if (remoteMcpRuntime.enabled) {
       });
     },
     service: mcpService,
+    // Each MCP installation has its own caller budget (server/rate-limits.js).
+    limitCaller: rateLimits.byCaller,
   });
   revokeMcpSubjects = (subjects) => remoteMcp.store.revokeSubjects(subjects);
   app.use(remoteMcp.router);

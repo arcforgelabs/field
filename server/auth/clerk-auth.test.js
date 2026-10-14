@@ -29,6 +29,7 @@ import { resolveTrustProxy } from "./trust-proxy.js";
 import { findFieldUserByEmail, importLegacyUsers, listFieldUsers } from "./field-users-store.js";
 import { createRemoteMcpRouter, MCP_SCOPES, TOOL_SCOPES } from "../mcp/remote-mcp.js";
 import { authorizeFieldMcpScopes } from "../mcp/scope-authority.js";
+import { createRateLimits, resolveRateLimitBudgets } from "../rate-limits.js";
 
 const BREAK_GLASS_KEY = "break-glass-fixture-key";
 
@@ -174,6 +175,7 @@ async function setup(t, authOptions = {}) {
       listUserTokens: users.listUserTokens,
     },
     revokeMcpAccess: (subjects) => ctx.revokeMcp(subjects),
+    ...(authOptions.limitCaller ? { limitCaller: authOptions.limitCaller } : {}),
     log,
   }));
   // Stand-ins for the product API and an owner-only action.
@@ -1229,4 +1231,15 @@ test("MCP: when Field cannot check the approver, /mcp answers 503 rather than tr
   clock += 2 * 60 * 60_000;
   assert.equal((await grant.rpc("tools/list")).status, 503);
   assert.equal((await grant.refresh()).status, 503);
+});
+
+test("the Clerk routes count each signed-in caller against their own rate limit, never a forged token", async (t) => {
+  const limits = createRateLimits(resolveRateLimitBudgets({ caller: { limit: 3, windowSeconds: 60 } }), { log: { warn() {}, error() {} } });
+  await setup(t, { reuseDb: true, limitCaller: limits.byCaller });
+  for (let i = 0; i < 5; i += 1) assert.equal((await call("GET", "/api/users", { token: "field_forged_token" })).status, 401);
+  for (let i = 0; i < 3; i += 1) assert.equal((await call("GET", "/api/users", { token: serviceToken })).status, 403);
+  const limited = await call("GET", "/api/users", { token: serviceToken });
+  assert.equal(limited.status, 429);
+  assert.equal(limited.body.code, "rate_limited");
+  assert.equal((await call("GET", "/api/users", { token: ownerToken })).status, 403, "another caller keeps their budget");
 });
