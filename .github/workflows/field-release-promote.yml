@@ -1,14 +1,17 @@
 name: Field Release Promote
-run-name: Point latest at field ${{ inputs.tag }}
+run-name: Point its channel at field ${{ inputs.tag }}
 
-# Points the default channel at a published stable release
-# (docs/RELEASING.md): npm `latest`, GHCR `stable` and `latest`, and GitHub's
-# latest release. A stable release already lands there when it is published,
-# so this is for rolling back to an earlier stable release, or putting one
-# back. It first verifies the release as published: the manifest's checksum,
-# the npm integrity, registry signatures and provenance, and the image's
-# GitHub attestation by digest. It also moves `beta` up when the beta channel
-# is behind.
+# Points a channel at a published release (docs/RELEASING.md), after it
+# verifies the release as published: the manifest's checksum, the npm
+# integrity, registry signatures and provenance, and the image's GitHub
+# attestation by digest.
+#
+#   stable tag  npm `latest`, GHCR `stable` and `latest`, GitHub's latest
+#               release; `beta` moves up too when the beta channel is behind
+#   beta tag    npm `beta` and GHCR `beta`
+#
+# A release already lands on its channel when it is published, so this is for
+# rolling a channel back to an earlier release, or putting one back.
 #
 # npm's trusted publisher for this file (environment npm-release) has
 # "Allow npm dist-tag" on and does not publish.
@@ -17,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Published stable tag, for example v2026.10.15
+        description: Published release tag, for example v2026.10.15 or v2026.10.15-beta.2
         required: true
         type: string
 
@@ -39,8 +42,13 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      # Read the image's attestations even while the package is private.
+      packages: read
     outputs:
       version: ${{ steps.manifest.outputs.version }}
+      channel: ${{ steps.manifest.outputs.channel }}
       digest: ${{ steps.manifest.outputs.digest }}
     steps:
       - name: Require the workflow from main
@@ -56,16 +64,17 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          if [[ ! "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]?$ ]]; then
-            echo "::error::${TAG} is not a stable release tag (vYYYY.M.D). Only a stable release can be latest; cut a stable tag from the beta's commit." >&2
+          if [[ ! "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]?(-beta\.[1-9][0-9]*)?$ ]]; then
+            echo "::error::${TAG} is not a release tag (vYYYY.M.D or vYYYY.M.D-beta.N)." >&2
             exit 1
           fi
           cd "$RUNNER_TEMP"
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'release-manifest.json*'
           sha256sum -c release-manifest.json.sha256
-          jq -e --arg tag "$TAG" '.tag == $tag and .channel == "stable"' release-manifest.json >/dev/null
+          jq -e --arg tag "$TAG" '.tag == $tag' release-manifest.json >/dev/null
           {
             echo "version=$(jq -r .version release-manifest.json)"
+            echo "channel=$(jq -r .channel release-manifest.json)"
             echo "digest=$(jq -r .image.digest release-manifest.json)"
             echo "integrity=$(jq -r .npm.integrity release-manifest.json)"
           } >> "$GITHUB_OUTPUT"
@@ -96,6 +105,13 @@ jobs:
           npm install --omit=dev --ignore-scripts --no-audit --no-fund "${PACKAGE}@${VERSION}" >/dev/null
           npm audit signatures
 
+      - name: Sign in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
       - name: Verify the image attestation by digest
         env:
           GH_TOKEN: ${{ github.token }}
@@ -125,12 +141,18 @@ jobs:
       - name: Install npm ${{ env.NPM_VERSION }}
         run: npm install -g "npm@${NPM_VERSION}"
 
-      - name: Move npm latest
+      - name: Move the npm dist-tags
         id: npm
         env:
           VERSION: ${{ needs.verify.outputs.version }}
+          CHANNEL: ${{ needs.verify.outputs.channel }}
         run: |
           set -euo pipefail
+          if [[ "$CHANNEL" == "beta" ]]; then
+            npm dist-tag add "${PACKAGE}@${VERSION}" beta
+            npm view "$PACKAGE" dist-tags --json | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           npm dist-tag add "${PACKAGE}@${VERSION}" latest
           # Beta users are never behind stable: when `beta` is this release's
           # own pre-release or an older one, it moves up to this release.
@@ -153,18 +175,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Move GHCR stable and latest to the verified digest
+      - name: Move the GHCR channel tags to the verified digest
         env:
           DIGEST: ${{ needs.verify.outputs.digest }}
+          CHANNEL: ${{ needs.verify.outputs.channel }}
           MOVE_BETA: ${{ steps.npm.outputs.beta }}
         run: |
           set -euo pipefail
-          tags=(--tag "${IMAGE}:stable" --tag "${IMAGE}:latest")
-          [[ "$MOVE_BETA" == "true" ]] && tags+=(--tag "${IMAGE}:beta")
+          if [[ "$CHANNEL" == "beta" ]]; then
+            tags=(--tag "${IMAGE}:beta")
+          else
+            tags=(--tag "${IMAGE}:stable" --tag "${IMAGE}:latest")
+            [[ "$MOVE_BETA" == "true" ]] && tags+=(--tag "${IMAGE}:beta")
+          fi
           docker buildx imagetools create "${tags[@]}" "${IMAGE}@${DIGEST}"
           echo "${tags[*]} -> ${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Mark the GitHub Release as latest
+        if: needs.verify.outputs.channel == 'stable'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
