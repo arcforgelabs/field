@@ -6,7 +6,7 @@
 import { mkdir, readFile, rename, writeFile } from "./storage/fs-promises.js";
 import { dirname, join } from "node:path";
 import { DEFAULT_EMAIL_SIGNATURE_HTML } from "../shared/email-templates.js";
-import { sanitizeEmailBodyHtml } from "./quote-email-template.js";
+import { sanitizeEmailBodyHtml } from "./email-html.js";
 
 const FILE = "email-signatures.json";
 const MAX_LENGTH = 4000;

@@ -5,22 +5,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useShell } from "@/components/shell/shell-context";
-
-function signatureToText(html: string) {
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>\s*<p[^>]*>/gi, "\n\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&#039;/g, "'")
-    .trim();
-}
-
-function textToSignature(text: string) {
-  const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return text.trim()
-    ? text.trim().split(/\n{2,}/).map((block) => `<p>${block.split("\n").map(escape).join("<br/>")}</p>`).join("")
-    : "";
-}
+import { signatureToText, textToSignature } from "./email-signature-text";
 
 export function EmailSignaturePanel() {
   const shell = useShell();

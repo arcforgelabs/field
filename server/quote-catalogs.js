@@ -18,6 +18,7 @@ import {
 } from "./business-profile.js";
 import { assertAssemblyModeContract } from "./assembly-modes.js";
 import { CATALOG_UNIT_DEFINITIONS, normalizeCatalogUnit } from "../shared/catalog-units.js";
+import { escapeMarkdownCell } from "../shared/markdown-table.js";
 
 const QUOTE_CATALOG_ROOT = join(import.meta.dirname, "../quote-catalogs");
 const LEGACY_QUOTE_CATALOG_RULE_ALIASES = Object.freeze({
@@ -708,7 +709,7 @@ function formatQty(value) {
 }
 
 function escapeCell(value) {
-  return String(value || "").replace(/\|/g, "\\|").replace(/\n/g, " ");
+  return escapeMarkdownCell(value || "");
 }
 
 function normalizeRuleCode(value) {
