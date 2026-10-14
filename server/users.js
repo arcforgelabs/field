@@ -1,4 +1,5 @@
-import { createHash, randomUUID, randomBytes } from "node:crypto";
+import { createHash, randomUUID, randomBytes, scrypt as scryptCallback, timingSafeEqual, webcrypto } from "node:crypto";
+import { promisify } from "node:util";
 import { existsSync } from "./storage/fs.js";
 import { readFile, writeFile, mkdir, rename, rm } from "./storage/fs-promises.js";
 import { flushDurableStorageQuietly } from "./storage/durable-hooks.js";
@@ -12,7 +13,7 @@ import { join, dirname } from "node:path";
  *     id, email, name,
  *     kind: "human" | "service",
  *     role: "admin" | "user",
- *     passwordHash?,        // humans only
+ *     passwordHash?,        // humans only: "scrypt$N$r$p$salt$hash" (see hashPassword)
  *     tokens: [{ id, hash, label, createdAt, lastUsedAt? }],
  *     settings: {}, permissions: [],
  *     createdAt, updatedAt?
@@ -30,8 +31,69 @@ const VALID_ROLES = new Set(["admin", "user"]);
 const VALID_KINDS = new Set(["human", "service"]);
 const TOKEN_PREFIX = "field_";
 
-function hashSecret(value) {
+// Tokens are 256 random bits (mintTokenString), so a fast hash is enough to
+// keep them out of users.json: there is nothing to guess.
+function hashToken(value) {
   return createHash("sha256").update(String(value)).digest("hex");
+}
+
+// Passwords are chosen by people, so they get a slow, salted, memory-hard
+// hash: scrypt with OWASP's N=2^15, r=8, p=3 (32 MiB, about 0.1 s).
+// Stored as "scrypt$N$r$p$<salt>$<hash>" (base64url), so the cost can rise
+// later without breaking older hashes.
+const scrypt = promisify(scryptCallback);
+const SCRYPT_PARAMS = { N: 2 ** 15, r: 8, p: 3 };
+const SCRYPT_KEY_LENGTH = 32;
+const SCRYPT_MAXMEM = 64 * 1024 * 1024;
+const LEGACY_SHA256_HASH = /^[0-9a-f]{64}$/;
+
+// Salts come from Web Crypto, not randomBytes: the verification runtime makes
+// randomBytes deterministic, and a salt drawn from it would shift every id
+// after it (scripts/verification/deterministic-preload.cjs).
+function newSalt() {
+  return Buffer.from(webcrypto.getRandomValues(new Uint8Array(16)));
+}
+
+async function scryptHash(prefix, secret, { N, r, p } = SCRYPT_PARAMS, salt = newSalt()) {
+  const key = await scrypt(String(secret), salt, SCRYPT_KEY_LENGTH, { N, r, p, maxmem: SCRYPT_MAXMEM });
+  return [prefix, N, r, p, salt.toString("base64url"), key.toString("base64url")].join("$");
+}
+
+export async function hashPassword(password) {
+  return await scryptHash("scrypt", password);
+}
+
+// Before scrypt, a password was stored as its bare SHA-256 hex. initUsers
+// wraps each such hash in scrypt at once ("scrypt-sha256$..."), so no fast
+// hash stays on disk; the next successful sign-in replaces it with a plain
+// scrypt hash of the password (see authenticateUser).
+async function verifyPasswordHash(stored, password) {
+  const parts = String(stored || "").split("$");
+  if (parts.length !== 6 || (parts[0] !== "scrypt" && parts[0] !== "scrypt-sha256")) return false;
+  const [prefix, N, r, p, salt, expected] = parts;
+  const params = { N: Number(N), r: Number(r), p: Number(p) };
+  if (!Object.values(params).every((n) => Number.isSafeInteger(n) && n > 0)) return false;
+  const input = prefix === "scrypt" ? password : legacySha256(password);
+  const actual = (await scryptHash(prefix, input, params, Buffer.from(salt, "base64url"))).split("$")[5];
+  const a = Buffer.from(actual, "base64url");
+  const b = Buffer.from(expected, "base64url");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function legacySha256(password) {
+  return createHash("sha256").update(String(password)).digest("hex");
+}
+
+let unknownAccountHashPromise = null;
+function unknownAccountHash() {
+  unknownAccountHashPromise ??= hashPassword(newSalt().toString("hex"));
+  return unknownAccountHashPromise;
+}
+
+function needsRehash(stored) {
+  const [prefix, N, r, p] = String(stored || "").split("$");
+  return prefix !== "scrypt"
+    || Number(N) !== SCRYPT_PARAMS.N || Number(r) !== SCRYPT_PARAMS.r || Number(p) !== SCRYPT_PARAMS.p;
 }
 
 function normaliseRole(role) {
@@ -91,6 +153,10 @@ export async function initUsers(dataDir) {
     if (!u.settings) { u.settings = {}; migrated = true; }
     if (!Array.isArray(u.permissions)) { u.permissions = []; migrated = true; }
     if (!Array.isArray(u.tokens)) { u.tokens = []; migrated = true; }
+    if (typeof u.passwordHash === "string" && LEGACY_SHA256_HASH.test(u.passwordHash)) {
+      u.passwordHash = await scryptHash("scrypt-sha256", u.passwordHash);
+      migrated = true;
+    }
   }
   if (migrated) await persist();
   return _users;
@@ -103,12 +169,16 @@ export async function initUsers(dataDir) {
 // the previous file whole. The temporary name ends in .tmp, which durable
 // storage never mirrors; it records the rename, so only users.json is stored.
 let _persistQueue = Promise.resolve();
+// Saves run one at a time, so a counter names each temporary file uniquely.
+// No randomUUID(): a token-use save runs on a timer, and a draw from it would
+// shift every later id the verification runtime makes deterministic.
+let _persistSequence = 0;
 
 function persist() {
   if (!_usersPath) return Promise.reject(new Error("users not initialized"));
   const run = async () => {
     const path = _usersPath;
-    const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+    const temporary = `${path}.${process.pid}.${(_persistSequence += 1)}.tmp`;
     // The state as it is when this save runs, so a queued save never writes
     // anything older than the one before it.
     await writeFile(temporary, JSON.stringify(_users, null, 2), { encoding: "utf8", mode: 0o600 });
@@ -140,8 +210,8 @@ export async function ensureUser({ id, email, password, name, role, kind }) {
   if (existing) {
     let changed = false;
     if (name && existing.name !== name) { existing.name = name; changed = true; }
-    if (password && existing.passwordHash !== hashSecret(password)) {
-      existing.passwordHash = hashSecret(password);
+    if (password && (needsRehash(existing.passwordHash) || !(await verifyPasswordHash(existing.passwordHash, password)))) {
+      existing.passwordHash = await hashPassword(password);
       changed = true;
     }
     if (role && normaliseRole(role) !== existing.role) {
@@ -176,7 +246,7 @@ export async function ensureUser({ id, email, password, name, role, kind }) {
     createdAt: new Date().toISOString(),
   };
   if (resolvedKind === "human" && password) {
-    user.passwordHash = hashSecret(password);
+    user.passwordHash = await hashPassword(password);
   }
   _users.push(user);
   await persist();
@@ -208,7 +278,7 @@ export async function createUser({ email, password, name, role, kind, settings, 
     createdAt: new Date().toISOString(),
   };
   if (resolvedKind === "human") {
-    user.passwordHash = hashSecret(password);
+    user.passwordHash = await hashPassword(password);
   }
   _users.push(user);
   await persist();
@@ -241,7 +311,7 @@ export async function updatePassword(id, password) {
   if (user.kind === "service") {
     throw new Error("service accounts cannot have a password — use tokens");
   }
-  user.passwordHash = hashSecret(password);
+  user.passwordHash = await hashPassword(password);
   user.updatedAt = new Date().toISOString();
   await persist();
   return publicShape(user);
@@ -264,7 +334,7 @@ export async function addToken(userId, label) {
   const plaintext = mintTokenString();
   const record = {
     id: randomUUID(),
-    hash: hashSecret(plaintext),
+    hash: hashToken(plaintext),
     label: label ? String(label).trim() || null : null,
     createdAt: new Date().toISOString(),
   };
@@ -279,7 +349,7 @@ export async function revokeTokenByPlaintext(userId, plaintext) {
   if (!_users || !plaintext) return false;
   const user = _users.find((u) => u.id === userId);
   if (!user || !Array.isArray(user.tokens)) return false;
-  const hash = hashSecret(plaintext);
+  const hash = hashToken(plaintext);
   const before = user.tokens.length;
   user.tokens = user.tokens.filter((t) => t.hash !== hash);
   if (user.tokens.length === before) return false;
@@ -325,7 +395,7 @@ export function listUserTokens(userId) {
  */
 export function recordTokenUse(plaintext, { now = Date.now } = {}) {
   if (!_users || !plaintext) return;
-  const hash = hashSecret(plaintext);
+  const hash = hashToken(plaintext);
   for (const u of _users) {
     const token = Array.isArray(u.tokens) ? u.tokens.find((t) => t.hash === hash) : null;
     if (!token) continue;
@@ -361,14 +431,14 @@ export function tokenIdForPlaintext(userId, plaintext) {
   if (!_users || !plaintext) return null;
   const user = _users.find((u) => u.id === userId);
   if (!user || !Array.isArray(user.tokens)) return null;
-  const hash = hashSecret(plaintext);
+  const hash = hashToken(plaintext);
   return user.tokens.find((t) => t.hash === hash)?.id ?? null;
 }
 
 /** Resolve a user by a plaintext token. Returns publicShape or null. */
 export function findUserByToken(plaintext) {
   if (!_users || !plaintext) return null;
-  const hash = hashSecret(plaintext);
+  const hash = hashToken(plaintext);
   for (const u of _users) {
     if (Array.isArray(u.tokens) && u.tokens.some((t) => t.hash === hash)) {
       return publicShape(u);
@@ -407,13 +477,29 @@ export function resolveBootstrapUsers({ config = {}, authToken }) {
   return Array.from(normalizedUsers.values());
 }
 
-/** Password-based login for human accounts. Returns publicShape or null. */
-export function authenticateUser(email, password) {
+/** Password-based login for human accounts. Resolves to publicShape or null. */
+export async function authenticateUser(email, password) {
   if (!_users) return null;
   const normalisedEmail = String(email).trim().toLowerCase();
   const user = _users.find((u) => u.email === normalisedEmail);
-  if (!user || user.kind !== "human") return null;
-  if (!user.passwordHash || user.passwordHash !== hashSecret(password)) return null;
+  if (!password) return null;
+  if (!user || user.kind !== "human" || !user.passwordHash) {
+    // As slow as a real check, so the answer's timing does not tell which
+    // emails have an account.
+    await verifyPasswordHash(await unknownAccountHash(), password);
+    return null;
+  }
+  const stored = user.passwordHash;
+  if (!(await verifyPasswordHash(stored, password))) return null;
+  // Upgrade an older hash now that the password is known. Skipped if the
+  // hash changed meanwhile (a concurrent password change wins).
+  if (needsRehash(stored)) {
+    const upgraded = await hashPassword(password);
+    if (user.passwordHash === stored) {
+      user.passwordHash = upgraded;
+      await persist();
+    }
+  }
   return publicShape(user);
 }
 

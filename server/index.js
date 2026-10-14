@@ -1047,7 +1047,7 @@ app.post("/api/auth/login", async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ error: "email and password required" });
   }
-  const user = authenticateUser(email, password);
+  const user = await authenticateUser(email, password);
   if (!user) return res.status(401).json({ error: "invalid credentials" });
   const minted = await addToken(user.id, "session");
   res.json({ ok: true, token: minted.token, user });
