@@ -420,7 +420,26 @@ export const api = {
     return request<{ ok: boolean; user: import("./types.ts").UserProfile }>("/api/auth/me");
   },
   listFieldUsers() {
-    return request<{ ok: boolean; users: import("./types.ts").FieldUser[] }>("/api/users");
+    return request<{ ok: boolean; users: import("./types.ts").FieldUser[]; serviceAccounts?: import("./types.ts").ServiceAccount[] }>("/api/users");
+  },
+  // Settings, Team, Access (#133). Owners only; the server never returns a token value.
+  listUserTokens(userId: string) {
+    return request<{ ok: boolean; tokens: import("./types.ts").AccessToken[] }>(`/api/users/${encodeURIComponent(userId)}/tokens`);
+  },
+  revokeUserToken(userId: string, tokenId: string, { current = false }: { current?: boolean } = {}) {
+    return request<{ ok: boolean; audited?: boolean; signedOut?: boolean }>(
+      `/api/users/${encodeURIComponent(userId)}/tokens/${encodeURIComponent(tokenId)}${current ? "?confirm=current" : ""}`,
+      { method: "DELETE" }
+    );
+  },
+  listMcpInstallations() {
+    return request<{ ok: boolean; installations: import("./types.ts").McpInstallation[] }>("/api/mcp/installations");
+  },
+  disconnectMcpInstallation(id: string) {
+    return request<{ ok: boolean; audited?: boolean }>(`/api/mcp/installations/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  accessEvents() {
+    return request<{ ok: boolean; events: import("./types.ts").AccessEvent[]; available?: boolean }>("/api/access/events");
   },
   approveFieldUser(id: string, role: import("./types.ts").FieldUserRole) {
     return request<{ ok: boolean; user: import("./types.ts").FieldUser }>(

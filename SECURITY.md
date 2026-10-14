@@ -45,6 +45,9 @@ credential value anywhere public.
   to the scopes the approving person holds now (`docs/REMOTE_MCP.md`). Field
   checks a person's token or MCP grant against their current access on every
   use, and reads tokens only from the `Authorization` header, never a URL.
+  Owners see and revoke tokens and MCP installations in Settings, Team,
+  Access; Field never shows or returns a token's value or hash, and every
+  revoke or disconnect is an audit event without one.
 - **Sent documents are records.** A quote or invoice a customer has been sent
   is never changed in place; a change produces a new version. Tampering with
   that history is a security issue.

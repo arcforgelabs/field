@@ -156,3 +156,42 @@ html[data-field-secret-on-screen] #sentry-feedback { display: none !important; }
   .fx-ints__grid { grid-template-columns: 1fr; }
   .fx-ints__search { flex: 1 1 100%; }
 }
+
+/* Team › Access (#133): who holds command-line tokens and connected agents. */
+.fx-access { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.fx-access__search { position: relative; display: flex; align-items: center; max-width: 340px; }
+.fx-access__search svg { position: absolute; left: 10px; width: 14px; height: 14px; color: var(--t-dim); pointer-events: none; }
+.fx-access__search .fx-input { width: 100%; padding-left: 30px; }
+.fx-access__list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--fx-line-strong); border-radius: var(--t-radius-lg, var(--t-radius)); background: var(--t-paper); overflow: hidden; }
+.fx-access__holder + .fx-access__holder { border-top: 1px solid var(--fx-line); }
+.fx-access__row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fx-access__row:hover { background: var(--fx-hover); }
+.fx-access__row:focus-visible { outline: none; box-shadow: inset var(--fx-focus); }
+.fx-access__chev { flex: none; width: 15px; height: 15px; color: var(--t-mute); transition: transform .12s; }
+.fx-access__row[aria-expanded="true"] .fx-access__chev { transform: rotate(90deg); }
+.fx-access__row .fx-avatar { cursor: inherit; }
+.fx-access__who { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.fx-access__name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+.fx-access__count { font-size: 12.5px; color: var(--t-dim); }
+.fx-access__used { flex: none; font-size: 12px; text-align: right; }
+.fx-access__detail { display: grid; gap: 14px; padding: 2px 14px 14px 49px; }
+.fx-access__h { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--t-mute); }
+.fx-access__items { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.fx-access__item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-top: 1px solid var(--fx-line); }
+.fx-access__icon { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--t-dim); }
+.fx-access__body { flex: 1 1 auto; min-width: 0; display: grid; gap: 3px; }
+.fx-access__title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.fx-access__meta { font-size: 12px; color: var(--t-dim); }
+.fx-access__scopes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.fx-access__scopes code { padding: 1px 7px; border-radius: 999px; background: var(--t-s1); box-shadow: inset 0 0 0 1px var(--fx-line-strong); color: var(--t-dim); font: 11px var(--t-data); }
+.fx-access__history { font-size: 12.5px; }
+.fx-access__history summary { cursor: pointer; color: var(--t-dim); }
+.fx-access__history ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+@media (max-width: 640px) {
+  .fx-access__search { max-width: none; }
+  .fx-access__row { flex-wrap: wrap; padding: 10px 12px; }
+  .fx-access__used { flex-basis: 100%; text-align: left; padding-left: 63px; }
+  .fx-access__detail { padding: 2px 12px 12px; }
+  .fx-access__item { display: grid; grid-template-columns: 15px minmax(0, 1fr); }
+  .fx-access__item .fx-btn { grid-column: 2; justify-self: start; }
+}

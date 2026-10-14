@@ -13,7 +13,7 @@ import { join, dirname } from "node:path";
  *     kind: "human" | "service",
  *     role: "admin" | "user",
  *     passwordHash?,        // humans only
- *     tokens: [{ id, hash, label, createdAt }],
+ *     tokens: [{ id, hash, label, createdAt, lastUsedAt? }],
  *     settings: {}, permissions: [],
  *     createdAt, updatedAt?
  *   }
@@ -60,9 +60,16 @@ function publicShape(u) {
   };
 }
 
+// What may leave this module about a token: never its value or its hash.
 function tokenMetadata(t) {
-  return { id: t.id, label: t.label || null, createdAt: t.createdAt };
+  return { id: t.id, label: t.label || null, createdAt: t.createdAt, lastUsedAt: t.lastUsedAt || null };
 }
+
+// "Last used" is recorded at most once a minute per token, and written to
+// users.json in the background, so a busy CLI does not rewrite the file on
+// every request.
+const TOKEN_USE_RESOLUTION_MS = 60 * 1000;
+let _usePersistTimer = null;
 
 function mintTokenString() {
   return TOKEN_PREFIX + randomBytes(32).toString("base64url");
@@ -282,6 +289,43 @@ export function listUserTokens(userId) {
   const user = _users.find((u) => u.id === userId);
   if (!user || !Array.isArray(user.tokens)) return [];
   return user.tokens.map(tokenMetadata);
+}
+
+/**
+ * Note that a token was just used (after it authenticated a request). Cheap:
+ * it updates memory at most once a minute per token and persists later.
+ */
+export function recordTokenUse(plaintext, { now = Date.now } = {}) {
+  if (!_users || !plaintext) return;
+  const hash = hashSecret(plaintext);
+  for (const u of _users) {
+    const token = Array.isArray(u.tokens) ? u.tokens.find((t) => t.hash === hash) : null;
+    if (!token) continue;
+    const at = now();
+    const last = token.lastUsedAt ? Date.parse(token.lastUsedAt) : 0;
+    if (Number.isFinite(last) && at - last < TOKEN_USE_RESOLUTION_MS) return;
+    token.lastUsedAt = new Date(at).toISOString();
+    if (!_usePersistTimer) {
+      _usePersistTimer = setTimeout(() => {
+        _usePersistTimer = null;
+        persist().catch((error) => console.warn(`[users] could not record token use: ${error.message}`));
+      }, 1000);
+      _usePersistTimer.unref?.();
+    }
+    return;
+  }
+}
+
+/**
+ * Which of a user's tokens a plaintext is, by id, without revealing anything
+ * else: so a list can mark the token the current request came in with.
+ */
+export function tokenIdForPlaintext(userId, plaintext) {
+  if (!_users || !plaintext) return null;
+  const user = _users.find((u) => u.id === userId);
+  if (!user || !Array.isArray(user.tokens)) return null;
+  const hash = hashSecret(plaintext);
+  return user.tokens.find((t) => t.hash === hash)?.id ?? null;
 }
 
 /** Resolve a user by a plaintext token. Returns publicShape or null. */

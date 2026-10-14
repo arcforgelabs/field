@@ -108,7 +108,10 @@ function rpcResult(res, id, result) {
   return res.json({ jsonrpc: "2.0", id, result });
 }
 
-function createInstallationRoutes({ store, authenticateInstallationRequest }) {
+// `onDisconnect({ req, installation })` runs after an installation is
+// revoked (the audit event, #133). It gets the installation's public shape:
+// ids, client name, approver, scopes and dates, never a token.
+function createInstallationRoutes({ store, authenticateInstallationRequest, onDisconnect }) {
   const router = Router();
   const authenticate = authenticateInstallationRequest || ((_req, res) => {
     res.status(401).json({ error: "authentication required" });
@@ -124,13 +127,25 @@ function createInstallationRoutes({ store, authenticateInstallationRequest }) {
   });
 
   router.delete("/api/mcp/installations/:id", authenticate, async (req, res) => {
+    const installation = store.installation(req.params.id);
     const revoked = await store.revokeInstallation({
       id: req.params.id,
       subject: req.caller.id,
       isAdmin: req.caller.role === "admin",
     });
     if (!revoked) return res.status(404).json({ error: "installation not found" });
-    return res.json({ ok: true });
+    let audited = true;
+    if (onDisconnect && installation) {
+      try {
+        await onDisconnect({ req, installation });
+      } catch (error) {
+        // The installation is revoked either way: a leaked grant must be
+        // stoppable even when the audit trail cannot be written.
+        audited = false;
+        console.error(`[mcp] installation ${installation.id} disconnected, but its audit event could not be written: ${error.message}`);
+      }
+    }
+    return res.json({ ok: true, audited });
   });
   return router;
 }
@@ -155,6 +170,9 @@ export async function createRemoteMcpRouter({
   authenticate,
   authorizeScopes,
   authenticateInstallationRequest,
+  // async ({ req, installation }) after an owner disconnects an installation:
+  // writes its audit event (server/auth/access-audit.js).
+  onInstallationDisconnected = null,
   // Clerk sign-in mode (FIELD_AUTH=clerk): approval comes from the signed-in
   // owner's session instead of an email and password. Resolves to { user },
   // { error: { status, message } } or { handled: true } (response already sent).
@@ -371,7 +389,7 @@ export async function createRemoteMcpRouter({
     return res.status(200).end();
   });
 
-  router.use(createInstallationRoutes({ store, authenticateInstallationRequest }));
+  router.use(createInstallationRoutes({ store, authenticateInstallationRequest, onDisconnect: onInstallationDisconnected }));
 
   router.all("/mcp", async (req, res) => {
     const token = bearerToken(req);

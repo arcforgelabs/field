@@ -1,4 +1,5 @@
-// Settings: your account (Clerk's own screens, in Field's theme), the team,
+// Settings: your account (Clerk's own screens, in Field's theme), the team
+// and its access (command-line tokens and connected agents),
 // the terms printed on quotes, integrations (Xero: owners change it, everyone
 // sees it) and how Field
 // looks.
@@ -10,6 +11,7 @@ import { api } from "@/lib/api";
 import { useShell } from "@/components/shell/shell-context";
 import { AppearanceSection } from "./appearance-section";
 import { PeopleSection } from "./people-section";
+import { AccessSection } from "./access-section";
 import { InvoicingPanel } from "./invoicing-panel";
 import { MilestoneRulesPanel } from "./milestone-rules-panel";
 import { EmailSignaturePanel } from "./email-signature-panel";
@@ -75,11 +77,18 @@ export function SettingsPage() {
             </Panel>
           )}
           {active === "team" && user && (
-            <Panel title="Team" description="Approve people who signed in and are waiting for access, change roles, or turn access off.">
-              {user.mfaVerified
-                ? <PeopleSection selfId={user.id} />
-                : <p className="fx-dim" style={{ margin: 0 }}>Sign in with a verified owner sign-in to manage the team.</p>}
-            </Panel>
+            <>
+              <Panel title="Team" description="Approve people who signed in and are waiting for access, change roles, or turn access off.">
+                {user.mfaVerified
+                  ? <PeopleSection selfId={user.id} />
+                  : <p className="fx-dim" style={{ margin: 0 }}>Sign in with a verified owner sign-in to manage the team.</p>}
+              </Panel>
+              {user.mfaVerified && (
+                <Panel title="Access" description="Command-line tokens and connected AI agents that can act in Field, by who holds them. Revoke one when it leaks or its agent retires. Field never shows a token's value.">
+                  <AccessSection selfId={user.id} />
+                </Panel>
+              )}
+            </>
           )}
           {active === "documents" && (
             <>
