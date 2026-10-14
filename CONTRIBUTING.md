@@ -73,12 +73,11 @@ security alert. Fix the cause; dismiss an alert only when it is not a defect,
 with a one-line reason. It blocks force pushes and deletion of `main`. No
 approving review is required.
 
-The maintainer (the repository admin role) can bypass it for emergencies
-only, and only through a pull request: the merge button then offers to merge
-before the checks pass. The bypass never allows a direct push, a force push
-or deletion of `main`. A bypassed merge still does not reach production
-until `main`'s own CI passes on the merged commit (`docs/REPLIT.md`,
-"Publishing").
+Organisation admins can bypass it at any time, while Arc Forge's gates are
+still being tuned. Use the bypass for emergencies, a private security fix, or
+a gate that cannot be satisfied, and say why in the pull request. A bypassed
+merge still does not reach production until `main`'s own CI passes on the
+merged commit (`docs/REPLIT.md`, "Publishing").
 
 GitHub's security-advisory merge ("Merge commit from fork") merges a
 temporary private fork. GitHub runs no checks there and says it does not
