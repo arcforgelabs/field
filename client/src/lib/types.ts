@@ -383,7 +383,7 @@ export interface InvoicingSettings {
   /** Where the business is (#29); null reads it from the business address. */
   country?: string | null;
   region?: string | null;
-  /** Whether Field checks for a newer release of itself (migration 0023). */
+  /** Whether Field checks for a newer release of itself (migration 0024). */
   updateCheck?: boolean;
   updatedAt: string | null;
   updatedBy: string | null;

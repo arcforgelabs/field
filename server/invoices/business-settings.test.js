@@ -1,4 +1,4 @@
-// Business settings: the update-check switch (migration 0023), on a throwaway
+// Business settings: the update-check switch (migration 0024), on a throwaway
 // PGlite database.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";

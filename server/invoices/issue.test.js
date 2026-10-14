@@ -332,7 +332,7 @@ describe("invoice issue service", () => {
     assert.equal(forced.decision.whenToCredit, "always");
     await assert.rejects(settings.update({ creditNoteOnReissue: "sometimes" }), /must be one of when-emailed, always, never/);
     await settings.update({ creditNoteOnReissue: "when-emailed" }, { actor: "owner-1" });
-    assert.deepEqual(await settings.get(), { creditNoteOnReissue: "when-emailed", country: null, region: null, updatedAt: (await settings.get()).updatedAt, updatedBy: "owner-1" });
+    assert.deepEqual(await settings.get(), { creditNoteOnReissue: "when-emailed", country: null, region: null, updateCheck: true, updatedAt: (await settings.get()).updatedAt, updatedBy: "owner-1" });
   });
 
   test("receipts: RCT-YYYY-M-N from their own counter, stored with the invoice they pay; a retry replays", async () => {
