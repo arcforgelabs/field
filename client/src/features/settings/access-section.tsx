@@ -62,6 +62,36 @@ function latest(holder: Holder) {
 const tokenName = (token: AccessToken) => token.label || "Unnamed token";
 const agentName = (agent: McpInstallation) => agent.clientName || "Unnamed agent";
 
+// Everyone's tokens and connected agents, and the access history. Pure: the
+// component sets its state from the result.
+async function fetchAccess(): Promise<{ holders: Holder[]; events: AccessEvent[]; agentsOff: boolean }> {
+  const { users = [], serviceAccounts = [] } = await api.listFieldUsers();
+  const [tokenLists, installations, history] = await Promise.all([
+    Promise.all([...users, ...serviceAccounts].map((holder) => api.listUserTokens(holder.id).then((res) => res.tokens).catch(() => [] as AccessToken[]))),
+    api.listMcpInstallations().then((res) => res.installations).catch((err: { status?: number }) => {
+      // No MCP router: connected agents are off on this installation.
+      if (err?.status === 404) return null;
+      throw err;
+    }),
+    api.accessEvents().then((res) => res.events).catch(() => [] as AccessEvent[]),
+  ]);
+  const agents = installations ?? [];
+  const people: Holder[] = users.map((user: FieldUser, index) => ({
+    id: user.id, name: user.name, email: user.email, kind: "person", role: user.role,
+    tokens: tokenLists[index], agents: agents.filter((agent) => agent.subject === user.id),
+  }));
+  const services: Holder[] = serviceAccounts.map((account: ServiceAccount, index) => ({
+    id: account.id, name: account.name, email: account.email, kind: "service", role: account.role === "admin" ? "owner" : "staff",
+    tokens: tokenLists[users.length + index], agents: agents.filter((agent) => agent.subject === account.id),
+  }));
+  const known = new Set([...people, ...services].map((holder) => holder.id));
+  // An agent whose approver Field no longer knows still shows, so it can be disconnected.
+  const orphans: Holder[] = [...new Set(agents.filter((agent) => !known.has(agent.subject)).map((agent) => agent.subject))].map((subject) => ({
+    id: subject, name: "Someone no longer in Field", email: null, kind: "person", role: "staff", tokens: [], agents: agents.filter((agent) => agent.subject === subject),
+  }));
+  return { holders: [...people, ...services, ...orphans], events: history, agentsOff: installations === null };
+}
+
 export function AccessSection({ selfId }: { selfId: string | null }) {
   const shell = useShell();
   const { logout } = useAuth();
@@ -74,44 +104,31 @@ export function AccessSection({ selfId }: { selfId: string | null }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const apply = useCallback((result: Awaited<ReturnType<typeof fetchAccess>>) => {
+    setAgentsOff(result.agentsOff);
+    setHolders(result.holders);
+    setEvents(result.events);
+    setError(null);
+  }, []);
+
   const load = useCallback(async () => {
     try {
-      const { users = [], serviceAccounts = [] } = await api.listFieldUsers();
-      const [tokenLists, installations, history] = await Promise.all([
-        Promise.all([...users, ...serviceAccounts].map((holder) => api.listUserTokens(holder.id).then((res) => res.tokens).catch(() => [] as AccessToken[]))),
-        api.listMcpInstallations().then((res) => res.installations).catch((err: { status?: number }) => {
-          // No MCP router: connected agents are off on this installation.
-          if (err?.status === 404) return null;
-          throw err;
-        }),
-        api.accessEvents().then((res) => res.events).catch(() => [] as AccessEvent[]),
-      ]);
-      setAgentsOff(installations === null);
-      const agents = installations ?? [];
-      const people: Holder[] = users.map((user: FieldUser, index) => ({
-        id: user.id, name: user.name, email: user.email, kind: "person", role: user.role,
-        tokens: tokenLists[index], agents: agents.filter((agent) => agent.subject === user.id),
-      }));
-      const services: Holder[] = serviceAccounts.map((account: ServiceAccount, index) => ({
-        id: account.id, name: account.name, email: account.email, kind: "service", role: account.role === "admin" ? "owner" : "staff",
-        tokens: tokenLists[users.length + index], agents: agents.filter((agent) => agent.subject === account.id),
-      }));
-      const known = new Set([...people, ...services].map((holder) => holder.id));
-      // An agent whose approver Field no longer knows still shows, so it can be disconnected.
-      const orphans: Holder[] = [...new Set(agents.filter((agent) => !known.has(agent.subject)).map((agent) => agent.subject))].map((subject) => ({
-        id: subject, name: "Someone no longer in Field", email: null, kind: "person", role: "staff", tokens: [], agents: agents.filter((agent) => agent.subject === subject),
-      }));
-      setHolders([...people, ...services, ...orphans]);
-      setEvents(history);
-      setError(null);
+      apply(await fetchAccess());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Access could not be loaded.");
     }
-  }, []);
+  }, [apply]);
 
+  // State is set in the request's callbacks, not in the effect itself, and
+  // not after the section is gone.
   useEffect(() => {
-    void load();
-  }, [load]);
+    let live = true;
+    fetchAccess().then(
+      (result) => { if (live) apply(result); },
+      (err) => { if (live) setError(err instanceof Error ? err.message : "Access could not be loaded."); },
+    );
+    return () => { live = false; };
+  }, [apply]);
 
   const withAccess = useMemo(() => (holders ?? []).filter((holder) => holder.tokens.length || holder.agents.length), [holders]);
   const needle = query.trim().toLowerCase();
