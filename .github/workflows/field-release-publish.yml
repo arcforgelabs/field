@@ -6,14 +6,16 @@ run-name: field ${{ inputs.tag }}
 # existing tag, which re-runs the checks and skips what is already published.
 #
 #   checks          field-release-checks.yml: tag, every CI lane, npm tarball
-#   image           environment release (Samuel approves): GHCR by digest,
+#   image           environment release for a stable release (Samuel
+#                   approves), release-beta for a beta (no reviewer, main
+#                   only): GHCR by digest,
 #                   build attestation and SBOM, smoke of the pushed digest,
 #                   then the channel's tags
 #   github-release  GitHub Release "field <version>" with notes, manifest and
 #                   .sha256 files
 #   npm             starts Field NPM Release (field-npm-release.yml) for the
-#                   tarball this run proved; it publishes after its own
-#                   approval
+#                   tarball this run proved; for a stable release it
+#                   publishes after its own approval
 #
 # Channels follow openclaw/openclaw: a beta (vYYYY.M.D-beta.N) goes to npm and
 # GHCR `beta` and a GitHub pre-release; a stable release (vYYYY.M.D) goes to
@@ -63,8 +65,9 @@ jobs:
     needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    # Only a stable release waits for a person: a beta runs straight through.
     environment:
-      name: release
+      name: ${{ needs.checks.outputs.channel == 'stable' && 'release' || 'release-beta' }}
       url: https://github.com/arcforgelabs/field/pkgs/container/field
     permissions:
       contents: read

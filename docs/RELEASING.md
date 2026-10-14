@@ -52,12 +52,17 @@ step. Field does not use OpenClaw's `extended-stable` channel.
 | --- | --- | --- |
 | `field-release-prepare.yml` (Field Release Prepare) | By hand, from `main` | Takes a `main` commit (default: the head) whose required checks passed, by the rule a Replit publish uses (`scripts/deploy-checks.js`). Plans the next tag for the channel, creates it, and starts Field Release Publish. |
 | `field-release-checks.yml` (Field Release Checks) | From Field Release Publish, or by hand to rehearse | Requires the tag to be a calendar version on `main` that matches `package.json`. Runs every CI lane on its commit (`docs/CI.md`). Packs the npm tarball with a shrinkwrap of the tested dependencies, then installs it in an empty directory and starts it. Publishes nothing. |
-| `field-release-publish.yml` (Field Release Publish) | From Field Release Prepare, or by hand for an existing tag | `image` job (environment `release`): pushes the image by digest, attests it and its SBOM, verifies the attestation, runs the Playwright smoke against the pushed digest, then adds the channel's tags. Then it creates the GitHub Release with the manifest, and starts Field NPM Release for the tarball it proved. |
-| `field-npm-release.yml` (Field NPM Release) | From Field Release Publish | Requires the tarball from that run to match the GitHub Release's manifest. `approve` (environment `npm-release`), then `publish` (environment `npm-publish`): npm trusted publishing with provenance, to the channel's dist-tag. Then it verifies what npm serves and attaches the post-publish evidence. |
+| `field-release-publish.yml` (Field Release Publish) | From Field Release Prepare, or by hand for an existing tag | `image` job (environment `release` for a stable release, `release-beta` for a beta): pushes the image by digest, attests it and its SBOM, verifies the attestation, runs the Playwright smoke against the pushed digest, then adds the channel's tags. Then it creates the GitHub Release with the manifest, and starts Field NPM Release for the tarball it proved. |
+| `field-npm-release.yml` (Field NPM Release) | From Field Release Publish | Requires the tarball from that run to match the GitHub Release's manifest. For a stable release, `approve` (environment `npm-release`) and then `publish`; for a beta, `publish` straight away. `publish` runs in environment `npm-publish`: npm trusted publishing with provenance, to the channel's dist-tag. Then it verifies what npm serves and attaches the post-publish evidence. |
 | `field-release-promote.yml` (Field Release Promote) | By hand, from `main` | Points a channel at a published release, to roll it back or put it back. It verifies the release (the manifest's checksum, the npm integrity, signatures and provenance, and the image attestation), then in environment `npm-release` moves the channel. A stable tag moves npm `latest`, GHCR `stable` and `latest`, and GitHub's latest release, and moves `beta` up when the beta channel is behind. A beta tag moves npm and GHCR `beta`. |
 
-Each protected environment needs Samuel's approval and accepts only runs from
-`main`. Release tags (`v20*`) cannot be moved or deleted
+Only a stable release, and moving a channel, wait for a person. A stable
+release stops twice for Samuel's approval: `release` (the image) and
+`npm-release` (npm). A beta needs no approval: its image job runs in
+`release-beta`, and Field NPM Release skips its `approve` job. Field Release
+Promote always needs `npm-release`. Every environment accepts only runs from
+`main`, and `npm-publish`, the environment npm's trusted publisher names, has
+no reviewer of its own. Release tags (`v20*`) cannot be moved or deleted
 (`.github/rulesets/release-tags.json`).
 
 npm can take minutes to serve a new version. Field NPM Release reads it back
@@ -83,18 +88,17 @@ forward with a new tag.
    gh workflow run field-release-prepare.yml --repo arcforgelabs/field --ref main -f channel=beta
    ```
 
-3. When the checks pass, approve `release` in the Field Release Publish run.
-   When it starts Field NPM Release, approve `npm-release` there, then
-   `npm-publish`. The beta is then on npm `beta`, GHCR `beta` and a GitHub
-   pre-release.
+3. Nothing waits for approval: when the checks pass, the beta is published to
+   npm `beta`, GHCR `beta` and a GitHub pre-release.
 4. Run the beta where it matters. To release that commit as stable, give it:
 
    ```bash
    gh workflow run field-release-prepare.yml --repo arcforgelabs/field --ref main -f channel=stable -f commit=<commit>
    ```
 
-   Approve it as in step 3. It is then npm `latest`, GHCR `stable` and
-   `latest`, and GitHub's latest release.
+   When the checks pass, approve `release` in the Field Release Publish run;
+   when it starts Field NPM Release, approve `npm-release` there. It is then
+   npm `latest`, GHCR `stable` and `latest`, and GitHub's latest release.
 
 To roll back, point the channel at the previous release (a stable tag for
 `latest`, a beta tag for `beta`), and approve `npm-release`. Nothing is
@@ -113,8 +117,9 @@ Docker, with Node, or on Replit (`deploy/replit/`).
 
 GitHub (done with `gh`; each item can be undone in the repository settings):
 
-- Environments `npm-publish`, `release` and `npm-release`: required reviewer
-  Samuel, deployments from `main` only.
+- Environments `release` and `npm-release`: required reviewer Samuel.
+  `release-beta` and `npm-publish`: no reviewer. All four deploy from `main`
+  only.
 - The release tag ruleset, from `.github/rulesets/release-tags.json`.
 
 npm (an npm owner of the `@arcforgelabs` scope does this on npmjs.com, with

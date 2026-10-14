@@ -8,7 +8,8 @@ run-name: field npm ${{ inputs.tag }}
 #
 #   resolve   the tarball from that run must match the GitHub Release's
 #             manifest (SHA-256 and npm integrity)
-#   approve   environment npm-release: Samuel approves the publish
+#   approve   stable only, environment npm-release: Samuel approves the
+#             publish. A beta skips it and publishes straight away.
 #   publish   environment npm-publish: npm trusted publishing with
 #             provenance, no stored token
 #   evidence  verifies what npm serves and attaches postpublish-evidence.json
@@ -116,6 +117,8 @@ jobs:
   approve:
     name: Approve ${{ inputs.tag }} for npm ${{ needs.resolve.outputs.dist_tag }}
     needs: resolve
+    # Only a stable release waits for a person.
+    if: needs.resolve.outputs.channel == 'stable'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     environment: npm-release
@@ -131,6 +134,13 @@ jobs:
   publish:
     name: publish
     needs: [resolve, approve]
+    # A stable release publishes only after its approval; a beta, whose
+    # approval job was skipped, publishes straight away.
+    if: >-
+      ${{ !cancelled() && needs.resolve.result == 'success' && (
+        needs.approve.result == 'success' ||
+        (needs.resolve.outputs.channel == 'beta' && needs.approve.result == 'skipped')
+      ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
@@ -221,6 +231,7 @@ jobs:
   evidence:
     name: evidence
     needs: [resolve, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
