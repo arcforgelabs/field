@@ -178,8 +178,9 @@ test("routes fall into their class by method and path", () => {
   assert.deepEqual(classesFor("POST", "/api/integrations/xero/push", "caller"), ["integration"]);
   assert.deepEqual(classesFor("POST", "/api/integrations/xero/connect", "caller"), ["oauth", "integration"]);
   assert.deepEqual(classesFor("GET", "/api/integrations/xero/callback", "address"), ["oauth"]);
-  assert.deepEqual(classesFor("POST", "/oauth/approve", "address"), ["sign-in", "oauth"]);
-  assert.deepEqual(classesFor("POST", "/oauth/token", "address"), ["oauth"]);
+  // The MCP router applies the oauth budget to /oauth/* itself (remote-mcp.test.js).
+  assert.deepEqual(classesFor("POST", "/oauth/approve", "address"), ["sign-in"]);
+  assert.deepEqual(classesFor("POST", "/oauth/token", "address"), []);
   assert.deepEqual(classesFor("POST", "/api/users/u1/tokens", "caller"), ["token"]);
   assert.deepEqual(classesFor("DELETE", "/api/users/u1/tokens/t1", "caller"), [], "revoking is never held back");
   assert.deepEqual(classesFor("GET", "/api/jobs", "caller"), []);

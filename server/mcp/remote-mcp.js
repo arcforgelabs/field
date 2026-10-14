@@ -1,4 +1,6 @@
 import express, { Router } from "express";
+import rateLimit from "express-rate-limit";
+import { classLimitOptions, resolveRateLimitBudgets } from "../rate-limits.js";
 import { OAuthStore } from "./oauth-store.js";
 import { renderAuthorizationPage, renderAuthorizationSignInPage } from "./authorization-page.js";
 import { MCP_SCOPES } from "./scopes.js";
@@ -190,6 +192,9 @@ export async function createRemoteMcpRouter({
   // Middleware run on /mcp once the grant is checked: the installation's
   // rate limits (server/rate-limits.js byCaller, keyed on req.rateLimitCaller).
   limitCaller = (_req, _res, next) => next(),
+  // The budgets in force (server/rate-limits.js); the OAuth endpoints below
+  // take the oauth budget per address.
+  rateLimitBudgets = resolveRateLimitBudgets(),
 }) {
   if (typeof authenticate !== "function") throw new Error("authenticate is required");
   if (typeof authorizeScopes !== "function") throw new Error("authorizeScopes is required");
@@ -237,6 +242,10 @@ export async function createRemoteMcpRouter({
   // Prevent the SPA fallback from masquerading as provider metadata. Field is
   // an OAuth authorization server, not an OpenID Provider.
   router.get("/.well-known/openid-configuration", (_req, res) => res.status(404).end());
+
+  // Registration, authorization, approval, token and revoke: the oauth
+  // budget, on this router so code scanning sees it ahead of each handler.
+  router.use("/oauth", rateLimit(classLimitOptions(rateLimitBudgets, "oauth")));
 
   router.post("/oauth/register", async (req, res) => {
     const metadata = req.body || {};

@@ -760,14 +760,19 @@ function setByPath(target, key, value) {
     error.statusCode = 400;
     throw error;
   }
+  // Each key is checked again where it is assigned, the form code scanning
+  // recognises (js/prototype-polluting-assignment).
   let cursor = target;
   for (const segment of parts.slice(0, -1)) {
+    if (segment === "__proto__" || segment === "constructor" || segment === "prototype") return;
     if (!Object.hasOwn(cursor, segment) || !cursor[segment] || typeof cursor[segment] !== "object") {
       cursor[segment] = {};
     }
     cursor = cursor[segment];
   }
-  cursor[parts[parts.length - 1]] = value;
+  const last = parts[parts.length - 1];
+  if (last === "__proto__" || last === "constructor" || last === "prototype") return;
+  cursor[last] = value;
 }
 
 function resolveCustomerName(details, meta) {
