@@ -8,8 +8,10 @@ import {
   listOpenGaps,
   listOpenHandoffBlockingGaps,
   listOpenSendBlockingGaps,
+  mergeJobDetails,
   previewJobState,
   readJobState,
+  updateJobDetailField,
 } from "./job-state.js";
 
 test("option selection gaps block handoff but not quote sending", async () => {
@@ -149,4 +151,34 @@ test("previewJobState does not mutate stored gap state when inspecting a histori
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }
+});
+
+test("a detail key or patch cannot reach Object.prototype, and real keys still merge", async (t) => {
+  const jobDir = await mkdtemp(join(tmpdir(), "field-job-state-proto-"));
+  t.after(() => rm(jobDir, { recursive: true, force: true }));
+  const meta = { id: "job-proto", createdAt: "2026-03-25T10:00:00.000Z", title: "Proto" };
+  t.after(() => {
+    delete Object.prototype.polluted;
+  });
+
+  const merged = await mergeJobDetails({
+    jobDir,
+    meta,
+    patch: JSON.parse('{"__proto__":{"polluted":1},"constructor":{"prototype":{"polluted":2}},"contact":{"name":"Pat","__proto__":{"polluted":3}},"siteAddress":"1 Main St"}'),
+  });
+  assert.equal({}.polluted, undefined);
+  assert.equal(merged.details.contact.name, "Pat");
+  assert.equal(merged.details.siteAddress, "1 Main St");
+  assert.equal(Object.hasOwn(merged.details, "__proto__"), false);
+
+  for (const key of ["__proto__.polluted", "constructor.prototype.polluted", "contact.__proto__.polluted"]) {
+    await assert.rejects(() => updateJobDetailField({ jobDir, meta, key, value: 1 }), { statusCode: 400 });
+  }
+  assert.equal({}.polluted, undefined);
+
+  const updated = await updateJobDetailField({ jobDir, meta, key: "contact.phone", value: "0400 000 000" });
+  assert.equal(updated.details.contact.phone, "0400 000 000");
+  assert.equal(updated.details.contact.name, "Pat");
+  const fresh = await updateJobDetailField({ jobDir, meta, key: "toString.label", value: "kept" });
+  assert.deepEqual(fresh.details.toString, { label: "kept" });
 });

@@ -57,13 +57,16 @@ function text(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function slugifyCatalogCode(value) {
-  return String(value || "")
+/** A catalogue code as a lowercase slug (exported for tests). */
+export function slugifyCatalogCode(value) {
+  let slug = String(value || "")
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 72);
+    .replace(/[^a-z0-9]+/g, "-");
+  // The collapse leaves at most one dash at each end.
+  if (slug.startsWith("-")) slug = slug.slice(1);
+  if (slug.endsWith("-")) slug = slug.slice(0, -1);
+  return slug.slice(0, 72);
 }
 
 // The catalogue editor keeps a kit's own "masterline" component (the kit's

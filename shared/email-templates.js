@@ -238,27 +238,32 @@ export function renderEmailTemplate(template, context = {}) {
   const milestoneLabel = String(context.milestoneLabel || "").trim().toLowerCase();
   // The server supplies it (ui.businessName: trading name, else legal name).
   const businessName = String(context.businessName || "").trim();
-  const escapedJobTitle = escapeHtml(jobTitle);
-  const values = {
-    greeting: clientName ? `Hi ${escapeHtml(clientName)},` : "Hi,",
-    clientName: escapeHtml(clientName),
-    jobTitle: escapeHtml(jobTitle || businessName),
-    businessName: escapeHtml(businessName),
-    jobTitleFor: escapedJobTitle ? ` for <strong>${escapedJobTitle}</strong>` : "",
-    jobTitleOn: escapedJobTitle ? ` on <strong>${escapedJobTitle}</strong>` : "",
-    milestone: milestoneLabel ? `${escapeHtml(milestoneLabel)} ` : "",
-    defaultSubject: escapeHtml(String(context.defaultSubject || "")),
+  // The subject is plain text, filled from the plain values; the body from
+  // the same values escaped, with the job title in bold.
+  const text = {
+    greeting: clientName ? `Hi ${clientName},` : "Hi,",
+    clientName,
+    jobTitle: jobTitle || businessName,
+    businessName,
+    jobTitleFor: jobTitle ? ` for ${jobTitle}` : "",
+    jobTitleOn: jobTitle ? ` on ${jobTitle}` : "",
+    milestone: milestoneLabel ? `${milestoneLabel} ` : "",
+    defaultSubject: String(context.defaultSubject || ""),
   };
+  const html = Object.fromEntries(Object.entries(text).map(([key, value]) => [key, escapeHtml(value)]));
+  if (jobTitle) {
+    html.jobTitleFor = ` for <strong>${escapeHtml(jobTitle)}</strong>`;
+    html.jobTitleOn = ` on <strong>${escapeHtml(jobTitle)}</strong>`;
+  }
   return {
     ...template,
-    subject: replacePlaceholders(template.subject || "", values, { stripTags: true }),
-    html: replacePlaceholders(template.html || "", values),
+    subject: replacePlaceholders(template.subject || "", text),
+    html: replacePlaceholders(template.html || "", html),
   };
 }
 
-function replacePlaceholders(value, values, { stripTags = false } = {}) {
-  const rendered = String(value || "").replace(/\{\{([a-zA-Z][a-zA-Z0-9]*)\}\}/g, (_match, key) => values[key] ?? "");
-  return stripTags ? rendered.replace(/<[^>]*>/g, "") : rendered;
+function replacePlaceholders(value, values) {
+  return String(value || "").replace(/\{\{([a-zA-Z][a-zA-Z0-9]*)\}\}/g, (_match, key) => (Object.hasOwn(values, key) ? values[key] : ""));
 }
 
 function escapeHtml(value) {

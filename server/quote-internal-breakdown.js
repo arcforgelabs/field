@@ -11,6 +11,7 @@ import {
 import { getCustomerScheduleItems } from "./quote-presentation.js";
 import { formatCatalogUnit, formatCatalogUnitText } from "../shared/catalog-units.js";
 import { buildDisambiguatedSourceLabels } from "../shared/source-label-disambiguation.js";
+import { escapeMarkdownCell as markdownRow } from "../shared/markdown-table.js";
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -110,10 +111,6 @@ function buildMarkdownTable(headers, rows) {
     ...rows.map((row) => `| ${row.join(" | ")} |`),
   ];
   return lines.join("\n");
-}
-
-function markdownRow(value) {
-  return String(value ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
 function findSourceLineItem(lineItems, breakdown) {

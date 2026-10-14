@@ -6,7 +6,7 @@ import {
   EMAIL_TEMPLATE_DOCUMENT_TYPES,
   EMAIL_TEMPLATE_PLACEHOLDERS,
 } from "../shared/email-templates.js";
-import { sanitizeEmailBodyHtml } from "./quote-email-template.js";
+import { sanitizeEmailBodyHtml } from "./email-html.js";
 
 let statePath = null;
 let overrides = {};

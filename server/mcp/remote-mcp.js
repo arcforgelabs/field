@@ -31,8 +31,11 @@ export function resolveRemoteMcpRuntimeConfig({ config = {}, env = process.env }
 const MAX_CLIENT_NAME_LENGTH = 128;
 const MAX_REDIRECT_URI_LENGTH = 2048;
 
-function bearerToken(req) {
-  return /^Bearer\s+(.+)$/i.exec(req.headers.authorization || "")?.[1] || null;
+/** The token in `Authorization: Bearer <token>`, or null (exported for tests). */
+export function bearerToken(req) {
+  const header = req.headers.authorization;
+  if (typeof header !== "string" || header.slice(0, 6).toLowerCase() !== "bearer" || !/^\s$/.test(header.charAt(6))) return null;
+  return header.slice(7).trim() || null;
 }
 
 function formError(res, status, error, description) {

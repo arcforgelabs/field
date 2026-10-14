@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import express from "express";
 import {
+  bearerToken,
   createRemoteMcpRouter,
   MCP_SCOPES,
   resolveRemoteMcpRuntimeConfig,
@@ -583,4 +584,19 @@ test("each MCP installation has its own caller budget, and an invalid token spen
   assert.equal((await limited.json()).code, "rate_limited");
   // Another installation is not held back by the first one's traffic.
   assert.equal((await rpc(f, second.tokens.access_token, "ping", {})).status, 200);
+});
+
+test("the bearer token is read with a prefix check, in linear time", () => {
+  const read = (authorization) => bearerToken({ headers: { authorization } });
+  assert.equal(read("Bearer abc.def"), "abc.def");
+  assert.equal(read("bearer  abc "), "abc");
+  assert.equal(read("Bearer\tabc"), "abc");
+  assert.equal(read("Bearer "), null);
+  assert.equal(read("Bearerabc"), null);
+  assert.equal(read("Basic abc"), null);
+  assert.equal(read(undefined), null);
+  const adversarial = `Bearer${" ".repeat(100_000)}\n`;
+  const started = performance.now();
+  assert.equal(read(adversarial), null);
+  assert.ok(performance.now() - started < 200, "linear");
 });

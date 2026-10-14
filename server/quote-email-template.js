@@ -1,5 +1,6 @@
 import { DEFAULT_BUSINESS_NAME } from "./business-profile.js";
 import mjml2html from "mjml";
+import { sanitizeEmailBodyHtml } from "./email-html.js";
 
 const COLORS = {
   brand: "#c8912a",
@@ -197,80 +198,12 @@ export async function renderQuoteEmailHtml({
   return html;
 }
 
-export function sanitizeEmailBodyHtml(html) {
-  return String(html || "")
-    // Strip script, style, iframe tags and their content
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
-    // Strip event handlers (on*)
-    .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, "")
-    // Strip all tags except allowed ones
-    .replace(/<\/?(?!p\b|br\b|strong\b|em\b|b\b|i\b|u\b|a\b|span\b|ul\b|ol\b|li\b|img\b)[a-z][a-z0-9]*(?:\s[^>]*)?\/?>/gi, "")
-    .replace(/<(p|span|li)\s+([^>]*)>/gi, (_match, tag, attrs) => {
-      const style = extractAttribute(attrs, "style");
-      const safeStyle = sanitizeInlineStyle(style);
-      return safeStyle ? `<${tag} style="${escapeHtml(safeStyle)}">` : `<${tag}>`;
-    })
-    .replace(/<(strong|em|b|i|u|ul|ol)\s[^>]*>/gi, "<$1>")
-    .replace(/<a\s+([^>]*)>/gi, (_match, attrs) => {
-      const href = sanitizeHref(extractAttribute(attrs, "href"));
-      return href ? `<a href="${escapeHtml(href)}">` : "<a>";
-    })
-    .replace(/<img\s+([^>]*)>/gi, (_match, attrs) => {
-      const src = sanitizeImageSrc(extractAttribute(attrs, "src"));
-      if (!src) return "";
-      const alt = escapeHtml(extractAttribute(attrs, "alt") || "Image");
-      return `<img src="${escapeHtml(src)}" alt="${alt}" style="max-width:100%;height:auto;border:0;" />`;
-    })
-    .replace(/<p>/gi, '<p style="margin:0 0 12px;">')
-    .replace(/<li>/gi, '<li style="margin:0 0 6px;">')
-    .replace(/<(ul|ol)>/gi, '<$1 style="margin:0 0 12px;padding-left:22px;">');
-}
-
 function escapeHtml(str) {
   return String(str || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
-}
-
-function extractAttribute(attrs, name) {
-  if (!attrs) return "";
-  const pattern = new RegExp(`${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i");
-  const match = String(attrs).match(pattern);
-  return match ? (match[1] || match[2] || match[3] || "") : "";
-}
-
-function sanitizeInlineStyle(style) {
-  const allowed = [];
-  for (const declaration of String(style || "").split(";")) {
-    const [rawProp, ...rawValueParts] = declaration.split(":");
-    const prop = String(rawProp || "").trim().toLowerCase();
-    const value = rawValueParts.join(":").trim();
-    if (!prop || !value) continue;
-    if (prop === "font-size" && /^\d{1,2}(?:\.\d)?px$/.test(value)) {
-      allowed.push(`${prop}:${value}`);
-    }
-    if (prop === "font-family" && /^[\w\s'",.-]+$/.test(value)) {
-      allowed.push(`${prop}:${value}`);
-    }
-  }
-  return allowed.join(";");
-}
-
-function sanitizeHref(href) {
-  const value = String(href || "").trim();
-  if (/^(https?:|mailto:|tel:)/i.test(value)) return value;
-  return "";
-}
-
-function sanitizeImageSrc(src) {
-  const value = String(src || "").trim();
-  if (/^https:\/\//i.test(value)) return value;
-  if (/^data:image\/(?:png|jpeg|jpg|gif|webp);base64,[a-z0-9+/=]+$/i.test(value)) return value;
-  return "";
 }
 
 function normalizeFontFamily(fontFamily) {

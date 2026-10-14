@@ -5,6 +5,7 @@ import { existsSync, createReadStream } from "../server/storage/fs.js";
 import { cp, mkdir, readFile, stat, writeFile } from "../server/storage/fs-promises.js";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { buildQuoteProofSummary } from "../server/quote-proof.js";
+import { escapeMarkdownCell } from "../shared/markdown-table.js";
 
 const FILE_SPECS = [
   { path: "meta.json", category: "capture", required: true, description: "Recording identity and top-level pipeline status." },
@@ -291,5 +292,5 @@ function isMainModule(importMetaUrl) {
 }
 
 function escapeCell(value) {
-  return String(value || "").replace(/\|/g, "\\|");
+  return escapeMarkdownCell(value || "");
 }

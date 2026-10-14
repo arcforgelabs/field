@@ -742,18 +742,27 @@ export function applyDetailsToMeta(meta, details) {
   };
 }
 
+// A detail key or patch key that would reach an object's prototype
+// instead of the details themselves.
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function getByPath(value, key) {
   return String(key || "")
     .split(".")
     .filter(Boolean)
-    .reduce((current, segment) => current?.[segment], value);
+    .reduce((current, segment) => (current && typeof current === "object" && Object.hasOwn(current, segment) ? current[segment] : undefined), value);
 }
 
 function setByPath(target, key, value) {
   const parts = String(key || "").split(".").filter(Boolean);
+  if (!parts.length || parts.some((segment) => UNSAFE_KEYS.has(segment))) {
+    const error = new Error(`detail key not allowed: ${key}`);
+    error.statusCode = 400;
+    throw error;
+  }
   let cursor = target;
   for (const segment of parts.slice(0, -1)) {
-    if (!cursor[segment] || typeof cursor[segment] !== "object") {
+    if (!Object.hasOwn(cursor, segment) || !cursor[segment] || typeof cursor[segment] !== "object") {
       cursor[segment] = {};
     }
     cursor = cursor[segment];
@@ -775,10 +784,12 @@ function mergeObjects(target, patch) {
     return patch;
   }
   for (const [key, value] of Object.entries(patch)) {
+    if (UNSAFE_KEYS.has(key)) continue;
     if (
       value
       && typeof value === "object"
       && !Array.isArray(value)
+      && Object.hasOwn(target, key)
       && target[key]
       && typeof target[key] === "object"
       && !Array.isArray(target[key])

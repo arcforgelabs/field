@@ -1,0 +1,1497 @@
+{
+  "about": "Email body HTML recorded from main 5c84bb0's regex sanitisers (sanitizeEmailBodyHtml, sanitizeGenericBody, stripHtml, renderEmailTemplate) and kept byte for byte by server/email-html.js. An entry's `changed` names an output that was wrong before, with what it was and why it changed.",
+  "entries": [
+    {
+      "name": "stock template email/standard",
+      "html": "<p>{{greeting}}</p><p>I wanted to send through an update{{jobTitleFor}}.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">I wanted to send through an update{{jobTitleFor}}.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>I wanted to send through an update{{jobTitleFor}}.</p>",
+      "text": "{{greeting}}\n\nI wanted to send through an update{{jobTitleFor}}."
+    },
+    {
+      "name": "composer body email/standard",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>I wanted to send through an update for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">I wanted to send through an update for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>I wanted to send through an update for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nI wanted to send through an update for Smith & Sons \"rear\" wall.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI wanted to send through an update for Smith & Sons \"rear\" wall.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body email/standard",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>I wanted to send through an update for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">I wanted to send through an update for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>I wanted to send through an update for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nI wanted to send through an update for Smith & Sons \"rear\" wall.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI wanted to send through an update for Smith & Sons \"rear\" wall.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template email/standard",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I wanted to send through an update for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">I wanted to send through an update for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>I wanted to send through an update for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p>",
+      "text": "Hi Pat O'Brien,\n\nI wanted to send through an update for Smith & Sons \"rear\" wall.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI wanted to send through an update for Smith & Sons \"rear\" wall.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template email/follow-up",
+      "html": "<p>{{greeting}}</p><p>Just following up{{jobTitleOn}}.</p><p>Let me know if you have any questions.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">Just following up{{jobTitleOn}}.</p><p style=\"margin:0 0 12px;\">Let me know if you have any questions.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>Just following up{{jobTitleOn}}.</p><p>Let me know if you have any questions.</p>",
+      "text": "{{greeting}}\n\nJust following up{{jobTitleOn}}.\n\nLet me know if you have any questions."
+    },
+    {
+      "name": "composer body email/follow-up",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Just following up on <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Let me know if you have any questions.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Just following up on <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p style=\"margin:0 0 12px;\">Let me know if you have any questions.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Just following up on <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Let me know if you have any questions.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nJust following up on Smith & Sons \"rear\" wall.\n\nLet me know if you have any questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nJust following up on Smith & Sons \"rear\" wall.\n\nLet me know if you have any questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body email/follow-up",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Just following up on <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Let me know if you have any questions.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Just following up on <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p style=\"margin:0 0 12px;\">Let me know if you have any questions.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Just following up on <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Let me know if you have any questions.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nJust following up on Smith & Sons \"rear\" wall.\n\nLet me know if you have any questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nJust following up on Smith & Sons \"rear\" wall.\n\nLet me know if you have any questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template email/follow-up",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Just following up on <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p>Let me know if you have any questions.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">Just following up on <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p style=\"margin:0 0 12px;\">Let me know if you have any questions.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>Just following up on <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p>Let me know if you have any questions.</p>",
+      "text": "Hi Pat O'Brien,\n\nJust following up on Smith & Sons \"rear\" wall.\n\nLet me know if you have any questions.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nJust following up on Smith & Sons \"rear\" wall.\n\nLet me know if you have any questions.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template email/site-note",
+      "html": "<p>{{greeting}}</p><p>I have a quick site note{{jobTitleFor}}:</p><p></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">I have a quick site note{{jobTitleFor}}:</p><p style=\"margin:0 0 12px;\"></p>",
+      "genericBody": "<p>{{greeting}}</p><p>I have a quick site note{{jobTitleFor}}:</p><p></p>",
+      "text": "{{greeting}}\n\nI have a quick site note{{jobTitleFor}}:"
+    },
+    {
+      "name": "composer body email/site-note",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>I have a quick site note for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>:</p><p></p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">I have a quick site note for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>:</p><p style=\"margin:0 0 12px;\"></p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>I have a quick site note for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>:</p><p></p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nI have a quick site note for Smith & Sons \"rear\" wall:\n\n\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI have a quick site note for Smith & Sons \"rear\" wall:\n\n\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body email/site-note",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>I have a quick site note for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>:</p><p></p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">I have a quick site note for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>:</p><p style=\"margin:0 0 12px;\"></p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>I have a quick site note for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>:</p><p></p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nI have a quick site note for Smith & Sons \"rear\" wall:\n\n\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI have a quick site note for Smith & Sons \"rear\" wall:\n\n\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template email/site-note",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I have a quick site note for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>:</p><p></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">I have a quick site note for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>:</p><p style=\"margin:0 0 12px;\"></p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>I have a quick site note for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>:</p><p></p>",
+      "text": "Hi Pat O'Brien,\n\nI have a quick site note for Smith & Sons \"rear\" wall:",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI have a quick site note for Smith & Sons \"rear\" wall:",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template quote/standard",
+      "html": "<p>{{greeting}}</p><p>Your quote{{jobTitleFor}} is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">Your quote{{jobTitleFor}} is ready. The full quote is attached as a PDF.</p><p style=\"margin:0 0 12px;\">Reply to this email if you'd like any adjustments or have questions.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>Your quote{{jobTitleFor}} is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p>",
+      "text": "{{greeting}}\n\nYour quote{{jobTitleFor}} is ready. The full quote is attached as a PDF.\n\nReply to this email if you'd like any adjustments or have questions."
+    },
+    {
+      "name": "composer body quote/standard",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Your quote for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Your quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The full quote is attached as a PDF.</p><p style=\"margin:0 0 12px;\">Reply to this email if you'd like any adjustments or have questions.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Your quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nYour quote for Smith & Sons \"rear\" wall is ready. The full quote is attached as a PDF.\n\nReply to this email if you'd like any adjustments or have questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour quote for Smith & Sons \"rear\" wall is ready. The full quote is attached as a PDF.\n\nReply to this email if you'd like any adjustments or have questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body quote/standard",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Your quote for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Your quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The full quote is attached as a PDF.</p><p style=\"margin:0 0 12px;\">Reply to this email if you'd like any adjustments or have questions.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Your quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nYour quote for Smith & Sons \"rear\" wall is ready. The full quote is attached as a PDF.\n\nReply to this email if you'd like any adjustments or have questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour quote for Smith & Sons \"rear\" wall is ready. The full quote is attached as a PDF.\n\nReply to this email if you'd like any adjustments or have questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template quote/standard",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">Your quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The full quote is attached as a PDF.</p><p style=\"margin:0 0 12px;\">Reply to this email if you'd like any adjustments or have questions.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>Your quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p>",
+      "text": "Hi Pat O'Brien,\n\nYour quote for Smith & Sons \"rear\" wall is ready. The full quote is attached as a PDF.\n\nReply to this email if you'd like any adjustments or have questions.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour quote for Smith & Sons \"rear\" wall is ready. The full quote is attached as a PDF.\n\nReply to this email if you'd like any adjustments or have questions.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template quote/approval",
+      "html": "<p>{{greeting}}</p><p>I have attached the quote{{jobTitleFor}} for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">I have attached the quote{{jobTitleFor}} for review.</p><p style=\"margin:0 0 12px;\">If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>I have attached the quote{{jobTitleFor}} for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p>",
+      "text": "{{greeting}}\n\nI have attached the quote{{jobTitleFor}} for review.\n\nIf everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it."
+    },
+    {
+      "name": "composer body quote/approval",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>I have attached the quote for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">I have attached the quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> for review.</p><p style=\"margin:0 0 12px;\">If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>I have attached the quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nI have attached the quote for Smith & Sons \"rear\" wall for review.\n\nIf everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI have attached the quote for Smith & Sons \"rear\" wall for review.\n\nIf everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body quote/approval",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>I have attached the quote for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">I have attached the quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> for review.</p><p style=\"margin:0 0 12px;\">If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>I have attached the quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nI have attached the quote for Smith & Sons \"rear\" wall for review.\n\nIf everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI have attached the quote for Smith & Sons \"rear\" wall for review.\n\nIf everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template quote/approval",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I have attached the quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">I have attached the quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> for review.</p><p style=\"margin:0 0 12px;\">If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>I have attached the quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p>",
+      "text": "Hi Pat O'Brien,\n\nI have attached the quote for Smith & Sons \"rear\" wall for review.\n\nIf everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI have attached the quote for Smith & Sons \"rear\" wall for review.\n\nIf everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template quote/warm",
+      "html": "<p>{{greeting}}</p><p>Thanks again for the details. The quote{{jobTitleFor}} is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">Thanks again for the details. The quote{{jobTitleFor}} is attached.</p><p style=\"margin:0 0 12px;\">I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>Thanks again for the details. The quote{{jobTitleFor}} is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p>",
+      "text": "{{greeting}}\n\nThanks again for the details. The quote{{jobTitleFor}} is attached.\n\nI have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed."
+    },
+    {
+      "name": "composer body quote/warm",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Thanks again for the details. The quote for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Thanks again for the details. The quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is attached.</p><p style=\"margin:0 0 12px;\">I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Thanks again for the details. The quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nThanks again for the details. The quote for Smith & Sons \"rear\" wall is attached.\n\nI have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nThanks again for the details. The quote for Smith & Sons \"rear\" wall is attached.\n\nI have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body quote/warm",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Thanks again for the details. The quote for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Thanks again for the details. The quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is attached.</p><p style=\"margin:0 0 12px;\">I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Thanks again for the details. The quote for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nThanks again for the details. The quote for Smith & Sons \"rear\" wall is attached.\n\nI have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nThanks again for the details. The quote for Smith & Sons \"rear\" wall is attached.\n\nI have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template quote/warm",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Thanks again for the details. The quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">Thanks again for the details. The quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is attached.</p><p style=\"margin:0 0 12px;\">I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>Thanks again for the details. The quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p>",
+      "text": "Hi Pat O'Brien,\n\nThanks again for the details. The quote for Smith & Sons \"rear\" wall is attached.\n\nI have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nThanks again for the details. The quote for Smith & Sons \"rear\" wall is attached.\n\nI have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template invoice/standard",
+      "html": "<p>{{greeting}}</p><p>Your {{milestone}}invoice{{jobTitleFor}} is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">Your {{milestone}}invoice{{jobTitleFor}} is ready. The invoice PDF is attached.</p><p style=\"margin:0 0 12px;\">Reply to this email if you have any questions about this invoice.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>Your {{milestone}}invoice{{jobTitleFor}} is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p>",
+      "text": "{{greeting}}\n\nYour {{milestone}}invoice{{jobTitleFor}} is ready. The invoice PDF is attached.\n\nReply to this email if you have any questions about this invoice."
+    },
+    {
+      "name": "composer body invoice/standard",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Your deposit invoice for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The invoice PDF is attached.</p><p style=\"margin:0 0 12px;\">Reply to this email if you have any questions about this invoice.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall is ready. The invoice PDF is attached.\n\nReply to this email if you have any questions about this invoice.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall is ready. The invoice PDF is attached.\n\nReply to this email if you have any questions about this invoice.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body invoice/standard",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Your deposit invoice for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The invoice PDF is attached.</p><p style=\"margin:0 0 12px;\">Reply to this email if you have any questions about this invoice.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall is ready. The invoice PDF is attached.\n\nReply to this email if you have any questions about this invoice.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall is ready. The invoice PDF is attached.\n\nReply to this email if you have any questions about this invoice.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template invoice/standard",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">Your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The invoice PDF is attached.</p><p style=\"margin:0 0 12px;\">Reply to this email if you have any questions about this invoice.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p>",
+      "text": "Hi Pat O'Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall is ready. The invoice PDF is attached.\n\nReply to this email if you have any questions about this invoice.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall is ready. The invoice PDF is attached.\n\nReply to this email if you have any questions about this invoice.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template invoice/payment",
+      "html": "<p>{{greeting}}</p><p>Please find your {{milestone}}invoice{{jobTitleFor}} attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">Please find your {{milestone}}invoice{{jobTitleFor}} attached.</p><p style=\"margin:0 0 12px;\">When payment is made, reply with the reference and I will mark it off against the job.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>Please find your {{milestone}}invoice{{jobTitleFor}} attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p>",
+      "text": "{{greeting}}\n\nPlease find your {{milestone}}invoice{{jobTitleFor}} attached.\n\nWhen payment is made, reply with the reference and I will mark it off against the job."
+    },
+    {
+      "name": "composer body invoice/payment",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Please find your deposit invoice for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Please find your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> attached.</p><p style=\"margin:0 0 12px;\">When payment is made, reply with the reference and I will mark it off against the job.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Please find your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nPlease find your deposit invoice for Smith & Sons \"rear\" wall attached.\n\nWhen payment is made, reply with the reference and I will mark it off against the job.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nPlease find your deposit invoice for Smith & Sons \"rear\" wall attached.\n\nWhen payment is made, reply with the reference and I will mark it off against the job.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body invoice/payment",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Please find your deposit invoice for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Please find your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> attached.</p><p style=\"margin:0 0 12px;\">When payment is made, reply with the reference and I will mark it off against the job.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Please find your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nPlease find your deposit invoice for Smith & Sons \"rear\" wall attached.\n\nWhen payment is made, reply with the reference and I will mark it off against the job.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nPlease find your deposit invoice for Smith & Sons \"rear\" wall attached.\n\nWhen payment is made, reply with the reference and I will mark it off against the job.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template invoice/payment",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Please find your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">Please find your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> attached.</p><p style=\"margin:0 0 12px;\">When payment is made, reply with the reference and I will mark it off against the job.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>Please find your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p>",
+      "text": "Hi Pat O'Brien,\n\nPlease find your deposit invoice for Smith & Sons \"rear\" wall attached.\n\nWhen payment is made, reply with the reference and I will mark it off against the job.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nPlease find your deposit invoice for Smith & Sons \"rear\" wall attached.\n\nWhen payment is made, reply with the reference and I will mark it off against the job.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template invoice/friendly",
+      "html": "<p>{{greeting}}</p><p>I have attached the {{milestone}}invoice{{jobTitleFor}}.</p><p>Let me know if you need anything clarified.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">I have attached the {{milestone}}invoice{{jobTitleFor}}.</p><p style=\"margin:0 0 12px;\">Let me know if you need anything clarified.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>I have attached the {{milestone}}invoice{{jobTitleFor}}.</p><p>Let me know if you need anything clarified.</p>",
+      "text": "{{greeting}}\n\nI have attached the {{milestone}}invoice{{jobTitleFor}}.\n\nLet me know if you need anything clarified."
+    },
+    {
+      "name": "composer body invoice/friendly",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>I have attached the deposit invoice for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Let me know if you need anything clarified.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">I have attached the deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p style=\"margin:0 0 12px;\">Let me know if you need anything clarified.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>I have attached the deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Let me know if you need anything clarified.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nI have attached the deposit invoice for Smith & Sons \"rear\" wall.\n\nLet me know if you need anything clarified.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI have attached the deposit invoice for Smith & Sons \"rear\" wall.\n\nLet me know if you need anything clarified.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body invoice/friendly",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>I have attached the deposit invoice for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Let me know if you need anything clarified.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">I have attached the deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p style=\"margin:0 0 12px;\">Let me know if you need anything clarified.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>I have attached the deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Let me know if you need anything clarified.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nI have attached the deposit invoice for Smith & Sons \"rear\" wall.\n\nLet me know if you need anything clarified.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI have attached the deposit invoice for Smith & Sons \"rear\" wall.\n\nLet me know if you need anything clarified.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template invoice/friendly",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I have attached the deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p>Let me know if you need anything clarified.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">I have attached the deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p style=\"margin:0 0 12px;\">Let me know if you need anything clarified.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>I have attached the deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p>Let me know if you need anything clarified.</p>",
+      "text": "Hi Pat O'Brien,\n\nI have attached the deposit invoice for Smith & Sons \"rear\" wall.\n\nLet me know if you need anything clarified.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nI have attached the deposit invoice for Smith & Sons \"rear\" wall.\n\nLet me know if you need anything clarified.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template invoice/replacement",
+      "html": "<p>{{greeting}}</p><p>Your {{milestone}}invoice{{jobTitleFor}} has changed. Attached are:</p><ul><li>{{documentNumber}}, the replacement invoice, with {{amountDue}} to pay</li><li>{{creditNoteNumber}}, the adjustment note that cancels {{replacesNumber}}</li></ul><p>Please pay {{documentNumber}} and disregard {{replacesNumber}}. Our bank details are on the invoice.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">Your {{milestone}}invoice{{jobTitleFor}} has changed. Attached are:</p><ul style=\"margin:0 0 12px;padding-left:22px;\"><li style=\"margin:0 0 6px;\">{{documentNumber}}, the replacement invoice, with {{amountDue}} to pay</li><li style=\"margin:0 0 6px;\">{{creditNoteNumber}}, the adjustment note that cancels {{replacesNumber}}</li></ul><p style=\"margin:0 0 12px;\">Please pay {{documentNumber}} and disregard {{replacesNumber}}. Our bank details are on the invoice.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>Your {{milestone}}invoice{{jobTitleFor}} has changed. Attached are:</p><ul><li>{{documentNumber}}, the replacement invoice, with {{amountDue}} to pay</li><li>{{creditNoteNumber}}, the adjustment note that cancels {{replacesNumber}}</li></ul><p>Please pay {{documentNumber}} and disregard {{replacesNumber}}. Our bank details are on the invoice.</p>",
+      "text": "{{greeting}}\n\nYour {{milestone}}invoice{{jobTitleFor}} has changed. Attached are:- {{documentNumber}}, the replacement invoice, with {{amountDue}} to pay\n- {{creditNoteNumber}}, the adjustment note that cancels {{replacesNumber}}Please pay {{documentNumber}} and disregard {{replacesNumber}}. Our bank details are on the invoice."
+    },
+    {
+      "name": "composer body invoice/replacement",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Your deposit invoice for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> has changed. Attached are:</p><ul><li><span data-merge=\"documentNumber\">INV-0042</span>, the replacement invoice, with <span data-merge=\"amountDue\">$7,920.00</span> to pay</li><li><span data-merge=\"creditNoteNumber\">CN-0003</span>, the adjustment note that cancels <span data-merge=\"replacesNumber\">INV-0041</span></li></ul><p>Please pay <span data-merge=\"documentNumber\">INV-0042</span> and disregard <span data-merge=\"replacesNumber\">INV-0041</span>. Our bank details are on the invoice.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> has changed. Attached are:</p><ul style=\"margin:0 0 12px;padding-left:22px;\"><li style=\"margin:0 0 6px;\"><span>INV-0042</span>, the replacement invoice, with <span>$7,920.00</span> to pay</li><li style=\"margin:0 0 6px;\"><span>CN-0003</span>, the adjustment note that cancels <span>INV-0041</span></li></ul><p style=\"margin:0 0 12px;\">Please pay <span>INV-0042</span> and disregard <span>INV-0041</span>. Our bank details are on the invoice.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> has changed. Attached are:</p><ul><li><span>INV-0042</span>, the replacement invoice, with <span>$7,920.00</span> to pay</li><li><span>CN-0003</span>, the adjustment note that cancels <span>INV-0041</span></li></ul><p>Please pay <span>INV-0042</span> and disregard <span>INV-0041</span>. Our bank details are on the invoice.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall has changed. Attached are:- INV-0042, the replacement invoice, with $7,920.00 to pay\n- CN-0003, the adjustment note that cancels INV-0041Please pay INV-0042 and disregard INV-0041. Our bank details are on the invoice.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall has changed. Attached are:- INV-0042, the replacement invoice, with $7,920.00 to pay\n- CN-0003, the adjustment note that cancels INV-0041Please pay INV-0042 and disregard INV-0041. Our bank details are on the invoice.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body invoice/replacement",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Your deposit invoice for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> has changed. Attached are:</p><ul><li><span data-merge=\"documentNumber\">INV-0042</span>, the replacement invoice, with <span data-merge=\"amountDue\">$7,920.00</span> to pay</li><li><span data-merge=\"creditNoteNumber\">CN-0003</span>, the adjustment note that cancels <span data-merge=\"replacesNumber\">INV-0041</span></li></ul><p>Please pay <span data-merge=\"documentNumber\">INV-0042</span> and disregard <span data-merge=\"replacesNumber\">INV-0041</span>. Our bank details are on the invoice.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> has changed. Attached are:</p><ul style=\"margin:0 0 12px;padding-left:22px;\"><li style=\"margin:0 0 6px;\"><span>INV-0042</span>, the replacement invoice, with <span>$7,920.00</span> to pay</li><li style=\"margin:0 0 6px;\"><span>CN-0003</span>, the adjustment note that cancels <span>INV-0041</span></li></ul><p style=\"margin:0 0 12px;\">Please pay <span>INV-0042</span> and disregard <span>INV-0041</span>. Our bank details are on the invoice.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Your deposit invoice for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> has changed. Attached are:</p><ul><li><span>INV-0042</span>, the replacement invoice, with <span>$7,920.00</span> to pay</li><li><span>CN-0003</span>, the adjustment note that cancels <span>INV-0041</span></li></ul><p>Please pay <span>INV-0042</span> and disregard <span>INV-0041</span>. Our bank details are on the invoice.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall has changed. Attached are:- INV-0042, the replacement invoice, with $7,920.00 to pay\n- CN-0003, the adjustment note that cancels INV-0041Please pay INV-0042 and disregard INV-0041. Our bank details are on the invoice.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall has changed. Attached are:- INV-0042, the replacement invoice, with $7,920.00 to pay\n- CN-0003, the adjustment note that cancels INV-0041Please pay INV-0042 and disregard INV-0041. Our bank details are on the invoice.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template invoice/replacement",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> has changed. Attached are:</p><ul><li>, the replacement invoice, with  to pay</li><li>, the adjustment note that cancels </li></ul><p>Please pay  and disregard . Our bank details are on the invoice.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">Your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> has changed. Attached are:</p><ul style=\"margin:0 0 12px;padding-left:22px;\"><li style=\"margin:0 0 6px;\">, the replacement invoice, with  to pay</li><li style=\"margin:0 0 6px;\">, the adjustment note that cancels </li></ul><p style=\"margin:0 0 12px;\">Please pay  and disregard . Our bank details are on the invoice.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> has changed. Attached are:</p><ul><li>, the replacement invoice, with  to pay</li><li>, the adjustment note that cancels </li></ul><p>Please pay  and disregard . Our bank details are on the invoice.</p>",
+      "text": "Hi Pat O'Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall has changed. Attached are:- , the replacement invoice, with  to pay\n- , the adjustment note that cancels Please pay  and disregard . Our bank details are on the invoice.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour deposit invoice for Smith & Sons \"rear\" wall has changed. Attached are:- , the replacement invoice, with  to pay\n- , the adjustment note that cancels Please pay  and disregard . Our bank details are on the invoice.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template adjustment_note/standard",
+      "html": "<p>{{greeting}}</p><p>Attached is adjustment note {{creditNoteNumber}}, which cancels invoice {{replacesNumber}}{{jobTitleFor}}.</p><p>Please keep it with your records: it corrects the GST claimed on {{replacesNumber}}.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">Attached is adjustment note {{creditNoteNumber}}, which cancels invoice {{replacesNumber}}{{jobTitleFor}}.</p><p style=\"margin:0 0 12px;\">Please keep it with your records: it corrects the GST claimed on {{replacesNumber}}.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>Attached is adjustment note {{creditNoteNumber}}, which cancels invoice {{replacesNumber}}{{jobTitleFor}}.</p><p>Please keep it with your records: it corrects the GST claimed on {{replacesNumber}}.</p>",
+      "text": "{{greeting}}\n\nAttached is adjustment note {{creditNoteNumber}}, which cancels invoice {{replacesNumber}}{{jobTitleFor}}.\n\nPlease keep it with your records: it corrects the GST claimed on {{replacesNumber}}."
+    },
+    {
+      "name": "composer body adjustment_note/standard",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Attached is adjustment note <span data-merge=\"creditNoteNumber\">CN-0003</span>, which cancels invoice <span data-merge=\"replacesNumber\">INV-0041</span> for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Please keep it with your records: it corrects the GST claimed on <span data-merge=\"replacesNumber\">INV-0041</span>.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Attached is adjustment note <span>CN-0003</span>, which cancels invoice <span>INV-0041</span> for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p style=\"margin:0 0 12px;\">Please keep it with your records: it corrects the GST claimed on <span>INV-0041</span>.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Attached is adjustment note <span>CN-0003</span>, which cancels invoice <span>INV-0041</span> for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Please keep it with your records: it corrects the GST claimed on <span>INV-0041</span>.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nAttached is adjustment note CN-0003, which cancels invoice INV-0041 for Smith & Sons \"rear\" wall.\n\nPlease keep it with your records: it corrects the GST claimed on INV-0041.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nAttached is adjustment note CN-0003, which cancels invoice INV-0041 for Smith & Sons \"rear\" wall.\n\nPlease keep it with your records: it corrects the GST claimed on INV-0041.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body adjustment_note/standard",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Attached is adjustment note <span data-merge=\"creditNoteNumber\">CN-0003</span>, which cancels invoice <span data-merge=\"replacesNumber\">INV-0041</span> for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Please keep it with your records: it corrects the GST claimed on <span data-merge=\"replacesNumber\">INV-0041</span>.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Attached is adjustment note <span>CN-0003</span>, which cancels invoice <span>INV-0041</span> for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p style=\"margin:0 0 12px;\">Please keep it with your records: it corrects the GST claimed on <span>INV-0041</span>.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Attached is adjustment note <span>CN-0003</span>, which cancels invoice <span>INV-0041</span> for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Please keep it with your records: it corrects the GST claimed on <span>INV-0041</span>.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nAttached is adjustment note CN-0003, which cancels invoice INV-0041 for Smith & Sons \"rear\" wall.\n\nPlease keep it with your records: it corrects the GST claimed on INV-0041.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nAttached is adjustment note CN-0003, which cancels invoice INV-0041 for Smith & Sons \"rear\" wall.\n\nPlease keep it with your records: it corrects the GST claimed on INV-0041.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template adjustment_note/standard",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Attached is adjustment note , which cancels invoice  for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p>Please keep it with your records: it corrects the GST claimed on .</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">Attached is adjustment note , which cancels invoice  for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p style=\"margin:0 0 12px;\">Please keep it with your records: it corrects the GST claimed on .</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>Attached is adjustment note , which cancels invoice  for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p>Please keep it with your records: it corrects the GST claimed on .</p>",
+      "text": "Hi Pat O'Brien,\n\nAttached is adjustment note , which cancels invoice  for Smith & Sons \"rear\" wall.\n\nPlease keep it with your records: it corrects the GST claimed on .",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nAttached is adjustment note , which cancels invoice  for Smith & Sons \"rear\" wall.\n\nPlease keep it with your records: it corrects the GST claimed on .",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template adjustment_note/with-replacement",
+      "html": "<p>{{greeting}}</p><p>Invoice {{replacesNumber}}{{jobTitleFor}} is cancelled by adjustment note {{creditNoteNumber}}, attached. It is replaced by {{documentNumber}}.</p><p>Reply to this email if you have any questions.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">Invoice {{replacesNumber}}{{jobTitleFor}} is cancelled by adjustment note {{creditNoteNumber}}, attached. It is replaced by {{documentNumber}}.</p><p style=\"margin:0 0 12px;\">Reply to this email if you have any questions.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>Invoice {{replacesNumber}}{{jobTitleFor}} is cancelled by adjustment note {{creditNoteNumber}}, attached. It is replaced by {{documentNumber}}.</p><p>Reply to this email if you have any questions.</p>",
+      "text": "{{greeting}}\n\nInvoice {{replacesNumber}}{{jobTitleFor}} is cancelled by adjustment note {{creditNoteNumber}}, attached. It is replaced by {{documentNumber}}.\n\nReply to this email if you have any questions."
+    },
+    {
+      "name": "composer body adjustment_note/with-replacement",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Invoice <span data-merge=\"replacesNumber\">INV-0041</span> for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> is cancelled by adjustment note <span data-merge=\"creditNoteNumber\">CN-0003</span>, attached. It is replaced by <span data-merge=\"documentNumber\">INV-0042</span>.</p><p>Reply to this email if you have any questions.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Invoice <span>INV-0041</span> for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is cancelled by adjustment note <span>CN-0003</span>, attached. It is replaced by <span>INV-0042</span>.</p><p style=\"margin:0 0 12px;\">Reply to this email if you have any questions.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Invoice <span>INV-0041</span> for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is cancelled by adjustment note <span>CN-0003</span>, attached. It is replaced by <span>INV-0042</span>.</p><p>Reply to this email if you have any questions.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nInvoice INV-0041 for Smith & Sons \"rear\" wall is cancelled by adjustment note CN-0003, attached. It is replaced by INV-0042.\n\nReply to this email if you have any questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nInvoice INV-0041 for Smith & Sons \"rear\" wall is cancelled by adjustment note CN-0003, attached. It is replaced by INV-0042.\n\nReply to this email if you have any questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body adjustment_note/with-replacement",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Invoice <span data-merge=\"replacesNumber\">INV-0041</span> for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> is cancelled by adjustment note <span data-merge=\"creditNoteNumber\">CN-0003</span>, attached. It is replaced by <span data-merge=\"documentNumber\">INV-0042</span>.</p><p>Reply to this email if you have any questions.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Invoice <span>INV-0041</span> for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is cancelled by adjustment note <span>CN-0003</span>, attached. It is replaced by <span>INV-0042</span>.</p><p style=\"margin:0 0 12px;\">Reply to this email if you have any questions.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Invoice <span>INV-0041</span> for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is cancelled by adjustment note <span>CN-0003</span>, attached. It is replaced by <span>INV-0042</span>.</p><p>Reply to this email if you have any questions.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nInvoice INV-0041 for Smith & Sons \"rear\" wall is cancelled by adjustment note CN-0003, attached. It is replaced by INV-0042.\n\nReply to this email if you have any questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nInvoice INV-0041 for Smith & Sons \"rear\" wall is cancelled by adjustment note CN-0003, attached. It is replaced by INV-0042.\n\nReply to this email if you have any questions.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template adjustment_note/with-replacement",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Invoice  for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is cancelled by adjustment note , attached. It is replaced by .</p><p>Reply to this email if you have any questions.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">Invoice  for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is cancelled by adjustment note , attached. It is replaced by .</p><p style=\"margin:0 0 12px;\">Reply to this email if you have any questions.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>Invoice  for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is cancelled by adjustment note , attached. It is replaced by .</p><p>Reply to this email if you have any questions.</p>",
+      "text": "Hi Pat O'Brien,\n\nInvoice  for Smith & Sons \"rear\" wall is cancelled by adjustment note , attached. It is replaced by .\n\nReply to this email if you have any questions.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nInvoice  for Smith & Sons \"rear\" wall is cancelled by adjustment note , attached. It is replaced by .\n\nReply to this email if you have any questions.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template receipt/standard",
+      "html": "<p>{{greeting}}</p><p>Your {{milestone}}receipt{{jobTitleFor}} is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">Your {{milestone}}receipt{{jobTitleFor}} is ready. The receipt PDF is attached.</p><p style=\"margin:0 0 12px;\">Reply to this email if you need another copy.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>Your {{milestone}}receipt{{jobTitleFor}} is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p>",
+      "text": "{{greeting}}\n\nYour {{milestone}}receipt{{jobTitleFor}} is ready. The receipt PDF is attached.\n\nReply to this email if you need another copy."
+    },
+    {
+      "name": "composer body receipt/standard",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Your deposit receipt for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Your deposit receipt for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The receipt PDF is attached.</p><p style=\"margin:0 0 12px;\">Reply to this email if you need another copy.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Your deposit receipt for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nYour deposit receipt for Smith & Sons \"rear\" wall is ready. The receipt PDF is attached.\n\nReply to this email if you need another copy.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour deposit receipt for Smith & Sons \"rear\" wall is ready. The receipt PDF is attached.\n\nReply to this email if you need another copy.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body receipt/standard",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Your deposit receipt for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Your deposit receipt for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The receipt PDF is attached.</p><p style=\"margin:0 0 12px;\">Reply to this email if you need another copy.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Your deposit receipt for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong> is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nYour deposit receipt for Smith & Sons \"rear\" wall is ready. The receipt PDF is attached.\n\nReply to this email if you need another copy.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour deposit receipt for Smith & Sons \"rear\" wall is ready. The receipt PDF is attached.\n\nReply to this email if you need another copy.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template receipt/standard",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit receipt for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">Your deposit receipt for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The receipt PDF is attached.</p><p style=\"margin:0 0 12px;\">Reply to this email if you need another copy.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit receipt for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p>",
+      "text": "Hi Pat O'Brien,\n\nYour deposit receipt for Smith & Sons \"rear\" wall is ready. The receipt PDF is attached.\n\nReply to this email if you need another copy.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nYour deposit receipt for Smith & Sons \"rear\" wall is ready. The receipt PDF is attached.\n\nReply to this email if you need another copy.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template receipt/thanks",
+      "html": "<p>{{greeting}}</p><p>Thanks for the payment. I have attached the {{milestone}}receipt{{jobTitleFor}}.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">Thanks for the payment. I have attached the {{milestone}}receipt{{jobTitleFor}}.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>Thanks for the payment. I have attached the {{milestone}}receipt{{jobTitleFor}}.</p>",
+      "text": "{{greeting}}\n\nThanks for the payment. I have attached the {{milestone}}receipt{{jobTitleFor}}."
+    },
+    {
+      "name": "composer body receipt/thanks",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Thanks for the payment. I have attached the deposit receipt for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Thanks for the payment. I have attached the deposit receipt for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Thanks for the payment. I have attached the deposit receipt for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nThanks for the payment. I have attached the deposit receipt for Smith & Sons \"rear\" wall.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nThanks for the payment. I have attached the deposit receipt for Smith & Sons \"rear\" wall.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body receipt/thanks",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Thanks for the payment. I have attached the deposit receipt for <strong><span data-merge=\"jobTitle\">Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Thanks for the payment. I have attached the deposit receipt for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Thanks for the payment. I have attached the deposit receipt for <strong><span>Smith &amp; Sons &quot;rear&quot; wall</span></strong>.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nThanks for the payment. I have attached the deposit receipt for Smith & Sons \"rear\" wall.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nThanks for the payment. I have attached the deposit receipt for Smith & Sons \"rear\" wall.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template receipt/thanks",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Thanks for the payment. I have attached the deposit receipt for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">Thanks for the payment. I have attached the deposit receipt for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>Thanks for the payment. I have attached the deposit receipt for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p>",
+      "text": "Hi Pat O'Brien,\n\nThanks for the payment. I have attached the deposit receipt for Smith & Sons \"rear\" wall.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nThanks for the payment. I have attached the deposit receipt for Smith & Sons \"rear\" wall.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "stock template receipt/records",
+      "html": "<p>{{greeting}}</p><p>Please find the {{milestone}}receipt attached for your records.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">{{greeting}}</p><p style=\"margin:0 0 12px;\">Please find the {{milestone}}receipt attached for your records.</p>",
+      "genericBody": "<p>{{greeting}}</p><p>Please find the {{milestone}}receipt attached for your records.</p>",
+      "text": "{{greeting}}\n\nPlease find the {{milestone}}receipt attached for your records."
+    },
+    {
+      "name": "composer body receipt/records",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Please find the deposit receipt attached for your records.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Please find the deposit receipt attached for your records.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Please find the deposit receipt attached for your records.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nPlease find the deposit receipt attached for your records.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nPlease find the deposit receipt attached for your records.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "sent body receipt/records",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O&#039;Brien</span>,</p><p>Please find the deposit receipt attached for your records.</p><p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O&#039;Brien</span>,</p><p style=\"margin:0 0 12px;\">Please find the deposit receipt attached for your records.</p><p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Hi <span>Pat O&#039;Brien</span>,</p><p>Please find the deposit receipt attached for your records.</p><p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Hi Pat O'Brien,\n\nPlease find the deposit receipt attached for your records.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nPlease find the deposit receipt attached for your records.\n\nRegards,\nJess Harlow\nHarlow & Co <Earthworks>",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "rendered template receipt/records",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Please find the deposit receipt attached for your records.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Pat O&#039;Brien,</p><p style=\"margin:0 0 12px;\">Please find the deposit receipt attached for your records.</p>",
+      "genericBody": "<p>Hi Pat O&#039;Brien,</p><p>Please find the deposit receipt attached for your records.</p>",
+      "text": "Hi Pat O'Brien,\n\nPlease find the deposit receipt attached for your records.",
+      "changed": {
+        "text": {
+          "was": "Hi Pat O&#039;Brien,\n\nPlease find the deposit receipt attached for your records.",
+          "why": "the plain text decoded &#39; but not &#039;, which shared/email-templates.js writes for an apostrophe, so the customer read O&#039;Brien"
+        }
+      }
+    },
+    {
+      "name": "default signature",
+      "html": "<p>Regards,<br/>{{senderName}}<br/>{{businessName}}</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Regards,<br/>{{senderName}}<br/>{{businessName}}</p>",
+      "genericBody": "<p>Regards,<br/>{{senderName}}<br/>{{businessName}}</p>",
+      "text": "Regards,\n{{senderName}}\n{{businessName}}"
+    },
+    {
+      "name": "default signature rendered",
+      "html": "<p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Regards,\nJess Harlow\nHarlow & Co <Earthworks>"
+    },
+    {
+      "name": "signature default text",
+      "html": "<p>Regards,<br/>{{senderName}}<br/>{{businessName}}</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Regards,<br/>{{senderName}}<br/>{{businessName}}</p>",
+      "genericBody": "<p>Regards,<br/>{{senderName}}<br/>{{businessName}}</p>",
+      "text": "Regards,\n{{senderName}}\n{{businessName}}"
+    },
+    {
+      "name": "signature default text rendered",
+      "html": "<p>Regards,<br/><span data-merge=\"senderName\">Jess Harlow</span><br/><span data-merge=\"businessName\">Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "genericBody": "<p>Regards,<br/><span>Jess Harlow</span><br/><span>Harlow &amp; Co &lt;Earthworks&gt;</span></p>",
+      "text": "Regards,\nJess Harlow\nHarlow & Co <Earthworks>"
+    },
+    {
+      "name": "signature with symbols",
+      "html": "<p>Cheers &amp; thanks,<br/>Pat &lt;Office&gt;</p><p>Mobile 0400 000 000<br/>\"Earthworks\" O'Brien</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Cheers &amp; thanks,<br/>Pat &lt;Office&gt;</p><p style=\"margin:0 0 12px;\">Mobile 0400 000 000<br/>\"Earthworks\" O'Brien</p>",
+      "genericBody": "<p>Cheers &amp; thanks,<br/>Pat &lt;Office&gt;</p><p>Mobile 0400 000 000<br/>\"Earthworks\" O'Brien</p>",
+      "text": "Cheers & thanks,\nPat <Office>\n\nMobile 0400 000 000\n\"Earthworks\" O'Brien"
+    },
+    {
+      "name": "signature with symbols rendered",
+      "html": "<p>Cheers &amp; thanks,<br/>Pat &lt;Office&gt;</p><p>Mobile 0400 000 000<br/>\"Earthworks\" O'Brien</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Cheers &amp; thanks,<br/>Pat &lt;Office&gt;</p><p style=\"margin:0 0 12px;\">Mobile 0400 000 000<br/>\"Earthworks\" O'Brien</p>",
+      "genericBody": "<p>Cheers &amp; thanks,<br/>Pat &lt;Office&gt;</p><p>Mobile 0400 000 000<br/>\"Earthworks\" O'Brien</p>",
+      "text": "Cheers & thanks,\nPat <Office>\n\nMobile 0400 000 000\n\"Earthworks\" O'Brien"
+    },
+    {
+      "name": "signature one line",
+      "html": "<p>Jess</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Jess</p>",
+      "genericBody": "<p>Jess</p>",
+      "text": "Jess"
+    },
+    {
+      "name": "signature one line rendered",
+      "html": "<p>Jess</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Jess</p>",
+      "genericBody": "<p>Jess</p>",
+      "text": "Jess"
+    },
+    {
+      "name": "tiptap merge fields",
+      "html": "<p>Hi <span data-merge=\"clientName\">Pat O'Brien</span>,</p><p>The cut is finished at <span data-merge=\"siteAddress\">12 Main St</span>.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>Pat O'Brien</span>,</p><p style=\"margin:0 0 12px;\">The cut is finished at <span>12 Main St</span>.</p>",
+      "genericBody": "<p>Hi <span>Pat O'Brien</span>,</p><p>The cut is finished at <span>12 Main St</span>.</p>",
+      "text": "Hi Pat O'Brien,\n\nThe cut is finished at 12 Main St."
+    },
+    {
+      "name": "tiptap lists",
+      "html": "<p>Scope:</p><ul><li><p>One</p></li><li><p><strong>Two</strong> and <em>three</em></p></li></ul><ol><li><p>First</p></li><li><p>Second</p></li></ol><p>Thanks</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Scope:</p><ul style=\"margin:0 0 12px;padding-left:22px;\"><li style=\"margin:0 0 6px;\"><p style=\"margin:0 0 12px;\">One</p></li><li style=\"margin:0 0 6px;\"><p style=\"margin:0 0 12px;\"><strong>Two</strong> and <em>three</em></p></li></ul><ol style=\"margin:0 0 12px;padding-left:22px;\"><li style=\"margin:0 0 6px;\"><p style=\"margin:0 0 12px;\">First</p></li><li style=\"margin:0 0 6px;\"><p style=\"margin:0 0 12px;\">Second</p></li></ol><p style=\"margin:0 0 12px;\">Thanks</p>",
+      "genericBody": "<p>Scope:</p><ul><li><p>One</p></li><li><p><strong>Two</strong> and <em>three</em></p></li></ul><ol><li><p>First</p></li><li><p>Second</p></li></ol><p>Thanks</p>",
+      "text": "Scope:- One\n- Two and three- First\n- SecondThanks"
+    },
+    {
+      "name": "tiptap links",
+      "html": "<p>See <a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"https://example.com/plan\">the plan</a>, <a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"mailto:office@example.com\">email us</a> or <a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"tel:+61400000000\">call</a>.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">See <a href=\"https://example.com/plan\">the plan</a>, <a href=\"mailto:office@example.com\">email us</a> or <a href=\"tel:+61400000000\">call</a>.</p>",
+      "genericBody": "<p>See <a href=\"https://example.com/plan\">the plan</a>, <a href=\"mailto:office@example.com\">email us</a> or <a href=\"tel:+61400000000\">call</a>.</p>",
+      "text": "See the plan, email us or call."
+    },
+    {
+      "name": "tiptap hard break",
+      "html": "<p>Line one<br>Line two<br>Line three</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Line one<br>Line two<br>Line three</p>",
+      "genericBody": "<p>Line one<br>Line two<br>Line three</p>",
+      "text": "Line one\nLine two\nLine three"
+    },
+    {
+      "name": "tiptap empty paragraph",
+      "html": "<p>Hi,</p><p></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi,</p><p style=\"margin:0 0 12px;\"></p>",
+      "genericBody": "<p>Hi,</p><p></p>",
+      "text": "Hi,"
+    },
+    {
+      "name": "tiptap entities",
+      "html": "<p>Rock &amp; soil &lt;20mm&gt; at 5&nbsp;m³ — \"quoted\" 'yes'</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Rock &amp; soil &lt;20mm&gt; at 5&nbsp;m³ — \"quoted\" 'yes'</p>",
+      "genericBody": "<p>Rock &amp; soil &lt;20mm&gt; at 5&nbsp;m³ — \"quoted\" 'yes'</p>",
+      "text": "Rock & soil <20mm> at 5 m³ — \"quoted\" 'yes'"
+    },
+    {
+      "name": "tiptap marks",
+      "html": "<p><u>Note</u>: <strong><em>both</em></strong> <b>b</b> <i>i</i></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\"><u>Note</u>: <strong><em>both</em></strong> <b>b</b> <i>i</i></p>",
+      "genericBody": "<p><u>Note</u>: <strong><em>both</em></strong> <b>b</b> <i>i</i></p>",
+      "text": "Note: both b i"
+    },
+    {
+      "name": "tiptap link with query",
+      "html": "<p><a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"https://maps.example.com/?q=1&amp;z=2\">map</a></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\"><a href=\"https://maps.example.com/?q=1&amp;z=2\">map</a></p>",
+      "genericBody": "<p><a href=\"https://maps.example.com/?q=1&amp;z=2\">map</a></p>",
+      "text": "map",
+      "changed": {
+        "emailBody": {
+          "was": "<p style=\"margin:0 0 12px;\"><a href=\"https://maps.example.com/?q=1&amp;amp;z=2\">map</a></p>",
+          "why": "an & in a link was escaped twice (&amp;amp;), so the link the customer clicked was wrong"
+        },
+        "genericBody": {
+          "was": "<p><a href=\"https://maps.example.com/?q=1&amp;amp;z=2\">map</a></p>",
+          "why": "an & in a link was escaped twice (&amp;amp;), so the link the customer clicked was wrong"
+        }
+      }
+    },
+    {
+      "name": "tiptap merge field in list",
+      "html": "<ul><li><p><span data-merge=\"documentNumber\">INV-0042</span>, the invoice</p></li></ul>",
+      "emailBody": "<ul style=\"margin:0 0 12px;padding-left:22px;\"><li style=\"margin:0 0 6px;\"><p style=\"margin:0 0 12px;\"><span>INV-0042</span>, the invoice</p></li></ul>",
+      "genericBody": "<ul><li><p><span>INV-0042</span>, the invoice</p></li></ul>",
+      "text": "- INV-0042, the invoice"
+    },
+    {
+      "name": "test email-compose-route",
+      "html": "<p>Hi <span data-merge=\"clientName\">someone</span>,</p><p>The cut is finished at <span data-merge=\"siteAddress\">x</span>.</p><ul><li><b>Bold</b> and <a href=\"https://example.invalid/plan\">the plan</a></li></ul>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <span>someone</span>,</p><p style=\"margin:0 0 12px;\">The cut is finished at <span>x</span>.</p><ul style=\"margin:0 0 12px;padding-left:22px;\"><li style=\"margin:0 0 6px;\"><b>Bold</b> and <a href=\"https://example.invalid/plan\">the plan</a></li></ul>",
+      "genericBody": "<p>Hi <span>someone</span>,</p><p>The cut is finished at <span>x</span>.</p><ul><li><b>Bold</b> and <a href=\"https://example.invalid/plan\">the plan</a></li></ul>",
+      "text": "Hi someone,\n\nThe cut is finished at x.- Bold and the plan"
+    },
+    {
+      "name": "test send-quote-email custom",
+      "html": "<p>Hi Jordan,</p><p>As discussed on site, I've included the alternative dump location pricing.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi Jordan,</p><p style=\"margin:0 0 12px;\">As discussed on site, I've included the alternative dump location pricing.</p>",
+      "genericBody": "<p>Hi Jordan,</p><p>As discussed on site, I've included the alternative dump location pricing.</p>",
+      "text": "Hi Jordan,\n\nAs discussed on site, I've included the alternative dump location pricing."
+    },
+    {
+      "name": "test send-quote-email malicious",
+      "html": "<p>Hello</p><script>alert(\"xss\")</script><iframe src=\"evil.com\"></iframe><p onclick=\"steal()\">Click</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hello</p><p style=\"margin:0 0 12px;\">Click</p>",
+      "genericBody": "<p>Hello</p><p>Click</p>",
+      "text": "Hello\n\nClick",
+      "changed": {
+        "text": {
+          "was": "Helloalert(\"xss\")Click",
+          "why": "script content is not message text; the old text kept it"
+        }
+      }
+    },
+    {
+      "name": "test send-quote-email styled",
+      "html": "<p>Hi <strong>Jordan</strong>, this is <em>important</em>.</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hi <strong>Jordan</strong>, this is <em>important</em>.</p>",
+      "genericBody": "<p>Hi <strong>Jordan</strong>, this is <em>important</em>.</p>",
+      "text": "Hi Jordan, this is important."
+    },
+    {
+      "name": "test email-templates update",
+      "html": "<p onclick=\"alert(1)\">Hello {{clientName}}</p><script>alert(1)</script>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Hello {{clientName}}</p>",
+      "genericBody": "<p>Hello {{clientName}}</p>",
+      "text": "Hello {{clientName}}",
+      "changed": {
+        "text": {
+          "was": "Hello {{clientName}}alert(1)",
+          "why": "script content is not message text; the old text kept it"
+        }
+      }
+    },
+    {
+      "name": "simple bodies",
+      "html": "<p>Gate code 4471</p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\">Gate code 4471</p>",
+      "genericBody": "<p>Gate code 4471</p>",
+      "text": "Gate code 4471"
+    },
+    {
+      "name": "styled paragraph",
+      "html": "<p style=\"font-size:16px; font-family: Arial, sans-serif; color:red\">Big</p><span style=\"font-size: 12px\">small</span><li style=\"font-size:13px\">item</li>",
+      "emailBody": "<p style=\"font-size:16px;font-family:Arial, sans-serif\">Big</p><span style=\"font-size:12px\">small</span><li style=\"font-size:13px\">item</li>",
+      "genericBody": "<p style=\"font-size:16px;font-family:Arial, sans-serif\">Big</p><span style=\"font-size:12px\">small</span><li style=\"font-size:13px\">item</li>",
+      "text": "Bigsmall- item"
+    },
+    {
+      "name": "image https",
+      "html": "<p><img src=\"https://cdn.example.com/a.png\" alt=\"Site plan\"></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\"><img src=\"https://cdn.example.com/a.png\" alt=\"Site plan\" style=\"max-width:100%;height:auto;border:0;\" /></p>",
+      "genericBody": "<p></p>",
+      "text": ""
+    },
+    {
+      "name": "image data",
+      "html": "<p><img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"\"></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\"><img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"Image\" style=\"max-width:100%;height:auto;border:0;\" /></p>",
+      "genericBody": "<p></p>",
+      "text": ""
+    },
+    {
+      "name": "image without alt",
+      "html": "<p><img src=\"https://cdn.example.com/a.png\"/></p>",
+      "emailBody": "<p style=\"margin:0 0 12px;\"><img src=\"https://cdn.example.com/a.png\" alt=\"Image\" style=\"max-width:100%;height:auto;border:0;\" /></p>",
+      "genericBody": "<p></p>",
+      "text": ""
+    },
+    {
+      "name": "div wrappers",
+      "html": "<div><h1>Title</h1><div>Body text</div></div>",
+      "emailBody": "TitleBody text",
+      "genericBody": "TitleBody text",
+      "text": "TitleBody text"
+    }
+  ],
+  "templates": [
+    {
+      "template": "email/standard",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice — INV-0042",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I wanted to send through an update for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p>"
+    },
+    {
+      "template": "email/standard",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice — INV-0042",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I wanted to send through an update.</p>"
+    },
+    {
+      "template": "email/standard",
+      "context": {},
+      "subject": "",
+      "html": "<p>Hi,</p><p>I wanted to send through an update.</p>"
+    },
+    {
+      "template": "email/follow-up",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Following up - Smith & Sons \"rear\" wall",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Just following up on <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p>Let me know if you have any questions.</p>",
+      "changed": {
+        "subject": {
+          "was": "Following up - Smith &amp; Sons &quot;rear&quot; wall",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "email/follow-up",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Following up - Harlow & Co <Earthworks>",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Just following up.</p><p>Let me know if you have any questions.</p>",
+      "changed": {
+        "subject": {
+          "was": "Following up - Harlow &amp; Co &lt;Earthworks&gt;",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "email/follow-up",
+      "context": {},
+      "subject": "Following up - ",
+      "html": "<p>Hi,</p><p>Just following up.</p><p>Let me know if you have any questions.</p>"
+    },
+    {
+      "template": "email/site-note",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Site note - Smith & Sons \"rear\" wall",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I have a quick site note for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>:</p><p></p>",
+      "changed": {
+        "subject": {
+          "was": "Site note - Smith &amp; Sons &quot;rear&quot; wall",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "email/site-note",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Site note - Harlow & Co <Earthworks>",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I have a quick site note:</p><p></p>",
+      "changed": {
+        "subject": {
+          "was": "Site note - Harlow &amp; Co &lt;Earthworks&gt;",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "email/site-note",
+      "context": {},
+      "subject": "Site note - ",
+      "html": "<p>Hi,</p><p>I have a quick site note:</p><p></p>"
+    },
+    {
+      "template": "quote/standard",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice — INV-0042",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p>"
+    },
+    {
+      "template": "quote/standard",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice — INV-0042",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your quote is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p>"
+    },
+    {
+      "template": "quote/standard",
+      "context": {},
+      "subject": "",
+      "html": "<p>Hi,</p><p>Your quote is ready. The full quote is attached as a PDF.</p><p>Reply to this email if you'd like any adjustments or have questions.</p>"
+    },
+    {
+      "template": "quote/approval",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Quote for approval - Smith & Sons \"rear\" wall",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I have attached the quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p>",
+      "changed": {
+        "subject": {
+          "was": "Quote for approval - Smith &amp; Sons &quot;rear&quot; wall",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "quote/approval",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Quote for approval - Harlow & Co <Earthworks>",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I have attached the quote for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p>",
+      "changed": {
+        "subject": {
+          "was": "Quote for approval - Harlow &amp; Co &lt;Earthworks&gt;",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "quote/approval",
+      "context": {},
+      "subject": "Quote for approval - ",
+      "html": "<p>Hi,</p><p>I have attached the quote for review.</p><p>If everything looks right, reply with approval and we can line up the next step. If anything needs changing, send through the adjustment and I will update it.</p>"
+    },
+    {
+      "template": "quote/warm",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Your quote - Smith & Sons \"rear\" wall",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Thanks again for the details. The quote for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p>",
+      "changed": {
+        "subject": {
+          "was": "Your quote - Smith &amp; Sons &quot;rear&quot; wall",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "quote/warm",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Your quote - Harlow & Co <Earthworks>",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Thanks again for the details. The quote is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p>",
+      "changed": {
+        "subject": {
+          "was": "Your quote - Harlow &amp; Co &lt;Earthworks&gt;",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "quote/warm",
+      "context": {},
+      "subject": "Your quote - ",
+      "html": "<p>Hi,</p><p>Thanks again for the details. The quote is attached.</p><p>I have kept the main scope and pricing in the PDF so it is easy to review. Let me know what you would like changed or confirmed.</p>"
+    },
+    {
+      "template": "invoice/standard",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice — INV-0042",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p>"
+    },
+    {
+      "template": "invoice/standard",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice — INV-0042",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit invoice is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p>"
+    },
+    {
+      "template": "invoice/standard",
+      "context": {},
+      "subject": "",
+      "html": "<p>Hi,</p><p>Your invoice is ready. The invoice PDF is attached.</p><p>Reply to this email if you have any questions about this invoice.</p>"
+    },
+    {
+      "template": "invoice/payment",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice - Smith & Sons \"rear\" wall",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Please find your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p>",
+      "changed": {
+        "subject": {
+          "was": "Invoice - Smith &amp; Sons &quot;rear&quot; wall",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "invoice/payment",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice - Harlow & Co <Earthworks>",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Please find your deposit invoice attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p>",
+      "changed": {
+        "subject": {
+          "was": "Invoice - Harlow &amp; Co &lt;Earthworks&gt;",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "invoice/payment",
+      "context": {},
+      "subject": "Invoice - ",
+      "html": "<p>Hi,</p><p>Please find your invoice attached.</p><p>When payment is made, reply with the reference and I will mark it off against the job.</p>"
+    },
+    {
+      "template": "invoice/friendly",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice - Smith & Sons \"rear\" wall",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I have attached the deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p>Let me know if you need anything clarified.</p>",
+      "changed": {
+        "subject": {
+          "was": "Invoice - Smith &amp; Sons &quot;rear&quot; wall",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "invoice/friendly",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice - Harlow & Co <Earthworks>",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>I have attached the deposit invoice.</p><p>Let me know if you need anything clarified.</p>",
+      "changed": {
+        "subject": {
+          "was": "Invoice - Harlow &amp; Co &lt;Earthworks&gt;",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "invoice/friendly",
+      "context": {},
+      "subject": "Invoice - ",
+      "html": "<p>Hi,</p><p>I have attached the invoice.</p><p>Let me know if you need anything clarified.</p>"
+    },
+    {
+      "template": "invoice/replacement",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Replacement invoice  · Smith & Sons \"rear\" wall",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit invoice for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> has changed. Attached are:</p><ul><li>, the replacement invoice, with  to pay</li><li>, the adjustment note that cancels </li></ul><p>Please pay  and disregard . Our bank details are on the invoice.</p>",
+      "changed": {
+        "subject": {
+          "was": "Replacement invoice  · Smith &amp; Sons &quot;rear&quot; wall",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "invoice/replacement",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Replacement invoice  · Harlow & Co <Earthworks>",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit invoice has changed. Attached are:</p><ul><li>, the replacement invoice, with  to pay</li><li>, the adjustment note that cancels </li></ul><p>Please pay  and disregard . Our bank details are on the invoice.</p>",
+      "changed": {
+        "subject": {
+          "was": "Replacement invoice  · Harlow &amp; Co &lt;Earthworks&gt;",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "invoice/replacement",
+      "context": {},
+      "subject": "Replacement invoice  · ",
+      "html": "<p>Hi,</p><p>Your invoice has changed. Attached are:</p><ul><li>, the replacement invoice, with  to pay</li><li>, the adjustment note that cancels </li></ul><p>Please pay  and disregard . Our bank details are on the invoice.</p>"
+    },
+    {
+      "template": "adjustment_note/standard",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Adjustment note  · Smith & Sons \"rear\" wall",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Attached is adjustment note , which cancels invoice  for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p><p>Please keep it with your records: it corrects the GST claimed on .</p>",
+      "changed": {
+        "subject": {
+          "was": "Adjustment note  · Smith &amp; Sons &quot;rear&quot; wall",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "adjustment_note/standard",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Adjustment note  · Harlow & Co <Earthworks>",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Attached is adjustment note , which cancels invoice .</p><p>Please keep it with your records: it corrects the GST claimed on .</p>",
+      "changed": {
+        "subject": {
+          "was": "Adjustment note  · Harlow &amp; Co &lt;Earthworks&gt;",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "adjustment_note/standard",
+      "context": {},
+      "subject": "Adjustment note  · ",
+      "html": "<p>Hi,</p><p>Attached is adjustment note , which cancels invoice .</p><p>Please keep it with your records: it corrects the GST claimed on .</p>"
+    },
+    {
+      "template": "adjustment_note/with-replacement",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Adjustment note  · Smith & Sons \"rear\" wall",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Invoice  for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is cancelled by adjustment note , attached. It is replaced by .</p><p>Reply to this email if you have any questions.</p>",
+      "changed": {
+        "subject": {
+          "was": "Adjustment note  · Smith &amp; Sons &quot;rear&quot; wall",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "adjustment_note/with-replacement",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Adjustment note  · Harlow & Co <Earthworks>",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Invoice  is cancelled by adjustment note , attached. It is replaced by .</p><p>Reply to this email if you have any questions.</p>",
+      "changed": {
+        "subject": {
+          "was": "Adjustment note  · Harlow &amp; Co &lt;Earthworks&gt;",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "adjustment_note/with-replacement",
+      "context": {},
+      "subject": "Adjustment note  · ",
+      "html": "<p>Hi,</p><p>Invoice  is cancelled by adjustment note , attached. It is replaced by .</p><p>Reply to this email if you have any questions.</p>"
+    },
+    {
+      "template": "receipt/standard",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice — INV-0042",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit receipt for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong> is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p>"
+    },
+    {
+      "template": "receipt/standard",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Invoice — INV-0042",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Your deposit receipt is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p>"
+    },
+    {
+      "template": "receipt/standard",
+      "context": {},
+      "subject": "",
+      "html": "<p>Hi,</p><p>Your receipt is ready. The receipt PDF is attached.</p><p>Reply to this email if you need another copy.</p>"
+    },
+    {
+      "template": "receipt/thanks",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Payment receipt - Smith & Sons \"rear\" wall",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Thanks for the payment. I have attached the deposit receipt for <strong>Smith &amp; Sons &quot;rear&quot; wall</strong>.</p>",
+      "changed": {
+        "subject": {
+          "was": "Payment receipt - Smith &amp; Sons &quot;rear&quot; wall",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "receipt/thanks",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Payment receipt - Harlow & Co <Earthworks>",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Thanks for the payment. I have attached the deposit receipt.</p>",
+      "changed": {
+        "subject": {
+          "was": "Payment receipt - Harlow &amp; Co &lt;Earthworks&gt;",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "receipt/thanks",
+      "context": {},
+      "subject": "Payment receipt - ",
+      "html": "<p>Hi,</p><p>Thanks for the payment. I have attached the receipt.</p>"
+    },
+    {
+      "template": "receipt/records",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "Smith & Sons \"rear\" wall",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Receipt for your records - Smith & Sons \"rear\" wall",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Please find the deposit receipt attached for your records.</p>",
+      "changed": {
+        "subject": {
+          "was": "Receipt for your records - Smith &amp; Sons &quot;rear&quot; wall",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "receipt/records",
+      "context": {
+        "clientName": "Pat O'Brien",
+        "jobTitle": "",
+        "milestoneLabel": "Deposit",
+        "defaultSubject": "Invoice — INV-0042",
+        "businessName": "Harlow & Co <Earthworks>"
+      },
+      "subject": "Receipt for your records - Harlow & Co <Earthworks>",
+      "html": "<p>Hi Pat O&#039;Brien,</p><p>Please find the deposit receipt attached for your records.</p>",
+      "changed": {
+        "subject": {
+          "was": "Receipt for your records - Harlow &amp; Co &lt;Earthworks&gt;",
+          "why": "the subject was HTML-escaped values with the tags stripped, so it showed &amp; and &quot;"
+        }
+      }
+    },
+    {
+      "template": "receipt/records",
+      "context": {},
+      "subject": "Receipt for your records - ",
+      "html": "<p>Hi,</p><p>Please find the receipt attached for your records.</p>"
+    }
+  ]
+}

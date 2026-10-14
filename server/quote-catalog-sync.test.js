@@ -11,6 +11,7 @@ import {
   catalogLinkFields,
   computeQuoteCatalogChanges,
   convertRate,
+  slugifyCatalogCode,
   upgradeOrganizerCatalogLinks,
 } from "./quote-catalog-sync.js";
 import { normalizePresentationOrganizer, resolvePresentationOrganizer } from "./quote-presentation-organizer.js";
@@ -1171,4 +1172,16 @@ test("an API apply without review data never replaces an edited row unless repla
   assert.deepEqual(forced.applied, ["manual:turf", "manual:soil"]);
   assert.equal(forced.organizer.nodes["manual:turf"].sellRate, 16);
   assert.equal(forced.organizer.nodes["manual:turf"].rateMode, "catalog-linked");
+});
+
+test("a catalogue code slug trims its end dashes in linear time", () => {
+  assert.equal(slugifyCatalogCode("  --Concrete Sleeper / 200mm--  "), "concrete-sleeper-200mm");
+  assert.equal(slugifyCatalogCode("-"), "");
+  assert.equal(slugifyCatalogCode("a-b"), "a-b");
+  for (const input of ["-".repeat(100_000) + "a", "a" + "-".repeat(100_000) + "!a", "a" + " -".repeat(50_000) + "b".repeat(80)]) {
+    const started = performance.now();
+    const slug = slugifyCatalogCode(input);
+    assert.ok(performance.now() - started < 200, "linear");
+    assert.ok(!slug.startsWith("-") && slug.length <= 72, slug);
+  }
 });

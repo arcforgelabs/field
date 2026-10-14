@@ -12,6 +12,7 @@ import {
   getJobDocumentLabelLower,
   resolveJobDocumentType,
 } from "./job-documents.js";
+import { emailHtmlToText, sanitizeGenericBodyHtml } from "./email-html.js";
 import { renderQuoteEmailHtml } from "./quote-email-template.js";
 import { loadQuoteRows } from "./quotes/read-model.js";
 
@@ -484,7 +485,7 @@ export async function composeDocumentEmail({
   const resolvedDocumentType = resolveJobDocumentType({ meta, documentType });
   const documentLabelLower = getJobDocumentLabelLower(resolvedDocumentType);
   const subject = cleanHeaderText(subjectOverride) || defaultDocumentSubject({ meta, quote, documentType: resolvedDocumentType });
-  const body = customBody ? stripHtml(customBody) : buildEmailBody({ meta, quote, documentType: resolvedDocumentType });
+  const body = customBody ? emailHtmlToText(customBody) : buildEmailBody({ meta, quote, documentType: resolvedDocumentType });
 
   const quoteCatalog = quote.quoteCatalog || quote.profile || {};
   const deliveryDefaults = quoteCatalog.deliveryDefaults || {};
@@ -532,7 +533,7 @@ export function composeJobEmail({ meta, subject = null, customBody = null, theme
   return {
     subject: cleanHeaderText(subject) || defaultJobEmailSubject(meta),
     htmlBody: wrapGenericEmailHtml({ customBody, fromName, themeFontFamily }),
-    body: stripHtml(customBody || ""),
+    body: emailHtmlToText(customBody || ""),
   };
 }
 
@@ -857,22 +858,6 @@ function buildEmailBody({
   ].filter(Boolean).join("\n");
 }
 
-function stripHtml(html) {
-  return String(html || "")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/li>\s*<li[^>]*>/gi, "\n- ")
-    .replace(/<li[^>]*>/gi, "- ")
-    .replace(/<\/p>\s*<p[^>]*>/gi, "\n\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .trim();
-}
-
 function buildEmailHtml({
   meta,
   quote,
@@ -1094,7 +1079,7 @@ function formatAddressListHeader(value) {
 
 function wrapGenericEmailHtml({ customBody, fromName, themeFontFamily }) {
   const fontFamily = cleanHeaderText(themeFontFamily) || "Helvetica, Arial, sans-serif";
-  const safeBody = sanitizeGenericBody(customBody || "");
+  const safeBody = sanitizeGenericBodyHtml(customBody || "");
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background:#f4f4f4;font-family:${escapeHtml(fontFamily)};">
@@ -1106,40 +1091,6 @@ function wrapGenericEmailHtml({ customBody, fromName, themeFontFamily }) {
     </div>
   </body>
 </html>`;
-}
-
-function sanitizeGenericBody(html) {
-  return String(html || "")
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
-    .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, "")
-    .replace(/<\/?(?!p\b|br\b|strong\b|em\b|b\b|i\b|u\b|a\b|span\b|ul\b|ol\b|li\b)[a-z][a-z0-9]*(?:\s[^>]*)?\/?>/gi, "")
-    .replace(/<(p|span|li)\s+([^>]*)>/gi, (_match, tag, attrs) => {
-      const style = String(attrs || "").match(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-      const safeStyle = sanitizeEmailInlineStyle(style?.[1] || style?.[2] || "");
-      return safeStyle ? `<${tag} style="${escapeHtml(safeStyle)}">` : `<${tag}>`;
-    })
-    .replace(/<(strong|em|b|i|u|ul|ol)\s[^>]*>/gi, "<$1>")
-    .replace(/<a\s+([^>]*)>/gi, (_match, attrs) => {
-      const href = String(attrs || "").match(/href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
-      const value = String(href?.[1] || href?.[2] || href?.[3] || "").trim();
-      if (!/^(https?:|mailto:|tel:)/i.test(value)) return "<a>";
-      return `<a href="${escapeHtml(value)}">`;
-    });
-}
-
-function sanitizeEmailInlineStyle(style) {
-  const allowed = [];
-  for (const declaration of String(style || "").split(";")) {
-    const [rawProp, ...rawValueParts] = declaration.split(":");
-    const prop = String(rawProp || "").trim().toLowerCase();
-    const value = rawValueParts.join(":").trim();
-    if (!prop || !value) continue;
-    if (prop === "font-size" && /^\d{1,2}(?:\.\d)?px$/.test(value)) allowed.push(`${prop}:${value}`);
-    if (prop === "font-family" && /^[\w\s'",.-]+$/.test(value)) allowed.push(`${prop}:${value}`);
-  }
-  return allowed.join(";");
 }
 
 function escapeHtml(value) {

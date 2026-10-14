@@ -91,7 +91,7 @@ test("GET of clerk-js through the real SDK reaches Clerk's Frontend API with the
   const realFetch = globalThis.fetch;
   let upstream;
   t.mock.method(globalThis, "fetch", async (url, init) => {
-    if (String(url).startsWith("https://frontend-api.clerk.dev")) {
+    if (URL.canParse(String(url)) && new URL(String(url)).origin === "https://frontend-api.clerk.dev") {
       upstream = { url: String(url), headers: new Headers(init.headers), method: init.method };
       return new Response("/* clerk-js */", { status: 200, headers: { "content-type": "application/javascript" } });
     }

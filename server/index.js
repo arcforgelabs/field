@@ -73,6 +73,7 @@ import rateLimit from "express-rate-limit";
 import { addressLimitOptions, createRateLimits, describeConfiguredBudgets, resolveRateLimitBudgets } from "./rate-limits.js";
 import multer from "multer";
 import { assertNoRemovedIntegrationConfig } from "./config-guard.js";
+import { renderDemoBootstrapPage } from "./demo-bootstrap-page.js";
 import { loadFieldConfig, resolveFieldPort } from "./runtime-config.js";
 import { deployedBuildStatus } from "./deployed-build.js";
 import { createUpdateChecker } from "./update-check.js";
@@ -977,40 +978,6 @@ function resolveDemoUserConfig() {
   };
 }
 
-function renderDemoBootstrapPage({ token, user }) {
-  const tokenLiteral = JSON.stringify(token);
-  const userLiteral = JSON.stringify(JSON.stringify(user));
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="noindex,nofollow">
-  <title>Opening Field Demo</title>
-  <style>
-    :root { color-scheme: dark; }
-    body {
-      min-height: 100dvh;
-      margin: 0;
-      display: grid;
-      place-items: center;
-      background: #050505;
-      color: #f4f3ef;
-      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-  </style>
-</head>
-<body>
-  <span>Opening Field demo...</span>
-  <script>
-    localStorage.setItem("fr_token", ${tokenLiteral});
-    localStorage.setItem("fr_user", ${userLiteral});
-    window.location.replace("/jobs");
-  </script>
-</body>
-</html>`;
-}
-
 async function appendReviewItemActivity({
   jobDir,
   actor,
@@ -1129,7 +1096,7 @@ app.get(["/demo", "/demo-account-create"], async (_req, res) => {
     if (!minted?.token) throw new Error("demo token could not be minted");
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(renderDemoBootstrapPage({ token: minted.token, user }));
+    res.send(renderDemoBootstrapPage({ token: minted.token }));
   } catch (err) {
     console.error(`[demo] failed to create demo session: ${err.message}`);
     res.status(500).send("Demo unavailable");
@@ -1864,7 +1831,7 @@ app.patch("/api/jobs/:id/details", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error(`[job-detail] ${job.meta.id} failed: ${err.message}`);
-    res.status(500).json(errorBody(err));
+    res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
 
@@ -3144,7 +3111,7 @@ app.post("/api/jobs/:id/versions/:version/promote", requireAuth, async (req, res
         });
         console.log(`[promote-version] DB updated: job=${jobId} (${Date.now() - startTime}ms)`);
       } catch (e) {
-        console.warn(`[promote-version] DB update failed (best-effort): job=${jobId}`, e.message);
+        console.warn(`[promote-version] DB update failed (best-effort): job=${jobId} ${e.message}`);
       }
     }
 
@@ -3152,7 +3119,7 @@ app.post("/api/jobs/:id/versions/:version/promote", requireAuth, async (req, res
     console.log(`[promote-version] Complete: job=${jobId} (${totalTime}ms)`);
     res.json({ ok: true, currentVersion, previousVersion, sourceVersion });
   } catch (err) {
-    console.error(`[promote-version] Error: job=${jobId} version=${version} (${Date.now() - startTime}ms)`, err.message);
+    console.error(`[promote-version] Error: job=${jobId} version=${version} (${Date.now() - startTime}ms) ${err.message}`);
     res.status(err.statusCode || 500).json(errorBody(err));
   }
 });
