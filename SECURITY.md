@@ -62,7 +62,9 @@ credential value anywhere public.
   never in the repository, a log, an issue or a pull request. Name the
   variable, never its value.
 - Credentials Field stores at runtime stay inside the installation. Gmail OAuth
-  refresh tokens are in its data directory, written with mode `0600`.
+  refresh tokens are in its data directory, written with mode `0600`, and so
+  is `users.json` (password and token hashes), saved through one queue by an
+  atomic rename.
   Integration credentials and tokens (Xero) are in its PostgreSQL, per
   organisation, encrypted with AES-256-GCM under `FIELD_SECRETS_KEY`, a
   deployment secret of its own; a missing or wrong key fails closed

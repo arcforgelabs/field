@@ -1,6 +1,6 @@
 import { createHash, randomUUID, randomBytes } from "node:crypto";
 import { existsSync } from "./storage/fs.js";
-import { readFile, writeFile, mkdir } from "./storage/fs-promises.js";
+import { readFile, writeFile, mkdir, rename, rm } from "./storage/fs-promises.js";
 import { flushDurableStorageQuietly } from "./storage/durable-hooks.js";
 import { join, dirname } from "node:path";
 
@@ -96,10 +96,38 @@ export async function initUsers(dataDir) {
   return _users;
 }
 
-async function persist() {
-  if (!_usersPath) throw new Error("users not initialized");
-  await writeFile(_usersPath, JSON.stringify(_users, null, 2), "utf8");
-  await flushDurableStorageQuietly({ reason: "users" });
+// Every save goes through one queue, and each writes the whole current state
+// to a temporary file in the same directory, then renames it over users.json.
+// Two saves never interleave (a shorter file written over a longer one used
+// to leave a stale tail that no longer parsed), and a crash mid-write leaves
+// the previous file whole. The temporary name ends in .tmp, which durable
+// storage never mirrors; it records the rename, so only users.json is stored.
+let _persistQueue = Promise.resolve();
+
+function persist() {
+  if (!_usersPath) return Promise.reject(new Error("users not initialized"));
+  const run = async () => {
+    const path = _usersPath;
+    const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+    // The state as it is when this save runs, so a queued save never writes
+    // anything older than the one before it.
+    await writeFile(temporary, JSON.stringify(_users, null, 2), { encoding: "utf8", mode: 0o600 });
+    try {
+      await rename(temporary, path);
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => {});
+      throw error;
+    }
+    await flushDurableStorageQuietly({ reason: "users" });
+  };
+  const saved = _persistQueue.then(run, run);
+  _persistQueue = saved.catch(() => {});
+  return saved;
+}
+
+/** Resolves once every save queued so far has finished (tests, shutdown). */
+export function usersSaved() {
+  return _persistQueue;
 }
 
 // `id` is honoured only when the email is new: Clerk sign-in creates a
@@ -305,15 +333,24 @@ export function recordTokenUse(plaintext, { now = Date.now } = {}) {
     const last = token.lastUsedAt ? Date.parse(token.lastUsedAt) : 0;
     if (Number.isFinite(last) && at - last < TOKEN_USE_RESOLUTION_MS) return;
     token.lastUsedAt = new Date(at).toISOString();
+    // One pending background save serves every touch until it runs.
     if (!_usePersistTimer) {
-      _usePersistTimer = setTimeout(() => {
-        _usePersistTimer = null;
-        persist().catch((error) => console.warn(`[users] could not record token use: ${error.message}`));
-      }, 1000);
+      _usePersistTimer = setTimeout(saveTokenUse, 1000);
       _usePersistTimer.unref?.();
     }
     return;
   }
+}
+
+/**
+ * The background save of "last used" times, run now. It goes through the
+ * same queue as every other save. Exported for tests.
+ */
+export function saveTokenUse() {
+  if (_usePersistTimer) clearTimeout(_usePersistTimer);
+  _usePersistTimer = null;
+  if (!_usersPath) return Promise.resolve();
+  return persist().catch((error) => console.warn(`[users] could not record token use: ${error.message}`));
 }
 
 /**
