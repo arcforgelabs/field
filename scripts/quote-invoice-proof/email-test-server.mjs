@@ -39,7 +39,14 @@ export function attachmentsOf(mime) {
 
 export async function boot(t, { extraUsers = [], env: extraEnv = {}, config: extraConfig = {} } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "field-email-documents-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  // Removed by the hook below once the server has exited: node:test runs
+  // after hooks in the order they were registered, and removing the
+  // directory while the server still writes to data/ fails with ENOTEMPTY.
+  let serverStopped = null;
+  t.after(async () => {
+    await serverStopped?.();
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
   const dataDir = join(dir, "data");
   const mailDir = join(dir, "mail");
   await mkdir(dataDir, { recursive: true });
@@ -81,11 +88,11 @@ export async function boot(t, { extraUsers = [], env: extraEnv = {}, config: ext
   child.unref();
   const killOnExit = () => { if (child.exitCode === null) child.kill("SIGKILL"); };
   process.once("exit", killOnExit);
-  t.after(async () => {
+  serverStopped = async () => {
     process.removeListener("exit", killOnExit);
     if (child.exitCode === null) child.kill("SIGTERM");
     await exited;
-  });
+  };
   const base = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 90_000;
   for (;;) {
