@@ -199,3 +199,21 @@ describe("quote saves carry the quote rows' version (If-Match)", () => {
     expect(lastHeaders()).not.toHaveProperty("If-Match");
   });
 });
+
+describe("a rate-limited answer (429)", () => {
+  it("keeps the session and shows the server's plain message", async () => {
+    window.location.hash = "#/jobs";
+    const body = { error: "Too many requests. Try again in 45 seconds.", code: "rate_limited", retryAfter: 45, budget: "caller" };
+    fetchMock.mockImplementation(async () => ({
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+      headers: new Headers({ "Retry-After": "45" }),
+      json: async () => body,
+    }));
+    await expect(api.me()).rejects.toMatchObject({ message: body.error, code: "rate_limited", status: 429 });
+    await expect(api.quotePdfPreview("job-1", null)).rejects.toThrow(body.error);
+    expect(localStorage.getItem("fr_token")).toBe("catalog-api-test-token");
+    expect(window.location.hash).toBe("#/jobs");
+  });
+});

@@ -347,7 +347,9 @@ async function request<T>(
   rememberQuoteRowsVersion(path, res);
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    // Gmail auth expired returns 401 with a specific code — don't treat as session expiry
+    // Gmail auth expired returns 401 with a specific code — don't treat as session expiry.
+    // Only a 401 signs out: a 429 (rate limit) keeps the session and shows
+    // body.error, which says how long to wait.
     if (res.status === 401 && body.code !== "gmail_auth_expired") {
       localStorage.removeItem("fr_token");
       window.location.hash = "#/";
@@ -1273,7 +1275,11 @@ export const api = {
       }),
       signal,
     });
-    if (!res.ok) throw new Error(`PDF preview failed: ${res.status}`);
+    if (!res.ok) {
+      // A 429 (rate limit) says how long to wait in body.error.
+      const body = await res.json().catch(() => ({ error: null }));
+      throw new Error(body?.error || `PDF preview failed: ${res.status}`);
+    }
     return res.json();
   },
   wallRenderUrl(id: string, zoneId: string, version?: string | null, theme?: string | null) {

@@ -35,6 +35,7 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `docs/INTEGRATIONS.md` | Integration credentials entered in Settings, the `FIELD_SECRETS_KEY` key and its rotation, and who may change what |
 | `docs/CATALOG_BACKUP_RESTORE.md` | Backing up and restoring the price catalogue |
 | `docs/REMOTE_MCP.md` | The OAuth MCP surface AI agents and other systems connect through |
+| `docs/RATE_LIMITS.md` | How fast the API, CLI and MCP may be called, the 429 answer, and how to change a budget |
 | `docs/concepts/surveyor.md` | Surveyor, Field's before/after proof lane |
 | `docs/lessons-learned.md` | Persistent production bugs and the fixes that resolved them |
 | `docs/SELF_HOSTING.md` | Running a pinned, verified release with Docker, Node or Replit, and the `deploy/replit/` template |

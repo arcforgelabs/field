@@ -800,11 +800,14 @@ function publicCaller(caller) {
  *                                MCP grants for a person who is removed or disabled
  * @param {object|null} options.accessAudit  server/auth/access-audit.js store: every token revoke
  *                                writes an event (who, which token, whose, when; never a value)
+ * @param {function} options.limitCaller  middleware run once the caller is signed in: the
+ *                                caller's rate limits (server/rate-limits.js byCaller)
  */
-export function createClerkAuthRouter({ auth, db: database, users, revokeMcpAccess = async () => 0, accessAudit = null, log = console }) {
+export function createClerkAuthRouter({ auth, db: database, users, revokeMcpAccess = async () => 0, accessAudit = null, limitCaller = (_req, _res, next) => next(), log = console }) {
   const db = orgScope(database, auth?.orgUid ?? DEFAULT_ORG_UID);
   const router = Router();
-  const { requireAuth, requireOwner } = auth;
+  const { requireOwner } = auth;
+  const requireAuth = (req, res, next) => auth.requireAuth(req, res, () => limitCaller(req, res, next));
 
   // The users.json records holding a person's machine tokens: the one under
   // their id, and any human record with their email (left by an earlier

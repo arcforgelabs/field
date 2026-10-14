@@ -127,6 +127,30 @@ test("Field CLI reads, sets and checks milestone rules", async (t) => {
   assert.match(restored.stdout, /schedule: account rule "SA domestic, under \$20,000"/);
 });
 
+test("Field CLI turns a 429 into a plain message naming the wait", async (t) => {
+  const configDir = await mkdtemp(join(tmpdir(), "field-cli-429-"));
+  t.after(() => rm(configDir, { recursive: true, force: true }));
+  let calls = 0;
+  const server = createServer((request, response) => {
+    calls += 1;
+    response.statusCode = 429;
+    response.setHeader("Content-Type", "application/json");
+    response.setHeader("Retry-After", request.url === "/api/auth/me" ? "42" : "900");
+    response.end(JSON.stringify({ error: "Too many requests. Try again in 15 minutes.", code: "rate_limited", retryAfter: 900, budget: "pdf-render" }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const env = { ...process.env, FIELD_CONFIG_DIR: configDir, FIELD_URL: `http://127.0.0.1:${server.address().port}`, FIELD_TOKEN: TEST_TOKEN };
+
+  await assert.rejects(runCli(["list-jobs"], { env }), (error) => {
+    assert.match(error.message, /GET \/api\/jobs: Field is rate-limiting these requests \(pdf-render limit\)\. Wait 15 minutes, then try again\./);
+    assert.doesNotMatch(error.message, /\{/, "no raw JSON");
+    return true;
+  });
+  await assert.rejects(runCli(["auth", "login", "--token-stdin"], { env, input: `${TEST_TOKEN}\n` }), /Wait 42 seconds, then try again/);
+  assert.equal(calls, 2, "no automatic retry");
+});
+
 function runCli(args, { env, input = "" }) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cliPath, ...args], { cwd: repoRoot, env });

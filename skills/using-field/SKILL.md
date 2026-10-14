@@ -241,6 +241,10 @@ Current document behavior:
 Auth:
 - `Authorization: Bearer <token>`
 
+Rate limits (`docs/RATE_LIMITS.md`):
+- Each token may make 600 requests a minute. Sends (`email-quote`, `email`) are limited to 30 in 5 minutes, and PDF renders to 60 in 5 minutes.
+- A `429` answer has `Retry-After` in seconds and `{ "error", "code": "rate_limited", "retryAfter", "budget" }`. Wait that long, then try again. Do not retry in a tight loop.
+
 Most useful routes:
 - `GET /api/jobs/:id?version=<n>`: full detail, selected quote revision, edit policy, milestone state. Pass `version=latest` to bypass the customer-locked default and force the actual newest version (use this after creating, promoting, or regenerating a draft).
 - `GET /api/jobs/:id/quote?version=<n>`: quote markdown for the selected revision.

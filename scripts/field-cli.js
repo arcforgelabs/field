@@ -161,6 +161,21 @@ async function readOptionalBody(args) {
   return inlineBody ?? null;
 }
 
+// A 429 from Field's rate limits (docs/RATE_LIMITS.md): say how long to wait,
+// from Retry-After. The CLI does not retry by itself.
+function waitFromRetryAfter(value) {
+  const seconds = Number.parseInt(String(value ?? "").trim(), 10);
+  if (!Number.isInteger(seconds) || seconds <= 0) return "a moment";
+  if (seconds < 120) return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  return `${Math.ceil(seconds / 60)} minutes`;
+}
+
+async function rateLimitedMessage(method, path, response) {
+  const body = await response.json().catch(() => ({}));
+  const budget = typeof body?.budget === "string" && /^[a-z-]{1,32}$/.test(body.budget) ? ` (${body.budget} limit)` : "";
+  return `${method} ${path}: Field is rate-limiting these requests${budget}. Wait ${waitFromRetryAfter(response.headers.get("retry-after") ?? body?.retryAfter)}, then try again.`;
+}
+
 async function request(method, path, { body = null, headers = {} } = {}) {
   if (!authToken) {
     throw new Error("Field is not authenticated. Run: field auth login --url https://<your-field-host>");
@@ -181,6 +196,7 @@ async function request(method, path, { body = null, headers = {} } = {}) {
   }
 
   const response = await fetch(buildUrl(path), options);
+  if (response.status === 429) throw new Error(await rateLimitedMessage(method, path, response));
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`${method} ${path} -> ${response.status}: ${text.slice(0, 300)}`);
@@ -231,6 +247,7 @@ async function verifyCredential(url, token) {
   const response = await fetch(`${String(url).replace(/\/+$/, "")}/api/auth/me`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
+  if (response.status === 429) throw new Error(await rateLimitedMessage("GET", "/api/auth/me", response));
   const body = await response.json().catch(() => ({}));
   if (!response.ok || !body?.user) {
     throw new Error(`Field authentication failed (${response.status}): ${body.error || "invalid credential"}`);

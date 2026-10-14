@@ -184,6 +184,9 @@ export async function createRemoteMcpRouter({
   currentScopes,
   service,
   now,
+  // Middleware run on /mcp once the grant is checked: the installation's
+  // rate limits (server/rate-limits.js byCaller, keyed on req.rateLimitCaller).
+  limitCaller = (_req, _res, next) => next(),
 }) {
   if (typeof authenticate !== "function") throw new Error("authenticate is required");
   if (typeof authorizeScopes !== "function") throw new Error("authorizeScopes is required");
@@ -391,7 +394,7 @@ export async function createRemoteMcpRouter({
 
   router.use(createInstallationRoutes({ store, authenticateInstallationRequest, onDisconnect: onInstallationDisconnected }));
 
-  router.all("/mcp", async (req, res) => {
+  const authenticateMcp = async (req, res, next) => {
     const token = bearerToken(req);
     const granted = token ? store.access(token, { resource }) : null;
     let allowed = null;
@@ -408,7 +411,14 @@ export async function createRemoteMcpRouter({
       res.set("WWW-Authenticate", invalidTokenChallenge(issuer));
       return res.status(401).json({ error: "invalid_token" });
     }
-    const authorization = { ...granted, scope };
+    req.mcpAuthorization = { ...granted, scope };
+    // Rate limits count per installation, and only for a grant that checked out.
+    req.rateLimitCaller = `mcp:${granted.grantId}`;
+    return next();
+  };
+
+  router.all("/mcp", authenticateMcp, limitCaller, async (req, res) => {
+    const authorization = req.mcpAuthorization;
     if (req.method !== "POST") return res.status(405).set("Allow", "POST").end();
 
     const message = req.body || {};

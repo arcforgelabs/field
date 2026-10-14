@@ -48,6 +48,12 @@ credential value anywhere public.
   Owners see and revoke tokens and MCP installations in Settings, Team,
   Access; Field never shows or returns a token's value or hash, and every
   revoke or disconnect is an audit event without one.
+- **Rate limits.** Every request counts against its client address, and a
+  signed-in one also against its caller, after the token is checked. Sign-in,
+  OAuth, email, PDF and integration routes have smaller budgets. A spent
+  budget answers `429` with `Retry-After` (`docs/RATE_LIMITS.md`). The
+  address is only as good as `trust proxy` (`FIELD_TRUST_PROXY`): never
+  trust more proxy hops than there are.
 - **Sent documents are records.** A quote or invoice a customer has been sent
   is never changed in place; a change produces a new version. Tampering with
   that history is a security issue.
