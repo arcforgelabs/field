@@ -75,7 +75,9 @@ A beta has guards instead of a gate: it runs only from `main`, only for a
 commit (Field Release Checks). Every environment accepts only runs from
 `main`, and `npm-publish`, the environment npm's trusted publisher names, has
 no reviewer of its own. Release tags (`v20*`) cannot be moved or deleted
-(`.github/rulesets/release-tags.json`).
+(`.github/rulesets/release-tags.json`). Each job that builds or publishes
+checks out the tag itself, never a commit handed on from an earlier job, and
+stops if the tag no longer points at the commit the checks proved.
 
 npm can take minutes to serve a new version. Field NPM Release reads it back
 with backoff for about 15 minutes, and a rerun skips a version npm already

@@ -98,11 +98,24 @@ jobs:
       tarball: ${{ steps.pack.outputs.tarball }}
       tarball_sha256: ${{ steps.pack.outputs.sha256 }}
     steps:
-      - name: Check out the release commit
+      # The tag, not a commit passed between jobs: the build runs only what
+      # resolve proved is on main. A tag moved since then fails here.
+      - name: Check out the release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.resolve.outputs.commit }}
+          ref: refs/tags/${{ inputs.tag }}
           persist-credentials: false
+
+      - name: Require the commit resolve proved
+        env:
+          RESOLVED: ${{ needs.resolve.outputs.commit }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$RESOLVED" ]; then
+            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that resolve proved is on main. Run the release again." >&2
+            exit 1
+          fi
 
       # No Actions cache: what is published is built from the registry and
       # the lockfiles alone, and a release run never writes a cache that
