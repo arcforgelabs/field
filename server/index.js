@@ -79,6 +79,7 @@ import { deployedBuildStatus } from "./deployed-build.js";
 import { createUpdateChecker } from "./update-check.js";
 import { applyStoredGmailOAuthUsers, saveGmailOAuthUser } from "./gmail-oauth-store.js";
 import { hasGoogleServiceAccountKey } from "./google-service-account.js";
+import { registerGmailOAuthRoutes } from "./gmail-oauth-routes.js";
 import {
   initFieldSentry,
   reportBackgroundError,
@@ -4143,82 +4144,21 @@ app.post("/api/jobs/:id/milestones/:index/unsent", requireAuth, async (req, res)
   }
 });
 
-// Gmail OAuth re-authorization flow
-app.get("/api/auth/gmail", requireAuth, (req, res) => {
-  const delegatedUser = resolveGmailDelegatedUser(config, { user: req.caller });
-  const explicitlyDelegated = Boolean(process.env.FIELD_MAIL_GMAIL_USER || config.mail?.gmailUser);
-  if (hasGoogleServiceAccountKey(config) && delegatedUser && explicitlyDelegated) {
-    return res.status(409).json({ error: `Gmail is configured for server-side sending as ${delegatedUser}; OAuth re-authorization is not required.` });
-  }
-
-  const oauth = config.googleOAuth || {};
-  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID || oauth.clientId;
-  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET || oauth.clientSecret;
-  if (!clientId || !clientSecret) {
-    return res.status(500).json({ error: "Gmail OAuth client credentials are not configured" });
-  }
-
-  const baseUrl = config.publicUrl
-    || `${req.headers["x-forwarded-proto"] || req.protocol}://${req.headers["x-forwarded-host"] || req.get("host")}`;
-  const redirectUri = `${baseUrl.replace(/\/+$/, "")}/api/auth/gmail/callback`;
-
-  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
-  const url = oauth2Client.generateAuthUrl({
-    access_type: "offline",
-    prompt: "consent",
-    scope: [...GMAIL_SEND_SCOPES, GOOGLE_CONTACTS_READONLY_SCOPE],
-    state: buildGmailOAuthState({ returnTo: req.query.returnTo || "", user: req.caller }),
-    login_hint: req.query.loginHint || resolveGmailLoginHint(config, { user: req.caller }),
-  });
-  res.json({ url });
-});
-
-app.get("/api/auth/gmail/callback", async (req, res) => {
-  const code = req.query.code;
-  if (!code) return res.status(400).send("Missing authorization code");
-
-  const oauth = config.googleOAuth || {};
-  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID || oauth.clientId;
-  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET || oauth.clientSecret;
-  const baseUrl = config.publicUrl
-    || `${req.headers["x-forwarded-proto"] || req.protocol}://${req.headers["x-forwarded-host"] || req.get("host")}`;
-  const redirectUri = `${baseUrl.replace(/\/+$/, "")}/api/auth/gmail/callback`;
-
-  try {
-    const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
-    const { tokens } = await oauth2Client.getToken(code);
-    oauth2Client.setCredentials(tokens);
-    const state = parseGmailOAuthState(req.query.state || "");
-    const consentEmail = await resolveOAuthTokenEmail(oauth2Client);
-    const stateEmail = String(state.userEmail || "").trim().toLowerCase();
-    if (!consentEmail) {
-      return res.status(400).send("Gmail consent did not return an account email. Re-authorize Gmail with the updated scopes.");
-    }
-    if (stateEmail && consentEmail !== stateEmail) {
-      return res.status(400).send(`Gmail consent completed for ${consentEmail}, but Field user ${stateEmail} requested authorization.`);
-    }
-
-    // Store a user-scoped refresh token in the data directory. This keeps each
-    // Field user mapped to their own Gmail Sent Mail instead of a global token.
-    // config is never rewritten at runtime.
-    const entry = await saveGmailOAuthUser(DATA_DIR, consentEmail, {
-      refreshToken: tokens.refresh_token,
-      fallbackRefreshToken: config.googleOAuth?.users?.[consentEmail]?.refreshToken,
-    });
-
-    // Update in-memory config
-    if (!config.googleOAuth) config.googleOAuth = {};
-    config.googleOAuth.users = { ...(config.googleOAuth.users || {}), [consentEmail]: entry };
-
-    // Reset cached Gmail client so the new token takes effect
+// Gmail OAuth re-authorization flow (server/gmail-oauth-routes.js).
+registerGmailOAuthRoutes(app, {
+  config,
+  requireAuth,
+  OAuth2: google.auth.OAuth2,
+  scopes: [...GMAIL_SEND_SCOPES, GOOGLE_CONTACTS_READONLY_SCOPE],
+  hasServiceAccountKey: hasGoogleServiceAccountKey,
+  resolveDelegatedUser: resolveGmailDelegatedUser,
+  resolveLoginHint: resolveGmailLoginHint,
+  saveOAuthUser: (email, tokens) => saveGmailOAuthUser(DATA_DIR, email, tokens),
+  // Reset cached Gmail clients so the new token takes effect.
+  onAuthorized: () => {
     resetGmailClient();
     resetGoogleContactsCache();
-
-    res.redirect(buildGmailOAuthReturnUrl(state.returnTo || ""));
-  } catch (err) {
-    console.error("[gmail-oauth-callback] token exchange failed:", err.message);
-    res.status(500).send(`Gmail re-authorization failed: ${err.message}`);
-  }
+  },
 });
 
 app.get("/api/google/contacts", requireAuth, async (req, res) => {
@@ -4233,41 +4173,6 @@ app.get("/api/google/contacts", requireAuth, async (req, res) => {
     res.status(mapped.statusCode).json({ error: mapped.message, code: mapped.code });
   }
 });
-
-function buildGmailOAuthReturnUrl(returnPath) {
-  const cleanPath = String(returnPath || "/").trim() || "/";
-  const hashPath = cleanPath.startsWith("/") ? cleanPath : `/${cleanPath}`;
-  const joiner = hashPath.includes("?") ? "&" : "?";
-  return `/#${hashPath}${joiner}gmailReauthorized=1`;
-}
-
-function buildGmailOAuthState({ returnTo, user }) {
-  return Buffer.from(JSON.stringify({
-    returnTo: String(returnTo || ""),
-    userId: user?.id || null,
-    userEmail: user?.email || null,
-  }), "utf8").toString("base64url");
-}
-
-function parseGmailOAuthState(state) {
-  const raw = String(state || "");
-  if (!raw) return {};
-  try {
-    return JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
-  } catch {
-    return { returnTo: raw };
-  }
-}
-
-async function resolveOAuthTokenEmail(oauth2Client) {
-  const token = await oauth2Client.getAccessToken();
-  const accessToken = typeof token === "string" ? token : token?.token;
-  if (!accessToken) return "";
-  const response = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
-  if (!response.ok) return "";
-  const info = await response.json();
-  return String(info.email || "").trim().toLowerCase();
-}
 
 app.post("/api/jobs/:id/landed", requireAuth, async (req, res) => {
   const job = await findJob(req.params.id);

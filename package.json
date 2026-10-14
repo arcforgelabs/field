@@ -22,6 +22,7 @@
   "files": [
     "server/",
     "!server/**/*.test.js",
+    "!server/test-support/",
     "!server/db/src/",
     "!server/db/tsconfig.json",
     "shared/",

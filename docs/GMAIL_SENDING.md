@@ -21,6 +21,10 @@ identities) live in the installation's secret store, never here.
    `GOOGLE_OAUTH_REFRESH_TOKEN`, when set, outranks all of them, and
    `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` outrank the client
    in config.
+   The consent must finish within 10 minutes of the person starting it in
+   Field, on the same running server: the OAuth `state` is a single-use value
+   that the server keeps in memory. The callback refuses any other state
+   before it exchanges the code. After a restart, start the consent again.
 
 The delegated user comes from `resolveExpectedGmailUser`, which resolves:
 
@@ -37,7 +41,7 @@ Two consequences that are easy to get wrong:
   for accounts inside the Workspace domain that authorised delegation. A session
   as an outside account fails no matter what the configured default sender says.
 
-`GET /api/auth/gmail` (`server/index.js`) uses a *different* test — it treats
+`GET /api/auth/gmail` (`server/gmail-oauth-routes.js`) uses a *different* test — it treats
 delegation as active only when `FIELD_MAIL_GMAIL_USER` or `mail.gmailUser` is
 explicitly set. The two
 disagree. That disagreement concealed a live outage once; if you touch
