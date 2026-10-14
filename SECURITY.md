@@ -37,7 +37,8 @@ credential value anywhere public.
   share data or credentials.
 - **People.** With `FIELD_AUTH=clerk`, people sign in with Clerk, and Field's
   PostgreSQL holds their role (`owner` or `staff`) and approval. Without it,
-  they sign in with email and password. Owner-only actions need a verified
+  they sign in with email and password; `users.json` holds each password only
+  as salted scrypt, never a fast hash. Owner-only actions need a verified
   owner sign-in (`docs/CLERK_SIGN_IN.md`).
 - **Machine access.** A CLI/API bearer token, or the owner break-glass key
   (`authToken`, `FIELD_TOKEN`), acts as an operator of that installation;
