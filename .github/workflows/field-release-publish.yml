@@ -102,7 +102,9 @@ jobs:
           platforms: linux/amd64
           tags: ${{ env.IMAGE }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-          build-args: VCS_REF=${{ needs.checks.outputs.commit }}
+          build-args: |
+            VCS_REF=${{ needs.checks.outputs.commit }}
+            FIELD_RELEASE=v${{ needs.checks.outputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/arcforgelabs/field
             org.opencontainers.image.version=${{ needs.checks.outputs.version }}

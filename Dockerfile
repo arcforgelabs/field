@@ -27,6 +27,9 @@ ENV NODE_ENV=production
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.revision="${VCS_REF}"
 ENV FIELD_REVISION="${VCS_REF}"
+# The release tag a release image is (Field Release Publish sets it), or empty.
+ARG FIELD_RELEASE=""
+ENV FIELD_RELEASE="${FIELD_RELEASE}"
 COPY --from=server-deps /app/node_modules ./node_modules
 COPY server ./server
 COPY --from=server-deps /app/server/db/dist ./server/db/dist

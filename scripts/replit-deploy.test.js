@@ -14,6 +14,8 @@ import { join, relative, resolve } from "node:path";
 
 const HELPER = resolve(import.meta.dirname, "replit-deploy.sh");
 const CHECKS_HELPER = resolve(import.meta.dirname, "deploy-checks.js");
+const RELEASE_HELPER = resolve(import.meta.dirname, "deploy-release.js");
+const RELEASE_CHANNEL = resolve(import.meta.dirname, "../server/release-channel.js");
 // The deploy fetches this URL; git config maps it to the fixture's bare
 // repository, and the checks are read for acme/field from the stand-in API.
 const GITHUB_URL = "https://github.com/acme/field.git";
@@ -55,6 +57,7 @@ echo "revision=\${FIELD_REVISION:-}"
 echo "ref=\${FIELD_DEPLOYED_REF:-}"
 echo "from=\${FIELD_DEPLOYED_FROM:-}"
 echo "checks=\${FIELD_DEPLOYED_CHECKS:-}"
+echo "release=\${FIELD_DEPLOYED_RELEASE:-}"
 `;
 
 // A GitHub stand-in with main at v2, a tag v1 at v1, a branch whose build
@@ -70,14 +73,20 @@ function fixture(t) {
   write(join(upstream, "scripts/replit-start.sh"), FIXTURE_START);
   copyFileSync(HELPER, join(upstream, "scripts/replit-deploy.sh"));
   copyFileSync(CHECKS_HELPER, join(upstream, "scripts/deploy-checks.js"));
+  copyFileSync(RELEASE_HELPER, join(upstream, "scripts/deploy-release.js"));
+  mkdirSync(join(upstream, "server"), { recursive: true });
+  copyFileSync(RELEASE_CHANNEL, join(upstream, "server/release-channel.js"));
   write(join(upstream, "version.txt"), "v1\n");
   git(upstream, "add", "-A");
   git(upstream, "commit", "-q", "-m", "v1");
   git(upstream, "tag", "v1");
+  // Release tags, annotated as Field Release Prepare makes them.
+  git(upstream, "tag", "-a", "v2026.10.15", "-m", "field 2026.10.15");
   const v1 = git(upstream, "rev-parse", "HEAD");
   write(join(upstream, "version.txt"), "v2\n");
   git(upstream, "commit", "-q", "-am", "v2");
   const v2 = git(upstream, "rev-parse", "HEAD");
+  git(upstream, "tag", "-a", "v2026.10.16-beta.1", "-m", "field 2026.10.16-beta.1");
   git(upstream, "switch", "-q", "-c", "broken");
   write(join(upstream, "scripts/replit-build.sh"), "#!/usr/bin/env bash\nexit 7\n");
   git(upstream, "commit", "-q", "-am", "broken build");
@@ -103,13 +112,42 @@ function fixture(t) {
 
 const passing = (names = REQUIRED) => names.map((name, i) => ({ id: i + 1, name, status: "completed", conclusion: "success", app: { id: 15368 } }));
 
+// A release's release-manifest.json and its .sha256 sidecar, as Field Release
+// Publish attaches them.
+function manifestFor(tag, commit) {
+  const body = JSON.stringify({ tag, version: tag.slice(1), commit });
+  return { body, sha256: createHash("sha256").update(body).digest("hex") };
+}
+
 // GitHub's check-runs API for acme/field: every commit passed, unless the test
 // says otherwise in `runs` (commit -> check runs) or `respond` (commit -> a
-// raw status, headers and body).
-async function checksApi(t, { runs = {}, respond = {} } = {}) {
+// raw status, headers and body). With `releases`, it also stands in for
+// GitHub's releases API ({ latest, list }), the release downloads
+// ({ manifests: tag -> { body, sha256 } }) and npm ({ npm: dist-tags }); an
+// entry set to a number answers that HTTP status.
+async function checksApi(t, { runs = {}, respond = {}, releases } = {}) {
   const requests = [];
+  const send = (res, value) => {
+    if (typeof value === "number") {
+      res.writeHead(value, value === 403 ? { "x-ratelimit-remaining": "0" } : {});
+      return res.end("{}");
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end(typeof value === "string" ? value : JSON.stringify(value));
+  };
   const server = createServer((req, res) => {
     requests.push(req.url);
+    if (releases) {
+      if (req.url === "/repos/acme/field/releases/latest") return send(res, releases.latest ?? 404);
+      if (req.url === "/repos/acme/field/releases?per_page=50") return send(res, releases.list ?? 404);
+      if (req.url === "/@arcforgelabs%2ffield") return send(res, releases.npm ? { "dist-tags": releases.npm } : 404);
+      const download = /^\/acme\/field\/releases\/download\/([^/]+)\/release-manifest\.json(\.sha256)?$/.exec(req.url);
+      if (download) {
+        const manifest = releases.manifests?.[download[1]];
+        if (!manifest) return send(res, 404);
+        return send(res, download[2] ? `${manifest.sha256}  release-manifest.json\n` : manifest.body);
+      }
+    }
     const match = /^\/repos\/acme\/field\/commits\/([0-9a-f]{40})\/check-runs/.exec(req.url);
     const commit = match?.[1];
     if (commit && respond[commit]) {
@@ -155,7 +193,13 @@ function deploy(workspace, command, env = {}, { remote, api } = {}) {
     : {};
   const child = spawn("bash", [join(workspace, "scripts/replit-deploy.sh"), command], {
     cwd: workspace,
-    env: { ...GIT_ENV, HOME: workspace, ...mapped, ...(api ? { FIELD_DEPLOY_CHECKS_API: api.url } : {}), ...env },
+    env: {
+      ...GIT_ENV,
+      HOME: workspace,
+      ...mapped,
+      ...(api ? { FIELD_DEPLOY_CHECKS_API: api.url, FIELD_DEPLOY_RELEASES_API: api.url, FIELD_DEPLOY_RELEASE_DOWNLOADS: api.url, FIELD_DEPLOY_NPM_REGISTRY: api.url } : {}),
+      ...env,
+    },
   });
   let output = "";
   child.stdout.on("data", (chunk) => { output += chunk; });
@@ -354,4 +398,84 @@ test("start runs the fetched build's start script with its commit, ref and CI re
   // The runtime asks for another ref than the build fetched: say so loudly.
   const drift = await deploy(workspace, "start", { FIELD_DEPLOY_REF: "main" });
   assert.match(drift.output, /WARNING: FIELD_DEPLOY_REF is 'main' now, but this build fetched 'v1'/);
+});
+
+// The release channels: GitHub says stable is v2026.10.15 (at v1) and the
+// newest release is v2026.10.16-beta.1 (at v2).
+function releaseWorld({ v1, v2 }, overrides = {}) {
+  return {
+    latest: { tag_name: "v2026.10.15", prerelease: false, draft: false },
+    list: [
+      { tag_name: "v2026.10.16-beta.1", prerelease: true, draft: false },
+      { tag_name: "v2026.10.15", prerelease: false, draft: false },
+    ],
+    manifests: { "v2026.10.15": manifestFor("v2026.10.15", v1), "v2026.10.16-beta.1": manifestFor("v2026.10.16-beta.1", v2) },
+    ...overrides,
+  };
+}
+
+test("FIELD_DEPLOY_REF=stable builds the release GitHub marks latest, after its manifest and CI check out", async (t) => {
+  const { workspace, remote, v1, v2 } = fixture(t);
+  const api = await checksApi(t, { releases: releaseWorld({ v1, v2 }) });
+  const before = snapshot(workspace);
+  const result = await deploy(workspace, "build", { FIELD_DEPLOY_REF: "stable" }, { remote, api });
+  assert.equal(result.status, 0, result.output);
+  assert.equal(out(workspace, "built-version.txt"), "v1");
+  assert.equal(out(workspace, ".field-revision"), v1);
+  assert.equal(out(workspace, ".field-deploy-ref"), "stable");
+  assert.equal(out(workspace, ".field-deploy-release"), "v2026.10.15");
+  assert.match(result.output, /the stable channel is v2026\.10\.15/);
+  assert.match(result.output, new RegExp(`release: stable is v2026\\.10\\.15 at ${v1} \\(from github; release-manifest.json sha256 [0-9a-f]{64} verified\\)`));
+  assert.match(result.output, new RegExp(`checks: passed \\(test, client-build, docker-build, gitleaks\\) at ${v1}`));
+  assert.deepEqual(snapshot(workspace), before);
+
+  const start = await deploy(workspace, "start", { FIELD_DEPLOY_REF: "stable" });
+  assert.equal(start.status, 0, start.output);
+  assert.match(start.output, /starting github stable \(v2026\.10\.15\)/);
+  assert.match(start.output, /^ref=stable$/m);
+  assert.match(start.output, /^release=v2026\.10\.15$/m);
+  assert.match(start.output, new RegExp(`^revision=${v1}$`, "m"));
+  assert.doesNotMatch(start.output, /WARNING/);
+});
+
+test("FIELD_DEPLOY_REF=beta builds the newest release, and a pinned release tag is recorded as the release", async (t) => {
+  const { workspace, remote, v1, v2 } = fixture(t);
+  const api = await checksApi(t, { releases: releaseWorld({ v1, v2 }) });
+  const beta = await deploy(workspace, "build", { FIELD_DEPLOY_REF: "beta" }, { remote, api });
+  assert.equal(beta.status, 0, beta.output);
+  assert.equal(out(workspace, ".field-revision"), v2);
+  assert.equal(out(workspace, ".field-deploy-release"), "v2026.10.16-beta.1");
+  const pinned = await deploy(workspace, "build", { FIELD_DEPLOY_REF: "v2026.10.15" }, { remote, api });
+  assert.equal(pinned.status, 0, pinned.output);
+  assert.equal(out(workspace, ".field-deploy-ref"), "v2026.10.15");
+  assert.equal(out(workspace, ".field-deploy-release"), "v2026.10.15");
+  const branch = await deploy(workspace, "build", {}, { remote, api });
+  assert.equal(branch.status, 0, branch.output);
+  assert.equal(existsSync(join(workspace, ".field-deploy/.field-deploy-release")), false);
+});
+
+test("when GitHub's API is rate-limited, stable falls back to npm latest; the manifest is still checked", async (t) => {
+  const { workspace, remote, v1, v2 } = fixture(t);
+  const api = await checksApi(t, { releases: releaseWorld({ v1, v2 }, { latest: 403, npm: { latest: "2026.10.15", beta: "2026.10.16-beta.1" } }) });
+  const result = await deploy(workspace, "build", { FIELD_DEPLOY_REF: "stable" }, { remote, api });
+  assert.equal(result.status, 0, result.output);
+  assert.equal(out(workspace, ".field-deploy-release"), "v2026.10.15");
+  assert.match(result.output, /GitHub could not say \(.*rate limit.*\); npm's dist-tag names v2026\.10\.15/);
+});
+
+test("a channel that cannot be resolved, or a manifest that does not check out, builds nothing and never falls back to main", async (t) => {
+  const { workspace, remote, v1, v2 } = fixture(t);
+  const cases = [
+    { name: "no answer", releases: releaseWorld({ v1, v2 }, { latest: 404, npm: { latest: "0.0.0-placeholder" } }), says: /could not tell which release the stable channel points at/ },
+    { name: "bad sidecar", releases: releaseWorld({ v1, v2 }, { manifests: { "v2026.10.15": { ...manifestFor("v2026.10.15", v1), sha256: "0".repeat(64) } } }), says: /does not match its .sha256/ },
+    { name: "wrong commit", releases: releaseWorld({ v1, v2 }, { manifests: { "v2026.10.15": manifestFor("v2026.10.15", v2) } }), says: new RegExp(`v2026.10.15 is at ${v1}, but its release-manifest.json names ${v2}`) },
+  ];
+  for (const { name, releases, says } of cases) {
+    const api = await checksApi(t, { releases });
+    const result = await deploy(workspace, "build", { FIELD_DEPLOY_REF: "stable" }, { remote, api });
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.output, says, name);
+    assert.equal(existsSync(join(workspace, ".field-deploy")), false, name);
+    assert.equal(api.requests.some((url) => url.includes("/check-runs")), false, `${name}: no CI check before a release is established`);
+  }
 });
