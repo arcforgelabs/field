@@ -89,6 +89,18 @@ can reach it another way.
   never revives their old tokens. Machine tokens can never do owner-only
   actions. A person and a service account never share an email, whichever
   was added first.
+- **Settings, Team, Access** shows owners every command-line token and
+  connected agent (MCP installation), one row per person or service account:
+  each token's name, when it was created and last used, and what it acts as;
+  each agent's client name, who approved it and when, when it was last used
+  and its scopes. Never a token's value. Revoke and Disconnect take effect on
+  the token's or agent's next request, and each writes an access audit event
+  (who, which token or installation and its name, whose, when), listed under
+  "Recent changes". An owner revoking their own command-line token stops only
+  that token: the `field` command needs `field auth login` again, and their
+  sign-in to Field carries on. With password sign-in the browser itself holds
+  a token; revoking that one needs `?confirm=current` and signs the browser
+  out.
 - **Every use of a token or MCP grant is checked** against the person's access
   now: their membership of the deployment's organisation, its status and its
   role in PostgreSQL, and, once they have signed in with Clerk, their Clerk
@@ -211,8 +223,9 @@ Cutover:
 - [ ] Review roles. Today every `users.json` person is an admin, so all
       imported people start as owners: demote anyone who should be staff.
 - [ ] Revoke browser tokens left over from password sign-in (labelled
-      `session`) with `DELETE /api/users/:id/tokens/:tokenId`; CLI tokens keep
-      their own labels and keep working.
+      `session`) in Settings, Team, Access (or with
+      `DELETE /api/users/:id/tokens/:tokenId`); CLI tokens keep their own
+      labels and keep working.
 - [ ] Reconnect nothing for MCP clients: check `GET /api/mcp/installations` still
       lists its grant and an MCP tool call works.
 

@@ -210,7 +210,11 @@ import {
   revokeAllTokens,
   revokeTokenByPlaintext,
   listUserTokens,
+  recordTokenUse,
+  tokenIdForPlaintext,
 } from "./users.js";
+import { createAccessAuditStore } from "./auth/access-audit.js";
+import { createAccessEventsRouter, createPasswordTokenRouter } from "./auth/token-access.js";
 import { initEmailTemplates, listEmailTemplates, updateEmailTemplate } from "./email-templates.js";
 import { generateEvidenceQuoteMarkdown } from "./generate-evidence-quote.js";
 import { applyPresentationToQuote, getCustomerPresentationFinancials } from "./quote-presentation.js";
@@ -437,7 +441,7 @@ if (FIELD_AUTH_MODE === "clerk") {
       db,
       orgUid: deploymentOrg.uid,
       clerk: await loadClerkAdapter({ ...keys, authorizedParties }),
-      legacy: { findUserByToken, findUserById },
+      legacy: { findUserByToken, findUserById, recordTokenUse },
       breakGlassKey: AUTH_TOKEN,
       ...ownerVerification,
     });
@@ -556,6 +560,8 @@ installIssuedDocumentRecorder(issuedDocumentRecorder);
 // key wrote.
 const secretsKeyring = loadSecretsKeyring(process.env);
 if (secretsKeyring.problem) console.warn(`[secrets] ${secretsKeyring.problem}: integration credentials and tokens cannot be stored or read (docs/INTEGRATIONS.md)`);
+// Settings, Team, Access (#133): who revoked a token or disconnected an agent.
+const accessAudit = deploymentOrg ? createAccessAuditStore({ db: getDb(), orgUid: deploymentOrg.uid }) : null;
 const integrationCredentials = deploymentOrg ? createCredentialStore({ db: getDb(), orgUid: deploymentOrg.uid, keyring: secretsKeyring }) : null;
 if (integrationCredentials) await integrationCredentials.rewrap().catch((error) => console.warn(`[secrets] re-encrypting with the current key failed (${error?.code || "error"})`));
 // The Connect wizard (docs/XERO.md): where the owner is, and credentials the
@@ -784,6 +790,7 @@ function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: "unauthorized" });
   const caller = findUserByToken(token);
   if (!caller) return res.status(401).json({ error: "unauthorized" });
+  recordTokenUse(token);
   req.caller = caller;
   attachRequestOrg(req, res, next);
 }
@@ -1036,8 +1043,10 @@ if (clerkAuth) {
       revokeAllTokens,
       revokeTokenByPlaintext,
       listUserTokens,
+      tokenIdForPlaintext,
     },
     revokeMcpAccess: (subjects) => revokeMcpSubjects(subjects),
+    accessAudit,
   }));
 }
 
@@ -1207,34 +1216,17 @@ app.delete("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Token management: admin or self.
-function canManageTokens(req, targetId) {
-  if (!req.caller) return false;
-  return req.caller.id === targetId || req.caller.role === "admin";
-}
-
-app.get("/api/users/:id/tokens", requireAuth, (req, res) => {
-  if (!canManageTokens(req, req.params.id)) return res.status(403).json({ error: "forbidden" });
-  const target = findUserById(req.params.id);
-  if (!target) return res.status(404).json({ error: "user not found" });
-  res.json({ ok: true, tokens: listUserTokens(target.id) });
-});
-
-app.post("/api/users/:id/tokens", requireAuth, async (req, res) => {
-  if (!canManageTokens(req, req.params.id)) return res.status(403).json({ error: "forbidden" });
-  const target = findUserById(req.params.id);
-  if (!target) return res.status(404).json({ error: "user not found" });
-  const { label } = req.body || {};
-  const minted = await addToken(target.id, label);
-  res.status(201).json({ ok: true, token: minted.token, metadata: minted.metadata });
-});
-
-app.delete("/api/users/:id/tokens/:tokenId", requireAuth, async (req, res) => {
-  if (!canManageTokens(req, req.params.id)) return res.status(403).json({ error: "forbidden" });
-  const removed = await revokeToken(req.params.id, req.params.tokenId);
-  if (!removed) return res.status(404).json({ error: "token not found" });
-  res.json({ ok: true });
-});
+// Token management with password sign-in: admin or self (server/auth/
+// token-access.js). With Clerk sign-in the routes above answer first, owners
+// only. Revoking writes an access audit event; the token this request used
+// needs ?confirm=current.
+app.use(createPasswordTokenRouter({
+  users: { findUserById, listUserTokens, addToken, revokeToken, tokenIdForPlaintext },
+  requireAuth,
+  audit: () => accessAudit,
+}));
+// Settings, Team, Access: the latest token revokes and agent disconnects.
+app.use(createAccessEventsRouter({ requireAuth, requireOwner: requireAdmin, audit: () => accessAudit }));
 
 app.get("/api/ui-config", requireAuth, (_req, res) => {
   res.json({
@@ -6222,6 +6214,16 @@ if (remoteMcpRuntime.enabled) {
         return user ? authorizeFieldMcpScopes(user, MCP_SCOPES) : null;
       },
     authenticateInstallationRequest: clerkAuth ? [requireAuth, requireAdmin] : requireAuth,
+    // Every disconnect writes an access audit event (#133).
+    onInstallationDisconnected: async ({ req, installation }) => {
+      if (!accessAudit) throw new Error("no access audit store (no database)");
+      const name = clerkAuth ? await clerkAuth.holderName(installation.subject) : findUserById(installation.subject)?.name ?? null;
+      await accessAudit.record("mcp_installation_disconnected", {
+        actor: req.caller,
+        target: { id: installation.id, name: installation.clientName },
+        holder: { id: installation.subject, name },
+      });
+    },
     service: mcpService,
   });
   revokeMcpSubjects = (subjects) => remoteMcp.store.revokeSubjects(subjects);

@@ -4,6 +4,9 @@ import { flushDurableStorageQuietly } from "../storage/durable-hooks.js";
 import { dirname, join } from "node:path";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60_000;
+// An installation's "last used" is recorded at most once a minute, so /mcp
+// calls do not rewrite the state file every time.
+const LAST_USED_RESOLUTION_MS = 60_000;
 
 function hash(value) {
   return createHash("sha256").update(String(value)).digest("hex");
@@ -216,6 +219,7 @@ export class OAuthStore {
       const requested = scope?.length ? scope : record.scope;
       if (requested.some((requestedScope) => !record.scope.includes(requestedScope))) return null;
       record.rotatedAt = this.now();
+      this.noteUse(record.grantId, { persist: false });
       return this.issue(data, { ...record, scope: requested });
     });
   }
@@ -243,7 +247,19 @@ export class OAuthStore {
       || requiredScopes.some((scope) => !record.scope.includes(scope))) {
       return null;
     }
+    this.noteUse(record.grantId);
     return record;
+  }
+
+  // The installation was just used: remember when, persisted in the background.
+  // Inside a transaction (persist: false) the transaction's own write saves it.
+  noteUse(grantId, { persist = true } = {}) {
+    const grant = this.data.grants.find((candidate) => candidate.id === grantId);
+    if (!grant) return;
+    const at = this.now();
+    if (grant.lastUsedAt && at - grant.lastUsedAt < LAST_USED_RESOLUTION_MS) return;
+    grant.lastUsedAt = at;
+    if (persist) this.transaction(() => {}).catch(() => {});
   }
 
   revokeFamily(data, familyId) {
@@ -286,8 +302,14 @@ export class OAuthStore {
         clientName: this.client(grant.clientId)?.client_name || null,
         scopes: [...grant.scope],
         createdAt: new Date(grant.createdAt).toISOString(),
+        lastUsedAt: grant.lastUsedAt ? new Date(grant.lastUsedAt).toISOString() : null,
         revokedAt: grant.revokedAt ? new Date(grant.revokedAt).toISOString() : null,
       }));
+  }
+
+  /** One installation's public shape (revoked or not), or null. */
+  installation(id) {
+    return this.listInstallations({ includeRevoked: true }).find((installation) => installation.id === id) || null;
   }
 
   // Cut a person off (removed or disabled in Field): every installation, token

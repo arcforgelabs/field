@@ -2183,6 +2183,37 @@ export const integrationAuditEvents = pgTable(
 export type IntegrationAuditEvent = typeof integrationAuditEvents.$inferSelect;
 
 /**
+ * Who revoked a command-line token or disconnected a connected agent (MCP
+ * installation), and when (#133). Names the token or installation by id and
+ * name, and whose it was; never a token value or hash. Append-only.
+ */
+export const accessAuditEvents = pgTable(
+  "access_audit_events",
+  {
+    uid: text("uid").primaryKey(),
+    orgUid: orgUid(),
+    action: text("action").notNull(),
+    actorId: text("actor_id"),
+    actorName: text("actor_name"),
+    /** The token id or MCP installation id. */
+    targetId: text("target_id").notNull(),
+    /** The token's name or the agent's client name, when it has one. */
+    targetName: text("target_name"),
+    /** The person or service account the token or installation belonged to. */
+    holderId: text("holder_id"),
+    holderName: text("holder_name"),
+    at: timestamp("at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (t) => [
+    index("access_audit_events_org_at_idx").on(t.orgUid, t.at),
+    check("access_audit_events_action_check", sql`${t.action} in ('token_revoked','mcp_installation_disconnected')`),
+    tenantIsolation("access_audit_events"),
+  ],
+);
+
+export type AccessAuditEvent = typeof accessAuditEvents.$inferSelect;
+
+/**
  * Where an owner is in an integration's Connect wizard, per organisation
  * (Xero first). It survives a republish, so the wizard resumes where it was.
  *

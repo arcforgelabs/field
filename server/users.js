@@ -1,6 +1,6 @@
 import { createHash, randomUUID, randomBytes } from "node:crypto";
 import { existsSync } from "./storage/fs.js";
-import { readFile, writeFile, mkdir } from "./storage/fs-promises.js";
+import { readFile, writeFile, mkdir, rename, rm } from "./storage/fs-promises.js";
 import { flushDurableStorageQuietly } from "./storage/durable-hooks.js";
 import { join, dirname } from "node:path";
 
@@ -13,7 +13,7 @@ import { join, dirname } from "node:path";
  *     kind: "human" | "service",
  *     role: "admin" | "user",
  *     passwordHash?,        // humans only
- *     tokens: [{ id, hash, label, createdAt }],
+ *     tokens: [{ id, hash, label, createdAt, lastUsedAt? }],
  *     settings: {}, permissions: [],
  *     createdAt, updatedAt?
  *   }
@@ -60,9 +60,16 @@ function publicShape(u) {
   };
 }
 
+// What may leave this module about a token: never its value or its hash.
 function tokenMetadata(t) {
-  return { id: t.id, label: t.label || null, createdAt: t.createdAt };
+  return { id: t.id, label: t.label || null, createdAt: t.createdAt, lastUsedAt: t.lastUsedAt || null };
 }
+
+// "Last used" is recorded at most once a minute per token, and written to
+// users.json in the background, so a busy CLI does not rewrite the file on
+// every request.
+const TOKEN_USE_RESOLUTION_MS = 60 * 1000;
+let _usePersistTimer = null;
 
 function mintTokenString() {
   return TOKEN_PREFIX + randomBytes(32).toString("base64url");
@@ -89,10 +96,38 @@ export async function initUsers(dataDir) {
   return _users;
 }
 
-async function persist() {
-  if (!_usersPath) throw new Error("users not initialized");
-  await writeFile(_usersPath, JSON.stringify(_users, null, 2), "utf8");
-  await flushDurableStorageQuietly({ reason: "users" });
+// Every save goes through one queue, and each writes the whole current state
+// to a temporary file in the same directory, then renames it over users.json.
+// Two saves never interleave (a shorter file written over a longer one used
+// to leave a stale tail that no longer parsed), and a crash mid-write leaves
+// the previous file whole. The temporary name ends in .tmp, which durable
+// storage never mirrors; it records the rename, so only users.json is stored.
+let _persistQueue = Promise.resolve();
+
+function persist() {
+  if (!_usersPath) return Promise.reject(new Error("users not initialized"));
+  const run = async () => {
+    const path = _usersPath;
+    const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+    // The state as it is when this save runs, so a queued save never writes
+    // anything older than the one before it.
+    await writeFile(temporary, JSON.stringify(_users, null, 2), { encoding: "utf8", mode: 0o600 });
+    try {
+      await rename(temporary, path);
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => {});
+      throw error;
+    }
+    await flushDurableStorageQuietly({ reason: "users" });
+  };
+  const saved = _persistQueue.then(run, run);
+  _persistQueue = saved.catch(() => {});
+  return saved;
+}
+
+/** Resolves once every save queued so far has finished (tests, shutdown). */
+export function usersSaved() {
+  return _persistQueue;
 }
 
 // `id` is honoured only when the email is new: Clerk sign-in creates a
@@ -282,6 +317,52 @@ export function listUserTokens(userId) {
   const user = _users.find((u) => u.id === userId);
   if (!user || !Array.isArray(user.tokens)) return [];
   return user.tokens.map(tokenMetadata);
+}
+
+/**
+ * Note that a token was just used (after it authenticated a request). Cheap:
+ * it updates memory at most once a minute per token and persists later.
+ */
+export function recordTokenUse(plaintext, { now = Date.now } = {}) {
+  if (!_users || !plaintext) return;
+  const hash = hashSecret(plaintext);
+  for (const u of _users) {
+    const token = Array.isArray(u.tokens) ? u.tokens.find((t) => t.hash === hash) : null;
+    if (!token) continue;
+    const at = now();
+    const last = token.lastUsedAt ? Date.parse(token.lastUsedAt) : 0;
+    if (Number.isFinite(last) && at - last < TOKEN_USE_RESOLUTION_MS) return;
+    token.lastUsedAt = new Date(at).toISOString();
+    // One pending background save serves every touch until it runs.
+    if (!_usePersistTimer) {
+      _usePersistTimer = setTimeout(saveTokenUse, 1000);
+      _usePersistTimer.unref?.();
+    }
+    return;
+  }
+}
+
+/**
+ * The background save of "last used" times, run now. It goes through the
+ * same queue as every other save. Exported for tests.
+ */
+export function saveTokenUse() {
+  if (_usePersistTimer) clearTimeout(_usePersistTimer);
+  _usePersistTimer = null;
+  if (!_usersPath) return Promise.resolve();
+  return persist().catch((error) => console.warn(`[users] could not record token use: ${error.message}`));
+}
+
+/**
+ * Which of a user's tokens a plaintext is, by id, without revealing anything
+ * else: so a list can mark the token the current request came in with.
+ */
+export function tokenIdForPlaintext(userId, plaintext) {
+  if (!_users || !plaintext) return null;
+  const user = _users.find((u) => u.id === userId);
+  if (!user || !Array.isArray(user.tokens)) return null;
+  const hash = hashSecret(plaintext);
+  return user.tokens.find((t) => t.hash === hash)?.id ?? null;
 }
 
 /** Resolve a user by a plaintext token. Returns publicShape or null. */

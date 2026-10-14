@@ -35,6 +35,7 @@ import {
 import { DEFAULT_ORG_UID, orgScope } from "../db-runtime/tenancy.js";
 import { authorizeFieldMcpScopes } from "../mcp/scope-authority.js";
 import { MCP_SCOPES } from "../mcp/scopes.js";
+import { revokeHolderToken, tokensFor } from "./token-access.js";
 
 export const BREAK_GLASS_HEADER = "x-field-break-glass";
 const BREAK_GLASS_WINDOW_MS = 15 * 60 * 1000;
@@ -601,7 +602,10 @@ export function createClerkAuth({
   async function tokenCaller(token) {
     const holder = legacy.findUserByToken(token);
     if (!holder) return null;
-    return machineCaller(holder.id, holder);
+    const resolved = await machineCaller(holder.id, holder);
+    // "Last used" in Settings, Team, Access: only a use that was let in.
+    if (resolved.caller) legacy.recordTokenUse?.(token);
+    return resolved;
   }
 
   async function requireAuth(req, res, next) {
@@ -721,6 +725,16 @@ export function createClerkAuth({
     return resolved.caller ? authorizeFieldMcpScopes(resolved.caller, MCP_SCOPES) : null;
   }
 
+  // A person's or service account's display name, for audit events about
+  // what they held (an MCP installation's approver). Null when unknown.
+  async function holderName(id) {
+    if (!id) return null;
+    const row = await findFieldUserById(db, id).catch(() => null);
+    if (row) return row.name || row.email || null;
+    const holder = legacy.findUserById?.(id);
+    return holder ? holder.name || holder.email || null : null;
+  }
+
   // /api/auth/me in Clerk mode: also answers pending/disabled people (with their
   // status) so the client can tell them what is going on. For an active owner it
   // also reports whether owner-only actions are open to this sign-in.
@@ -753,6 +767,7 @@ export function createClerkAuth({
     describeSession,
     isMachineRequest,
     currentMcpScopes,
+    holderName,
     deny,
     ownerGoogleDomains: googleDomains,
     ownerMfaMaxAgeMinutes,
@@ -783,8 +798,10 @@ function publicCaller(caller) {
  *                                revokeToken, revokeAllTokens, revokeTokenByPlaintext, listUserTokens
  * @param {function} options.revokeMcpAccess  async (subjectIds) => installations revoked; the MCP
  *                                MCP grants for a person who is removed or disabled
+ * @param {object|null} options.accessAudit  server/auth/access-audit.js store: every token revoke
+ *                                writes an event (who, which token, whose, when; never a value)
  */
-export function createClerkAuthRouter({ auth, db: database, users, revokeMcpAccess = async () => 0, log = console }) {
+export function createClerkAuthRouter({ auth, db: database, users, revokeMcpAccess = async () => 0, accessAudit = null, log = console }) {
   const db = orgScope(database, auth?.orgUid ?? DEFAULT_ORG_UID);
   const router = Router();
   const { requireAuth, requireOwner } = auth;
@@ -992,7 +1009,7 @@ export function createClerkAuthRouter({ auth, db: database, users, revokeMcpAcce
         ? res.json({ ok: true, tokens: [] })
         : res.status(404).json({ error: "user not found" });
     }
-    return res.json({ ok: true, tokens: users.listUserTokens(holder.id) });
+    return res.json({ ok: true, tokens: tokensFor(users, holder.id, req) });
   });
 
   router.post("/api/users/:id/tokens", requireAuth, requireOwner, async (req, res) => {
@@ -1008,13 +1025,17 @@ export function createClerkAuthRouter({ auth, db: database, users, revokeMcpAcce
     return res.status(201).json({ ok: true, token: minted.token, metadata: minted.metadata });
   });
 
+  // Revoking takes effect at once (the next request with the token is
+  // refused) and writes an access audit event. Owners sign in with Clerk, so
+  // the token being revoked is never the one this request came in with; the
+  // guard in revokeHolderToken is there for password sign-in.
   router.delete("/api/users/:id/tokens/:tokenId", requireAuth, requireOwner, async (req, res) => {
     const holder = await tokenHolder(req.params.id);
-    if (!holder || !(await users.revokeToken(holder.id, req.params.tokenId))) {
-      return res.status(404).json({ error: "token not found" });
-    }
-    log.info?.(`[auth] owner ${req.caller.id} revoked token ${req.params.tokenId} for ${holder.id}`);
-    return res.json({ ok: true });
+    if (!holder) return res.status(404).json({ error: "token not found" });
+    const row = await findFieldUserById(db, holder.id);
+    const named = { id: holder.id, name: row?.name || holder.name, email: row?.email || holder.email };
+    const result = await revokeHolderToken({ users, audit: accessAudit, log, req, holder: named, tokenId: req.params.tokenId });
+    return res.status(result.status).json(result.body);
   });
 
   return router;

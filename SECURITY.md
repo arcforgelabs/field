@@ -45,6 +45,9 @@ credential value anywhere public.
   to the scopes the approving person holds now (`docs/REMOTE_MCP.md`). Field
   checks a person's token or MCP grant against their current access on every
   use, and reads tokens only from the `Authorization` header, never a URL.
+  Owners see and revoke tokens and MCP installations in Settings, Team,
+  Access; Field never shows or returns a token's value or hash, and every
+  revoke or disconnect is an audit event without one.
 - **Sent documents are records.** A quote or invoice a customer has been sent
   is never changed in place; a change produces a new version. Tampering with
   that history is a security issue.
@@ -59,7 +62,9 @@ credential value anywhere public.
   never in the repository, a log, an issue or a pull request. Name the
   variable, never its value.
 - Credentials Field stores at runtime stay inside the installation. Gmail OAuth
-  refresh tokens are in its data directory, written with mode `0600`.
+  refresh tokens are in its data directory, written with mode `0600`, and so
+  is `users.json` (password and token hashes), saved through one queue by an
+  atomic rename.
   Integration credentials and tokens (Xero) are in its PostgreSQL, per
   organisation, encrypted with AES-256-GCM under `FIELD_SECRETS_KEY`, a
   deployment secret of its own; a missing or wrong key fails closed

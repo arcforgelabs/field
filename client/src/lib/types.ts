@@ -1744,6 +1744,50 @@ export interface FieldUser {
   updatedAt: string | null;
 }
 
+/** A service account: a machine identity that holds command-line tokens (users.json). */
+export interface ServiceAccount {
+  id: string;
+  email: string;
+  name: string;
+  kind: "service";
+  /** "admin" acts as an owner, "user" as staff. */
+  role: "admin" | "user";
+  createdAt: string | null;
+}
+
+/** A command-line token's metadata (GET /api/users/:id/tokens). Never its value. */
+export interface AccessToken {
+  id: string;
+  label: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  /** The token this request signed in with (password sign-in only). */
+  current?: boolean;
+}
+
+/** A connected agent: an MCP installation (GET /api/mcp/installations). */
+export interface McpInstallation {
+  id: string;
+  /** The person who approved it. */
+  subject: string;
+  clientId: string;
+  clientName: string | null;
+  scopes: string[];
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+/** An access audit event (GET /api/access/events). */
+export interface AccessEvent {
+  id: string;
+  action: "token_revoked" | "mcp_installation_disconnected";
+  actor: { id: string | null; name: string | null };
+  target: { id: string; name: string | null };
+  holder: { id: string | null; name: string | null };
+  at: string;
+}
+
 /** A server-rendered theme: `<family>` (light) or `<family>-dark` (shared/themes.js). */
 export type ThemeId = string;
 

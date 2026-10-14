@@ -30,6 +30,7 @@ const ROLLBACK_0018 = fileURLToPath(new URL("../db/rollback/0018_xero_invoice_sy
 const ROLLBACK_0017 = fileURLToPath(new URL("../db/rollback/0017_xero_connection.down.sql", import.meta.url));
 const ROLLBACK_0016 = fileURLToPath(new URL("../db/rollback/0016_business_settings.down.sql", import.meta.url));
 const ROLLBACK_0022 = fileURLToPath(new URL("../db/rollback/0022_milestone_rules.down.sql", import.meta.url));
+const ROLLBACK_0023 = fileURLToPath(new URL("../db/rollback/0023_access_audit_events.down.sql", import.meta.url));
 
 function rejects(promise, pattern) {
   return assert.rejects(promise, (error) => {
@@ -257,6 +258,7 @@ describe("migration 0013 rolls back", () => {
       await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
       const { jobId, mapped } = await collectJobInvoices(await scenarios.paid(dataDir));
       await createInvoiceRowService({ db, orgUid: ORG_A }).writeJob({ jobId, mapped });
+      await client.exec(`begin; ${readFileSync(ROLLBACK_0023, "utf8")}; commit;`);
       await client.exec(`begin; ${readFileSync(ROLLBACK_0022, "utf8")}; commit;`);
       await client.exec(`begin; ${readFileSync(ROLLBACK_0021, "utf8")}; commit;`);
       await client.exec(`begin; ${readFileSync(ROLLBACK_0020, "utf8")}; commit;`);
@@ -299,7 +301,7 @@ describe("migration 0015 rolls back", () => {
       await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
       const { jobId, mapped } = await collectJobInvoices(await scenarios.revisedPaid(dataDir));
       await createInvoiceRowService({ db, orgUid: ORG_A }).writeJob({ jobId, mapped });
-      for (const later of [ROLLBACK_0022, ROLLBACK_0021, ROLLBACK_0020, ROLLBACK_0019, ROLLBACK_0018, ROLLBACK_0017, ROLLBACK_0016]) await client.exec(`begin; ${readFileSync(later, "utf8")}; commit;`);
+      for (const later of [ROLLBACK_0023, ROLLBACK_0022, ROLLBACK_0021, ROLLBACK_0020, ROLLBACK_0019, ROLLBACK_0018, ROLLBACK_0017, ROLLBACK_0016]) await client.exec(`begin; ${readFileSync(later, "utf8")}; commit;`);
       await client.exec(`begin; ${readFileSync(ROLLBACK_0015, "utf8")}; commit;`);
       await migrate(drizzle(reference, { schema }), { migrationsFolder: before });
       assert.deepEqual(await schemaShape(db), await schemaShape(drizzle(reference, { schema })));

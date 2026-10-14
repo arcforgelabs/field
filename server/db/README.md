@@ -424,6 +424,17 @@ milestones) and `milestone_rule_caps` (at most one cap per milestone kind,
 settings, not issued documents: an owner replaces them, so `field_app` may
 delete them. Run `rollback/0022_milestone_rules.down.sql` before 0021's.
 
+### Access audit events
+
+`0023_access_audit_events` (#133) adds `access_audit_events`: who revoked a
+command-line token or disconnected a connected agent (MCP installation) in
+Settings, Team, Access, and when. Each row names the token or installation
+by id and name, and the person or service account that held it; never a
+token value or hash (`server/auth/access-audit.js`). It is append-only: a
+trigger refuses `UPDATE`, `DELETE` and `TRUNCATE`, and `field_app` may only
+read and insert. Run `rollback/0023_access_audit_events.down.sql` before
+0022's.
+
 ### Adding tables
 
 A tenant table gets `orgUid: orgUid()` and `tenantIsolation("<table>")` in
