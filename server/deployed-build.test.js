@@ -13,12 +13,14 @@ const ROOT = resolve(import.meta.dirname, "..");
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 
 test("the build status is the commit, the deployed ref, its source and its CI result, or null", () => {
-  const unknown = { revision: null, ref: null, source: null, checks: null };
+  const unknown = { revision: null, ref: null, source: null, checks: null, release: null };
   assert.deepEqual(deployedBuildStatus({}), unknown);
   assert.deepEqual(
     deployedBuildStatus({ FIELD_REVISION: ` ${COMMIT}\n`, FIELD_DEPLOYED_REF: "main", FIELD_DEPLOYED_FROM: "github", FIELD_DEPLOYED_CHECKS: "passed" }),
-    { revision: COMMIT, ref: "main", source: "github", checks: "passed" },
+    { revision: COMMIT, ref: "main", source: "github", checks: "passed", release: null },
   );
+  assert.equal(deployedBuildStatus({ FIELD_DEPLOYED_REF: "stable", FIELD_DEPLOYED_RELEASE: "v2026.10.15" }).release, "v2026.10.15");
+  assert.equal(deployedBuildStatus({ FIELD_RELEASE: "v2026.10.15-beta.2" }).release, "v2026.10.15-beta.2");
   assert.deepEqual(deployedBuildStatus({ FIELD_REVISION: "  " }), unknown);
 });
 
@@ -33,7 +35,7 @@ function freePort() {
   });
 }
 
-test("GET /health reports the deployed commit, ref, source and CI result", async (t) => {
+test("GET /health reports the deployed commit, ref, source, CI result and release", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "field-deployed-build-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const configPath = join(dir, "config.json");
@@ -56,9 +58,10 @@ test("GET /health reports the deployed commit, ref, source and CI result", async
       ...env,
       FIELD_PORT: String(port),
       FIELD_REVISION: COMMIT,
-      FIELD_DEPLOYED_REF: "v1.2.0",
+      FIELD_DEPLOYED_REF: "stable",
       FIELD_DEPLOYED_FROM: "github",
       FIELD_DEPLOYED_CHECKS: "passed",
+      FIELD_DEPLOYED_RELEASE: "v2026.10.15",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -81,5 +84,5 @@ test("GET /health reports the deployed commit, ref, source and CI result", async
     if (Date.now() > deadline) throw new Error(`server did not become healthy:\n${output.join("")}`);
     await new Promise((wake) => setTimeout(wake, 200));
   }
-  assert.deepEqual(health.build, { revision: COMMIT, ref: "v1.2.0", source: "github", checks: "passed" });
+  assert.deepEqual(health.build, { revision: COMMIT, ref: "stable", source: "github", checks: "passed", release: "v2026.10.15" });
 });

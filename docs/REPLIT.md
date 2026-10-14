@@ -784,9 +784,10 @@ To deploy what is merged on `main`:
 2. When Replit says it is done, Field still needs about a minute to rebuild
    its data directory from PostgreSQL; until then requests get "Internal
    Server Error". `GET /health` answers once it is up. Its `build` shows what
-   is live: `revision` (the commit), `ref` (`main`, or the pinned ref),
-   `source` (`github`, or `workspace` for an emergency build) and `checks`
-   (`passed`, or `unchecked` when an emergency override built it). Check that
+   is live: `revision` (the commit), `ref` (`main`, the pinned ref, or the
+   channel `stable` or `beta`), `release` (the release tag, when the build is
+   one), `source` (`github`, or `workspace` for an emergency build) and
+   `checks` (`passed`, or `unchecked` when an emergency override built it). Check that
    `revision` is the commit you meant to deploy (the tip of `main` on
    GitHub) and that `checks` is `passed`.
 3. Bring the workspace to the same level, so the next publish does not stop
@@ -797,16 +798,52 @@ To deploy what is merged on `main`:
    instead of `main`, apply only that ref's migrations, from a checkout of
    it.
 
-`.replit`, `scripts/replit-deploy.sh` and `scripts/deploy-checks.js` are the
-only files a publish takes from the workspace. Before the first publish with them, pull the workspace
+`.replit`, `scripts/replit-deploy.sh`, `scripts/deploy-checks.js`,
+`scripts/deploy-release.js` and `server/release-channel.js` are the only files
+a publish takes from the workspace. Before the first publish with them, pull the workspace
 once so its `.replit` has the deploy commands. When a commit changes them, the build log says
 `note: ... differs from main`; pull the workspace before the next publish so
 the new ones take effect.
 
+### Following stable releases
+
+Production should run published releases (`docs/RELEASING.md`), not every
+merge to `main`. Set the deployment secret `FIELD_DEPLOY_REF` to `stable`
+(Publishing > Adjust settings > Secrets), then publish. Each publish then
+deploys the release the stable channel points at:
+
+1. The build asks GitHub, without a token, for its latest release
+   (`scripts/deploy-release.js`, `server/release-channel.js`). That is the
+   newest stable release, or an earlier one if Field Release Promote rolled
+   `latest` back. If GitHub cannot answer, it asks npm for
+   `@arcforgelabs/field`'s `latest` dist-tag instead.
+2. It downloads that release's `release-manifest.json` and checks it against
+   its `.sha256`.
+3. It fetches the release's tag and requires the commit to be the one the
+   manifest names.
+4. The CI check above applies as before.
+
+If any step fails, the build fails and nothing is deployed; it never falls
+back to `main`. The build log names the release:
+`[deploy] release: stable is v2026.10.15 at <commit> (from github;
+release-manifest.json sha256 <hash> verified)`, then
+`[deploy] built github stable (v2026.10.15) at <commit>`. `GET /health` shows
+it as `build.ref` `stable` and `build.release` `v2026.10.15`.
+
+`FIELD_DEPLOY_REF=beta` follows the beta channel the same way: the newest
+release of all, betas and stable releases alike, so it is never behind
+stable.
+
+A publish deploys whatever the channel points at when it runs; a new release
+does not publish itself. To upgrade, publish again after a release.
+
+The default is still `main`.
+
 ### Pinning a release and rolling back
 
 Set the deployment secret `FIELD_DEPLOY_REF` (Publishing > Adjust settings)
-to a branch, a tag or a full 40-character commit hash, then publish. To roll
+to a release tag such as `v2026.10.15`, a branch or a full 40-character
+commit hash, then publish. A release tag is reported as `build.release` too. To roll
 back, set it to the older commit or tag and publish; to follow `main` again,
 remove it and publish. Use a secret, not a deployment Configuration value: a
 Configuration value is written into `.replit`.

@@ -46,6 +46,7 @@ for _ in $(seq 1 60); do
   kill -0 "$server_pid" 2>/dev/null || { echo "field-server exited before it answered /health" >&2; exit 1; }
   sleep 1
 done
-curl -fsS "http://127.0.0.1:${port}/health" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const h=JSON.parse(s);if(!h.ok)process.exit(1);console.log("health ok")})'
+expected_release="v$(node -p 'require(process.argv[1]).version' "$installed/package.json")"
+curl -fsS "http://127.0.0.1:${port}/health" | EXPECTED="$expected_release" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const h=JSON.parse(s);if(!h.ok)process.exit(1);const r=h.build&&h.build.release;if(r!==process.env.EXPECTED){console.error("health build.release is "+r+", expected "+process.env.EXPECTED);process.exit(1)}console.log("health ok, release "+r)})'
 curl -fsS "http://127.0.0.1:${port}/" | grep -q '<div id="root"' && echo "client served"
 "$work/node_modules/.bin/field" --help >/dev/null && echo "field CLI runs"
