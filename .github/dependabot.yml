@@ -17,6 +17,22 @@ updates:
     groups:
       server-minor-and-patch:
         update-types: [minor, patch]
+    # Held updates. Recheck each by its date.
+    ignore:
+      # pdfkit 0.18 and later add /UserUnit to every page, so issued quotes and
+      # invoices are no longer byte-identical (proof 11/25). Take it only with
+      # a deliberate re-baseline of the quote and invoice proof. Recheck 2027-01-13.
+      - dependency-name: pdfkit
+        versions: [">=0.18.0"]
+      # The types follow the runtime: Node 24 on Replit, in Docker and in CI.
+      # @types/node 26 declares APIs that Node 24 lacks. Recheck when the
+      # runtime moves to Node 26, or on 2027-01-13.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # @sentry/node 11 collects headers, cookies, bodies and IP addresses by
+      # default and skips beforeSendTransaction (#129). Recheck 2027-01-13.
+      - dependency-name: "@sentry/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /client
@@ -30,6 +46,13 @@ updates:
     groups:
       client-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # As for the server: the types follow the Node 24 runtime.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # @sentry/react moves to 11 with the server (#129). Recheck 2027-01-13.
+      - dependency-name: "@sentry/react"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /e2e
