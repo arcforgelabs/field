@@ -80,7 +80,7 @@
     "@electric-sql/pglite": "0.5.8",
     "@sentry/node": "^10.75.0",
     "aws4fetch": "1.0.20",
-    "better-sqlite3": "12.8.0",
+    "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.2",
     "express": "^5.1.0",
     "googleapis": "^171.4.0",
