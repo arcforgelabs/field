@@ -383,9 +383,26 @@ export interface InvoicingSettings {
   /** Where the business is (#29); null reads it from the business address. */
   country?: string | null;
   region?: string | null;
+  /** Whether Field checks for a newer release of itself (migration 0024). */
+  updateCheck?: boolean;
   updatedAt: string | null;
   updatedBy: string | null;
   choices: Array<{ value: CreditNoteOnReissue; label: string; description: string }>;
+}
+
+/** GET /api/updates (owners): is a newer Field release out? */
+export interface UpdateStatus {
+  ok: boolean;
+  enabled: boolean;
+  channel: "stable" | "beta";
+  /** The release this installation runs, or null when it is not a release. */
+  current: string | null;
+  latest: string | null;
+  updateAvailable: boolean;
+  checkedAt: string | null;
+  error: string | null;
+  releaseUrl: string | null;
+  upgradeUrl: string;
 }
 
 /**

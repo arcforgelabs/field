@@ -1786,6 +1786,12 @@ export const businessSettings = pgTable(
      */
     country: text("country"),
     region: text("region"),
+    /**
+     * Whether Field checks GitHub Releases (or npm) for a newer release of
+     * itself and tells owners in Settings (server/update-check.js). The
+     * check is an anonymous GET of public data.
+     */
+    updateCheck: boolean("update_check").notNull().default(true),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     updatedBy: text("updated_by"),

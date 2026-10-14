@@ -73,6 +73,7 @@ import multer from "multer";
 import { assertNoRemovedIntegrationConfig } from "./config-guard.js";
 import { loadFieldConfig, resolveFieldPort } from "./runtime-config.js";
 import { deployedBuildStatus } from "./deployed-build.js";
+import { createUpdateChecker } from "./update-check.js";
 import { applyStoredGmailOAuthUsers, saveGmailOAuthUser } from "./gmail-oauth-store.js";
 import { hasGoogleServiceAccountKey } from "./google-service-account.js";
 import {
@@ -1380,10 +1381,24 @@ app.put("/api/settings/invoicing", requireAuth, requireAdmin, async (req, res) =
   if (!businessSettings) return res.status(503).json({ error: "business settings need the database, which this server does not have" });
   try {
     const actor = req.caller?.id || req.caller?.email || req.caller?.name || null;
-    const patch = Object.fromEntries(["creditNoteOnReissue", "country", "region"]
+    const patch = Object.fromEntries(["creditNoteOnReissue", "country", "region", "updateCheck"]
       .filter((key) => Object.hasOwn(req.body || {}, key))
       .map((key) => [key, req.body[key]]));
     res.json({ ok: true, ...(await businessSettings.update(patch, { actor })), choices: CREDIT_NOTE_ON_REISSUE_CHOICES });
+  } catch (err) {
+    res.status(err.statusCode || 500).json(errorBody(err));
+  }
+});
+
+// Is a newer Field release out (server/update-check.js)? Owners only: Settings
+// shows it, with the release notes and the operator's upgrade guide. Off when
+// an owner turns business_settings.update_check off; then nothing is asked.
+const updateChecker = createUpdateChecker();
+
+app.get("/api/updates", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const enabled = businessSettings ? (await businessSettings.get()).updateCheck : true;
+    res.json({ ok: true, ...(await updateChecker.status({ enabled })) });
   } catch (err) {
     res.status(err.statusCode || 500).json(errorBody(err));
   }

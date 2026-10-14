@@ -1125,11 +1125,15 @@ export const api = {
   invoicingSettings() {
     return request<import("./types.ts").InvoicingSettings>("/api/settings/invoicing");
   },
-  updateInvoicingSettings(settings: { creditNoteOnReissue?: import("./types.ts").CreditNoteOnReissue; country?: string | null; region?: string | null }) {
+  updateInvoicingSettings(settings: { creditNoteOnReissue?: import("./types.ts").CreditNoteOnReissue; country?: string | null; region?: string | null; updateCheck?: boolean }) {
     return request<import("./types.ts").InvoicingSettings>("/api/settings/invoicing", {
       method: "PUT",
       body: JSON.stringify(settings),
     });
+  },
+  /** Owner only: is a newer Field release out (server/update-check.js)? */
+  updates() {
+    return request<import("./types.ts").UpdateStatus>("/api/updates");
   },
   /** Owner only (#93): the Xero connection and settings. Never a token or a secret. */
   xeroIntegration() {
