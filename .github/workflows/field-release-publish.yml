@@ -113,11 +113,23 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.channel.outputs.tags }}
     steps:
-      - name: Check out the release commit
+      # The tag, not a commit passed between jobs (as in field-release-checks).
+      - name: Check out the release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.checks.outputs.commit }}
+          ref: refs/tags/${{ inputs.tag }}
           persist-credentials: false
+
+      - name: Require the commit the checks proved
+        env:
+          RESOLVED: ${{ needs.checks.outputs.commit }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$RESOLVED" ]; then
+            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that the checks proved is on main. Run the release again." >&2
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -241,11 +253,23 @@ jobs:
       contents: write
       actions: read
     steps:
-      - name: Check out the release commit
+      # The tag, not a commit passed between jobs (as in field-release-checks).
+      - name: Check out the release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.checks.outputs.commit }}
+          ref: refs/tags/${{ inputs.tag }}
           persist-credentials: false
+
+      - name: Require the commit the checks proved
+        env:
+          RESOLVED: ${{ needs.checks.outputs.commit }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$RESOLVED" ]; then
+            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that the checks proved is on main. Run the release again." >&2
+            exit 1
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
