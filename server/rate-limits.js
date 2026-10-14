@@ -79,11 +79,8 @@ export const ROUTE_CLASSES = Object.freeze([
   { budget: "token", by: "address", method: "GET", path: "/demo" },
   { budget: "token", by: "address", method: "GET", path: "/demo-account-create" },
 
-  { budget: "oauth", by: "address", method: "POST", path: "/oauth/register" },
-  { budget: "oauth", by: "address", method: "GET", path: "/oauth/authorize" },
-  { budget: "oauth", by: "address", method: "POST", path: "/oauth/approve" },
-  { budget: "oauth", by: "address", method: "POST", path: "/oauth/token" },
-  { budget: "oauth", by: "address", method: "POST", path: "/oauth/revoke" },
+  // The MCP OAuth endpoints (/oauth/*) take the oauth budget on their own
+  // router (server/mcp/remote-mcp.js), where code scanning can see it.
   { budget: "oauth", by: "address", method: "GET", path: "/api/auth/gmail/callback" },
   { budget: "oauth", by: "address", method: "GET", path: "/api/integrations/xero/callback" },
   { budget: "oauth", by: "caller", method: "GET", path: "/api/auth/gmail" },
@@ -300,19 +297,29 @@ function runInOrder(middlewares, req, res, next) {
  *              classes of the route, per caller. Runs once per request, even
  *              when a route authenticates twice.
  */
+/**
+ * The options of one class's limiter: its budget, keyed by the verified
+ * caller when there is one and by address before sign-in. A router that
+ * mounts its own class limiter (server/mcp/remote-mcp.js) passes them to
+ * rateLimit() itself.
+ */
+export function classLimitOptions(budgets, name, { log = console } = {}) {
+  const budget = budgets[name];
+  return {
+    ...commonOptions(name, budget, log),
+    skipSuccessfulRequests: Boolean(budget.failedOnly),
+    keyGenerator: (req) => {
+      const caller = callerIdOf(req);
+      return caller ? `caller:${caller}` : addressKey(req);
+    },
+  };
+}
+
 export function createRateLimits(budgets, { log = console } = {}) {
   const classLimiters = {};
   for (const name of RATE_LIMIT_CLASSES) {
     if (name === "address" || name === "caller") continue;
-    const budget = budgets[name];
-    classLimiters[name] = rateLimit({
-      ...commonOptions(name, budget, log),
-      skipSuccessfulRequests: Boolean(budget.failedOnly),
-      keyGenerator: (req) => {
-        const caller = callerIdOf(req);
-        return caller ? `caller:${caller}` : addressKey(req);
-      },
-    });
+    classLimiters[name] = rateLimit(classLimitOptions(budgets, name, { log }));
   }
   const callerLimiter = rateLimit({
     ...commonOptions("caller", budgets.caller, log),

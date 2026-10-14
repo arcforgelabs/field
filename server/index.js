@@ -6137,6 +6137,7 @@ if (remoteMcpRuntime.enabled) {
     service: mcpService,
     // Each MCP installation has its own caller budget (server/rate-limits.js).
     limitCaller: rateLimits.byCaller,
+    rateLimitBudgets: RATE_LIMIT_BUDGETS,
   });
   revokeMcpSubjects = (subjects) => remoteMcp.store.revokeSubjects(subjects);
   app.use(remoteMcp.router);

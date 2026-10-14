@@ -110,6 +110,7 @@ async function fixture(t, overrides = {}) {
       },
     },
     ...(overrides.limitCaller ? { limitCaller: overrides.limitCaller } : {}),
+    ...(overrides.rateLimitBudgets ? { rateLimitBudgets: overrides.rateLimitBudgets } : {}),
   });
   app.use(built.router);
   const server = createServer(app);
@@ -599,4 +600,21 @@ test("the bearer token is read with a prefix check, in linear time", () => {
   const started = performance.now();
   assert.equal(read(adversarial), null);
   assert.ok(performance.now() - started < 200, "linear");
+});
+
+test("the OAuth endpoints answer 429 with Retry-After once the oauth budget is spent, on the MCP router itself", async (t) => {
+  const f = await fixture(t, { rateLimitBudgets: resolveRateLimitBudgets({ oauth: { limit: 2, windowSeconds: 900 } }) });
+  const register = () => fetch(`${f.base}/oauth/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ client_name: "Budget test", redirect_uris: ["http://localhost:8989/oauth/callback"] }),
+  });
+  assert.equal((await register()).status, 201);
+  assert.equal((await fetch(`${f.base}/oauth/authorize?client_id=unknown`)).status, 400);
+  const limited = await register();
+  assert.equal(limited.status, 429);
+  assert.ok(Number(limited.headers.get("retry-after")) > 0);
+  assert.equal((await limited.json()).budget, "oauth");
+  // Discovery and the MCP endpoint are not in the oauth budget.
+  assert.equal((await fetch(`${f.base}/.well-known/oauth-authorization-server`)).status, 200);
 });
