@@ -18,6 +18,10 @@
 // code and a state or province code. Milestone rules for a region apply to
 // jobs whose site address does not say where they are. Null reads it from
 // the business address.
+//
+// updateCheck (migration 0024): whether Field checks for a newer release of
+// itself and tells owners in Settings (server/update-check.js). On unless an
+// owner turns it off.
 import { schema } from "../db-runtime/index.js";
 import { orgScope } from "../db-runtime/tenancy.js";
 import { normalizeCountryCode, normalizeRegionCode } from "../../shared/regions.js";
@@ -65,6 +69,7 @@ function settingsFromRow(row) {
     creditNoteOnReissue: row?.creditNoteOnReissue || DEFAULT_CREDIT_NOTE_ON_REISSUE,
     country: row?.country || null,
     region: row?.region || null,
+    updateCheck: row?.updateCheck ?? true,
     updatedAt: row?.updatedAt ? new Date(row.updatedAt).toISOString() : null,
     updatedBy: row?.updatedBy || null,
   };
@@ -95,7 +100,11 @@ export function createBusinessSettingsService({ db, orgUid = undefined, now = ()
         set.country = country;
         set.region = region;
       }
-      if (!Object.keys(set).length) throw new BusinessSettingsError("nothing to change: send creditNoteOnReissue, or country and region");
+      if (Object.hasOwn(patch, "updateCheck")) {
+        if (typeof patch.updateCheck !== "boolean") throw new BusinessSettingsError("updateCheck must be true or false");
+        set.updateCheck = patch.updateCheck;
+      }
+      if (!Object.keys(set).length) throw new BusinessSettingsError("nothing to change: send creditNoteOnReissue, country and region, or updateCheck");
       return scope.transaction(async (tx) => {
         const at = now();
         const [row] = await tx.insert(businessSettings)

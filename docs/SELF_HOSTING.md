@@ -19,6 +19,22 @@ Every installation needs the same things, whatever runs it:
 Keep every secret in your platform's secret store. Never put one in a file in
 a repository, including your own deploy repository.
 
+## Update notice
+
+An installation that runs a release (`GET /health` shows it as
+`build.release`) tells its owners in Settings when a newer release is out on
+its channel, and puts a dot on the Settings link. The notice links the
+release notes and this guide's upgrade steps. The server checks at most every
+six hours (`server/update-check.js`), with an anonymous GET of public release
+data from GitHub, or npm when GitHub cannot answer. It sends nothing about
+the installation. An owner can turn it off in Settings, Account and security,
+"Check for new Field releases".
+
+The channel is `stable` unless the installation runs a beta, or
+`FIELD_DEPLOYED_REF` (Replit) says `beta`; `FIELD_UPDATE_CHANNEL=stable` or
+`beta` overrides it. A build that is not a release, such as a checkout of
+`main`, asks nothing.
+
 ## Pin a release
 
 Each release's `release-manifest.json` (on its GitHub Release) records its

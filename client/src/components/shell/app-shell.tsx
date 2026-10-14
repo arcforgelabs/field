@@ -6,6 +6,7 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { BookOpen, FileText, LayoutGrid, Moon, Search, Settings, Sun } from "lucide-react";
 import { FieldLogo } from "@/components/field";
 import { useAuth } from "@/contexts/auth-context";
+import { useUpdateStatus } from "@/features/settings/use-update-status";
 import { useTheme } from "@/contexts/theme-context";
 import { jobStatus, jobTitle } from "@/lib/job-status";
 import { useJobs } from "@/lib/use-jobs";
@@ -28,6 +29,8 @@ function isTyping(target: EventTarget | null) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const { status: updateStatus } = useUpdateStatus();
+  const updateAvailable = Boolean(updateStatus?.updateAvailable);
   const { jobs } = useJobs();
   const navigate = useNavigate();
   const location = useLocation();
@@ -129,8 +132,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               {resolvedMode === "dark" ? <Sun aria-hidden /> : <Moon aria-hidden />}
             </button>
-            <NavLink to="/settings" className="fx-btn fx-btn--ghost fx-btn--sm fx-btn--icon" aria-label="Settings" title="Settings">
+            <NavLink
+              to="/settings"
+              className="fx-btn fx-btn--ghost fx-btn--sm fx-btn--icon fx-update-anchor"
+              aria-label={updateAvailable ? "Settings (a Field update is available)" : "Settings"}
+              title={updateAvailable ? "Settings: a Field update is available" : "Settings"}
+            >
               <Settings aria-hidden />
+              {updateAvailable && <span className="fx-update-dot" aria-hidden />}
             </NavLink>
           </div>
         </aside>

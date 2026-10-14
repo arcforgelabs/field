@@ -169,6 +169,13 @@
       "when": 1791961956744,
       "tag": "0023_access_audit_events",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791971764020,
+      "tag": "0024_update_check",
+      "breakpoints": true
     }
   ]
 }

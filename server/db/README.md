@@ -435,6 +435,13 @@ trigger refuses `UPDATE`, `DELETE` and `TRUNCATE`, and `field_app` may only
 read and insert. Run `rollback/0023_access_audit_events.down.sql` before
 0022's.
 
+### Update check
+
+`0024_update_check` adds `business_settings.update_check` (boolean, default
+true): whether Field checks for a newer release of itself and tells owners in
+Settings (`server/update-check.js`). Run
+`rollback/0024_update_check.down.sql` before 0023's.
+
 ### Adding tables
 
 A tenant table gets `orgUid: orgUid()` and `tenantIsolation("<table>")` in

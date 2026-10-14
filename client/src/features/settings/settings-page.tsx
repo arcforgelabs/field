@@ -15,6 +15,8 @@ import { AccessSection } from "./access-section";
 import { InvoicingPanel } from "./invoicing-panel";
 import { MilestoneRulesPanel } from "./milestone-rules-panel";
 import { EmailSignaturePanel } from "./email-signature-panel";
+import { UpdateNotice, UpdatesPanel } from "./updates-panel";
+import { useUpdateStatus } from "./use-update-status";
 import { IntegrationsPage } from "./integrations-page";
 import "./settings-page.css";
 
@@ -24,6 +26,7 @@ type Section = "account" | "team" | "documents" | "email" | "integrations" | "ap
 
 export function SettingsPage() {
   const { logout, user, mode, isOwner } = useAuth();
+  const { status: updateStatus } = useUpdateStatus();
   const [params, setParams] = useSearchParams();
   const sections: Array<{ id: Section; label: string; show: boolean }> = [
     { id: "account", label: "Account and security", show: true },
@@ -49,6 +52,7 @@ export function SettingsPage() {
           ))}
         </nav>
         <div className="fx-set__body">
+          <UpdateNotice status={updateStatus} />
           {active === "account" && (
             <Panel title="Account and security" description={mode === "clerk" ? "Your sign-in, email addresses, connected accounts and devices." : "The account you're signed in with."}>
               {mode === "clerk" ? (
@@ -76,6 +80,7 @@ export function SettingsPage() {
               </div>
             </Panel>
           )}
+          {active === "account" && isOwner && <UpdatesPanel />}
           {active === "team" && user && (
             <>
               <Panel title="Team" description="Approve people who signed in and are waiting for access, change roles, or turn access off.">

@@ -1,0 +1,1 @@
+ALTER TABLE "business_settings" ADD COLUMN "update_check" boolean DEFAULT true NOT NULL;

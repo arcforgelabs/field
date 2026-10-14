@@ -117,6 +117,9 @@
 .fx-status { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--t-mute); background: color-mix(in srgb, currentColor 12%, transparent); }
 .fx-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
 .fx-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+/* A Field update is available (Settings link, owners only). */
+.fx-update-anchor { position: relative; }
+.fx-update-dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--fx-info); box-shadow: 0 0 0 2px var(--t-bg, transparent); }
 .fx-status--draft, .fx-dot--draft { color: var(--t-mute); }
 .fx-status--quoted, .fx-dot--quoted { color: var(--fx-info); }
 .fx-status--invoicing, .fx-dot--invoicing { color: var(--t-warn); }
