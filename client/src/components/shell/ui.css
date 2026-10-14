@@ -64,6 +64,12 @@
 .fx-ph__title { font-family: var(--t-display); font-size: 20px; font-weight: 650; letter-spacing: -.02em; margin: 0; line-height: 1.2; }
 .fx-ph__stack { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .fx-ph__line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+/* Header actions move as one group: they stay on the title's row while the title
+   column keeps 14rem, and wrap together to the right of a row of their own below
+   that. The title column's fixed basis means a status label ("Saving…", "Saved")
+   appearing never decides whether they wrap. */
+.fx-ph__actions { display: flex; align-items: center; gap: 10px; flex: none; margin-left: auto; }
+.fx-ph__stack:has(+ .fx-ph__actions) { flex: 1 1 14rem; }
 .fx-spacer { flex: 1; }
 .fx-crumb { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--t-mute); }
 .fx-crumb a { color: var(--t-dim); text-decoration: none; }

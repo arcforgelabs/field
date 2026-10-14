@@ -1,10 +1,13 @@
 // A small popover menu anchored to its trigger: Escape and outside clicks close it.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { menuPosition } from "./menu-position";
 
 export type MenuItem =
   | { kind?: "item"; label: string; icon?: ReactNode; onSelect: () => void; disabled?: boolean; tone?: "danger" }
   | { kind: "separator" };
+
+const MENU_WIDTH = 240;
 
 export function Menu({ trigger, items, label, align = "end" }: {
   trigger: (props: { onClick: () => void; "aria-expanded": boolean; "aria-haspopup": "menu"; ref: (el: HTMLButtonElement | null) => void }) => ReactNode;
@@ -19,14 +22,9 @@ export function Menu({ trigger, items, label, align = "end" }: {
   const menu = useRef<HTMLDivElement | null>(null);
   const toggle = useCallback(() => {
     if (open || !anchor) { setOpen(false); return; }
-    // Place it below the trigger, or above when there's no room.
-    const rect = anchor.getBoundingClientRect();
-    const width = 240;
     const height = items.reduce((sum, item) => sum + (item.kind === "separator" ? 9 : 32), 8);
-    const left = align === "end" ? rect.right - width : rect.left;
-    const below = rect.bottom + 4;
-    const top = below + height > window.innerHeight - 8 ? Math.max(8, rect.top - height - 4) : below;
-    setPos({ top, left: Math.max(8, Math.min(left, window.innerWidth - width - 8)) });
+    const pane = anchor.closest(".fx-main")?.getBoundingClientRect();
+    setPos(menuPosition(anchor.getBoundingClientRect(), { width: MENU_WIDTH, height }, { innerWidth: window.innerWidth, innerHeight: window.innerHeight, paneLeft: pane?.left ?? 0 }, align));
     setOpen(true);
   }, [open, anchor, items, align]);
 
@@ -65,7 +63,7 @@ export function Menu({ trigger, items, label, align = "end" }: {
     <>
       {trigger({ onClick: toggle, "aria-expanded": open, "aria-haspopup": "menu", ref: setAnchor })}
       {open && createPortal(
-        <div ref={menu} className="fx-menu" role="menu" aria-label={label} style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: 240 }}>
+        <div ref={menu} className="fx-menu" role="menu" aria-label={label} style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: MENU_WIDTH }}>
           {items.map((item, index) => item.kind === "separator"
             ? <hr key={`sep-${index}`} />
             : (

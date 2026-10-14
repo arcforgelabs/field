@@ -215,12 +215,13 @@ export function JobPage() {
             {saveLabel && <span className="fx-save-state" data-state={saveState.state} title={saveState.error || undefined}>{saveLabel}</span>}
           </div>
         </div>
-        <div className="fx-spacer" />
-        <button type="button" className="fx-btn fx-btn--ghost" onClick={previewPdf}><Eye aria-hidden />Preview</button>
-        {primary}
-        <Menu label="More job actions" items={moreItems} trigger={(props) => (
-          <button type="button" className="fx-btn fx-btn--ghost fx-btn--icon" aria-label="More job actions" {...props}><MoreHorizontal /></button>
-        )} />
+        <div className="fx-ph__actions">
+          <button type="button" className="fx-btn fx-btn--ghost" onClick={previewPdf}><Eye aria-hidden />Preview</button>
+          {primary}
+          <Menu label="More job actions" items={moreItems} trigger={(props) => (
+            <button type="button" className="fx-btn fx-btn--ghost fx-btn--icon" aria-label="More job actions" {...props}><MoreHorizontal /></button>
+          )} />
+        </div>
       </header>
       {(status === "draft" || draftAheadOfSent) && priced && sendBlocked && saveState.state !== "pending" && saveState.state !== "saving" && (
         <div className="fx-notice fx-notice--warn"><span>Can't send yet: {sendBlocked}</span></div>
