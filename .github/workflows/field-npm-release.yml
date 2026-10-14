@@ -8,10 +8,20 @@ run-name: field npm ${{ inputs.tag }}
 #
 #   resolve   the tarball from that run must match the GitHub Release's
 #             manifest (SHA-256 and npm integrity)
-#   approve   environment npm-release: Samuel approves the publish
+#   approve   environment npm-release: Samuel approves the publish, unless
+#             this run was dispatched by an approved Field Release Publish
+#             run (below). A manual dispatch always waits for it.
 #   publish   environment npm-publish: npm trusted publishing with
 #             provenance, no stored token
 #   evidence  verifies what npm serves and attaches postpublish-evidence.json
+#
+# A stable release has one approval: environment release, at the start of
+# Field Release Publish. This run accepts it instead of asking again only
+# when GitHub Actions itself dispatched it (github.actor is
+# github-actions[bot], which no person can be; a re-run keeps it), the run it names is a Field
+# Release Publish run from main for this tag, and, for a stable release,
+# GitHub's approvals record of that run shows environment release approved.
+# A beta needs no approval when it was dispatched that way.
 #
 # npm's trusted publisher for @arcforgelabs/field names this file
 # (field-npm-release.yml) and environment npm-publish. Renaming either breaks
@@ -57,6 +67,7 @@ jobs:
       tarball: ${{ steps.release.outputs.tarball }}
       integrity: ${{ steps.release.outputs.integrity }}
       digest: ${{ steps.release.outputs.digest }}
+      needs_approval: ${{ steps.approval.outputs.needs_approval }}
     steps:
       - name: Require the workflow from main
         if: github.ref != 'refs/heads/main'
@@ -79,6 +90,10 @@ jobs:
           run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
           if [[ "$(jq -r .path <<< "$run")" != ".github/workflows/field-release-publish.yml" || "$(jq -r .head_branch <<< "$run")" != "main" ]]; then
             echo "::error::Run ${RUN_ID} is not a Field Release Publish run from main." >&2
+            exit 1
+          fi
+          if [[ "$(jq -r .display_title <<< "$run")" != "field ${TAG}" ]]; then
+            echo "::error::Run ${RUN_ID} published $(jq -r .display_title <<< "$run"), not field ${TAG}." >&2
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/package" "$RUNNER_TEMP/release"
@@ -105,6 +120,40 @@ jobs:
             echo "digest=$(jq -r .image.digest "$manifest")"
           } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
+      # Does this run need its own approval? Only GitHub Actions can be the
+      # actor github-actions[bot] (a re-run keeps the original actor); a
+      # person dispatching this workflow by hand always gets the npm-release
+      # gate.
+      - name: Decide whether npm-release must approve
+        id: approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.release_publish_run_id }}
+          CHANNEL: ${{ steps.release.outputs.channel }}
+          DISPATCHED_BY: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          needs_approval=true
+          if [[ "$DISPATCHED_BY" == "github-actions[bot]" ]]; then
+            if [[ "$CHANNEL" == "beta" ]]; then
+              needs_approval=false
+              echo "A beta dispatched by Field Release Publish run ${RUN_ID}: no approval needed."
+            else
+              approved="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/approvals" \
+                --jq '[.[] | select(.state == "approved" and any(.environments[]; .name == "release")) | .user.login] | first // ""')"
+              if [[ -n "$approved" ]]; then
+                needs_approval=false
+                echo "Field Release Publish run ${RUN_ID} was approved for environment release by ${approved}: no second approval."
+              else
+                echo "::warning::Run ${RUN_ID} has no approval of environment release; npm-release must approve."
+              fi
+            fi
+          else
+            echo "Dispatched by ${DISPATCHED_BY}, not by Field Release Publish: npm-release must approve."
+          fi
+          echo "needs_approval=${needs_approval}" >> "$GITHUB_OUTPUT"
+          echo "npm-release approval needed: ${needs_approval}" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Keep the tarball for the publish job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -116,6 +165,7 @@ jobs:
   approve:
     name: Approve ${{ inputs.tag }} for npm ${{ needs.resolve.outputs.dist_tag }}
     needs: resolve
+    if: needs.resolve.outputs.needs_approval == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     environment: npm-release
@@ -131,6 +181,13 @@ jobs:
   publish:
     name: publish
     needs: [resolve, approve]
+    # After its own approval, or, when resolve proved the dispatching run's
+    # approval (or a beta), with that approval job skipped.
+    if: >-
+      ${{ !cancelled() && needs.resolve.result == 'success' && (
+        needs.approve.result == 'success' ||
+        (needs.resolve.outputs.needs_approval == 'false' && needs.approve.result == 'skipped')
+      ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
@@ -221,6 +278,7 @@ jobs:
   evidence:
     name: evidence
     needs: [resolve, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
