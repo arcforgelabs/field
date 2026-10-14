@@ -75,14 +75,14 @@
     "documents:verify-r2": "node scripts/documents-verify-r2.js"
   },
   "dependencies": {
-    "@clerk/backend": "3.20.1",
-    "@clerk/express": "2.1.72",
+    "@clerk/backend": "3.23.2",
+    "@clerk/express": "2.1.78",
     "@electric-sql/pglite": "0.5.8",
     "@sentry/node": "^10.75.0",
     "aws4fetch": "1.0.20",
     "better-sqlite3": "12.8.0",
-    "drizzle-orm": "0.45.2",
-    "express": "^5.1.0",
+    "drizzle-orm": "0.45.4",
+    "express": "^5.3.0",
     "googleapis": "^171.4.0",
     "json5": "^2.2.3",
     "mjml": "5.4.1",
@@ -92,7 +92,7 @@
   },
   "devDependencies": {
     "@types/node": "24.10.1",
-    "drizzle-kit": "0.31.10",
+    "drizzle-kit": "0.31.11",
     "typescript": "5.9.3"
   },
   "overrides": {
