@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useShell } from "@/components/shell/shell-context";
 
-export function signatureToText(html: string) {
+function signatureToText(html: string) {
   return html
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>\s*<p[^>]*>/gi, "\n\n")
@@ -15,7 +15,7 @@ export function signatureToText(html: string) {
     .trim();
 }
 
-export function textToSignature(text: string) {
+function textToSignature(text: string) {
   const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return text.trim()
     ? text.trim().split(/\n{2,}/).map((block) => `<p>${block.split("\n").map(escape).join("<br/>")}</p>`).join("")

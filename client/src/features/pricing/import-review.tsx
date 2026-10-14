@@ -68,7 +68,9 @@ export function ImportReview({ record, onChanged }: { record: PriceImport; onCha
     return out;
   }, [rows, decisions]);
   const effective = record.effective_from ? new Date(record.effective_from) : null;
-  const future = effective ? effective.getTime() > Date.now() + 60_000 : false;
+  // "Now" is when the review opened: rendering again does not move it.
+  const [openedAt] = useState(() => Date.now());
+  const future = effective ? effective.getTime() > openedAt + 60_000 : false;
 
   function setAll(match: ImportMatch, decision: ImportDecision) {
     setDecisions((current) => {

@@ -1,6 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { updateFavicon } from "@/lib/favicon";
-import type { ThemeId } from "@/lib/types";
 import {
   applyAppearance,
   readAccent,
@@ -12,28 +11,10 @@ import {
   writeColorMode,
   writeThemeFamily,
   type ColorMode,
-  type ResolvedMode,
 } from "@/lib/color-mode";
 import { loadThemeFonts } from "@/lib/theme-fonts";
 import { normalizeFamily, themeId } from "../../../shared/themes.js";
-
-// Appearance is a design system (`family`, shared/themes.js), a light or dark
-// mode, and an optional accent colour. `colorMode` is the person's choice
-// (system, light or dark); `mode` is what is showing. `theme` names the
-// matching server-rendered theme (`<family>` or `<family>-dark`) for pages
-// Field renders on the server, such as the retaining-wall view.
-interface ThemeState {
-  theme: ThemeId;
-  family: string;
-  mode: ResolvedMode;
-  colorMode: ColorMode;
-  accent: string | null;
-  setColorMode: (mode: ColorMode) => void;
-  setFamily: (family: string) => void;
-  setAccent: (accent: string | null) => void;
-}
-
-const ThemeContext = createContext<ThemeState | null>(null);
+import { ThemeContext } from "./theme-context";
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [colorMode, setColorModeState] = useState<ColorMode>(readColorMode);
@@ -77,10 +58,4 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       {children}
     </ThemeContext.Provider>
   );
-}
-
-export function useTheme() {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error("useTheme must be inside ThemeProvider");
-  return ctx;
 }

@@ -6,7 +6,7 @@
 // afterwards is marked, and applying it checks again first instead (the
 // editor and the server both compare each row's reviewKey), so an edit made
 // after the check is never replaced by a tick from before it.
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, RefreshCw } from "lucide-react";
 import type { QuoteCatalogChanges } from "@/lib/types";
 import { catalogChangeSelectedByDefault, catalogChangesHeadline, describeCatalogChange } from "../quote-catalog-rows";
@@ -40,11 +40,14 @@ export function QuoteCatalogChangesBanner({
   onApply: (nodeIds: string[]) => void | Promise<void>;
   onRecheck: () => void | Promise<void>;
 }) {
-  const [open, setOpen] = useState(false);
-  // A notice is about the list: show it.
-  useEffect(() => {
+  // A notice is about the list: show it, when it first comes and each time
+  // it changes.
+  const [open, setOpen] = useState(() => Boolean(notice));
+  const [lastNotice, setLastNotice] = useState(notice);
+  if (notice !== lastNotice) {
+    setLastNotice(notice);
     if (notice) setOpen(true);
-  }, [notice]);
+  }
   // Only plain catalogue updates start ticked. Rows edited on this quote,
   // rows whose price source is unknown and kits resting on legacy rows start
   // unselected, so the default apply never replaces a negotiated rate or

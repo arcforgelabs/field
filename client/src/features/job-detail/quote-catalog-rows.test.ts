@@ -174,7 +174,8 @@ describe("catalogue change default selection", () => {
     ]) {
       expect(catalogChangeSelectedByDefault({ ...plain, ...flagged })).toBe(false);
     }
-    const { selectedByDefault: _omitted, ...withoutFlag } = plain;
+    const withoutFlag: Partial<QuoteCatalogChangeLine> = { ...plain };
+    delete withoutFlag.selectedByDefault;
     expect(catalogChangeSelectedByDefault(withoutFlag as QuoteCatalogChangeLine)).toBe(false);
   });
 

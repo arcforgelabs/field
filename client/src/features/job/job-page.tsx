@@ -52,10 +52,17 @@ export function JobPage() {
     }
   }, [id, version]);
 
-  useEffect(() => {
+  // Another job: start again from its latest version. Reset while rendering,
+  // so nothing of the previous job is drawn under the new address.
+  const [shownId, setShownId] = useState(id);
+  if (shownId !== id) {
+    setShownId(id);
     setDetail(null);
     setTab(null);
     setVersion("latest");
+  }
+
+  useEffect(() => {
     void api.recording(id, "latest").then((next) => { setDetail(next); patchJobMeta(next.meta); }).catch((err) => setError(err instanceof Error ? err.message : "This job could not be loaded."));
   }, [id]);
 

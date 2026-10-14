@@ -21,7 +21,7 @@ the Replit publish check look for those names.
 | Check | What it proves | Run it locally |
 | --- | --- | --- |
 | `unit-server` | Data-layer types, generated migrations match the schema, and the server, scripts and shared tests. Tests that need a real PostgreSQL skip here. | `npm run db:typecheck && npm run db:check:ci && npm test` |
-| `unit-client` | Client typecheck and tests | `npm --prefix client run typecheck && npm --prefix client test` |
+| `unit-client` | Client typecheck, lint (`client/eslint.config.js`, React Hooks and React Refresh rules included) and tests | `npm --prefix client run typecheck && npm --prefix client run lint && npm --prefix client test` |
 | `postgres` | Every test file that opens a real PostgreSQL, against a `postgres:16-alpine` service | `FIELD_DB_TEST_DOCKER=1 npm test` (runs every test, with a Docker PostgreSQL) |
 | `quote-invoice-proof` | The quote and invoice proof (`README.md`, "Development") gives the same 25 PDFs, emails and API responses on two PGlite runs and on a run with PostgreSQL storage | See below |
 | `client-build` | The client bundle builds | `npm --prefix client run build` |

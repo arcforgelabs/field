@@ -8,80 +8,14 @@
 // - The installation's allowed-recipient policy is checked on the chip.
 // - Duplicates merge. Pasting a list makes one chip per address. Backspace
 //   in an empty box removes the last chip.
-import { useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type Ref } from "react";
+import { useId, useImperativeHandle, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type Ref } from "react";
 import { AlertCircle, X } from "lucide-react";
-
-export type Recipient = { email: string; name?: string | null };
-export type ContactSuggestion = { email: string; name: string; source: "job" | "sent" | "google" };
-export type RecipientPolicy = { mode: "live" | "allowlist" | "disabled"; allowedRecipients?: string[] };
-
-const EMAIL_PATTERN = /^[^\s@<>(),;:"[\]]+@[^\s@<>(),;:"[\]]+\.[a-z]{2,}$/i;
-
-export function normalizeEmail(value: string) {
-  return value.trim().replace(/^mailto:/i, "").replace(/^<|>$/g, "").trim().toLowerCase();
-}
-
-/** Why an address cannot be sent to, or null when it can. */
-export function recipientProblem(email: string, policy?: RecipientPolicy | null) {
-  if (!EMAIL_PATTERN.test(email)) return `${email} is not a complete address. Fix it or remove it before sending.`;
-  if (policy?.mode === "disabled") return "This installation does not send email.";
-  if (policy?.mode === "allowlist" && !(policy.allowedRecipients || []).includes(email)) {
-    return `This installation only sends to ${(policy.allowedRecipients || []).join(", ") || "its test addresses"}. Remove ${email} to send.`;
-  }
-  return null;
-}
-
-/** "Dana Whitfield <dana@…>, accounts@…" → recipients, names kept. */
-export function parseRecipients(text: string): Recipient[] {
-  return text
-    .split(/[,;\n]+/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const named = part.match(/^"?([^"<]*?)"?\s*<([^>]+)>$/);
-      if (named) return { email: normalizeEmail(named[2]), name: named[1].trim() || null };
-      return { email: normalizeEmail(part), name: null };
-    })
-    .filter((entry) => entry.email);
-}
-
-export function mergeRecipients(...groups: Recipient[][]) {
-  const seen = new Map<string, Recipient>();
-  for (const group of groups) {
-    for (const entry of group) {
-      const existing = seen.get(entry.email);
-      if (!existing) seen.set(entry.email, entry);
-      else if (!existing.name && entry.name) seen.set(entry.email, entry);
-    }
-  }
-  return [...seen.values()];
-}
+import { recipientProblem, parseRecipients, mergeRecipients, suggestRecipients, type Recipient, type ContactSuggestion, type RecipientPolicy } from "./recipients";
 
 function initials(recipient: Recipient) {
   const source = (recipient.name || recipient.email.split("@")[0] || "?").trim();
   const words = source.split(/[\s._-]+/).filter(Boolean);
   return ((words[0]?.[0] || "?") + (words[1]?.[0] || "")).toUpperCase();
-}
-
-/** Suggestions: the job's people first, then Google Contacts, not already chosen. */
-export function suggestRecipients(contacts: ContactSuggestion[], query: string, chosen: string[]) {
-  const needle = query.trim().toLowerCase();
-  const taken = new Set(chosen);
-  const rank = { job: 0, sent: 1, google: 2 } as const;
-  const seen = new Set<string>();
-  return contacts
-    .filter((contact) => {
-      const email = contact.email.toLowerCase();
-      if (taken.has(email) || seen.has(email)) return false;
-      seen.add(email);
-      return !needle || contact.name.toLowerCase().includes(needle) || email.includes(needle);
-    })
-    .sort((a, b) => {
-      const aStarts = Number(Boolean(needle) && (a.name.toLowerCase().startsWith(needle) || a.email.toLowerCase().startsWith(needle)));
-      const bStarts = Number(Boolean(needle) && (b.name.toLowerCase().startsWith(needle) || b.email.toLowerCase().startsWith(needle)));
-      return rank[a.source] - rank[b.source] || bStarts - aStarts || a.name.localeCompare(b.name, "en-AU", { sensitivity: "base" });
-    })
-    .slice(0, 8);
 }
 
 export function RecipientField({
@@ -108,6 +42,8 @@ export function RecipientField({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const localInput = useRef<HTMLInputElement | null>(null);
+  // The caller's ref (the composer focuses Cc and Bcc) gets the same input.
+  useImperativeHandle(inputRef, () => localInput.current!);
   const suggestions = useMemo(
     () => (open ? suggestRecipients(contacts, draft, recipients.map((entry) => entry.email)) : []),
     [open, contacts, draft, recipients],
@@ -173,12 +109,6 @@ export function RecipientField({
     }
   }
 
-  const setInput = (element: HTMLInputElement | null) => {
-    localInput.current = element;
-    if (typeof inputRef === "function") inputRef(element);
-    else if (inputRef && typeof inputRef === "object") (inputRef as { current: HTMLInputElement | null }).current = element;
-  };
-
   return (
     <div className="fx-rcpt">
       <div className="fx-rcpt__row" onMouseDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); localInput.current?.focus(); } }}>
@@ -215,7 +145,7 @@ export function RecipientField({
           <li className="fx-rcpt__input">
             <input
               id={`${id}-input`}
-              ref={setInput}
+              ref={localInput}
               type="text"
               inputMode="email"
               autoComplete="off"
