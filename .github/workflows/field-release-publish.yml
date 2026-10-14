@@ -6,16 +6,17 @@ run-name: field ${{ inputs.tag }}
 # existing tag, which re-runs the checks and skips what is already published.
 #
 #   checks          field-release-checks.yml: tag, every CI lane, npm tarball
-#   image           environment release for a stable release (Samuel
-#                   approves), release-beta for a beta (no reviewer, main
-#                   only): GHCR by digest,
+#   approve         the one approval of a stable release: environment
+#                   release (Samuel), alongside the checks. A beta uses
+#                   release-beta, which has no reviewer.
+#   image           after both: GHCR by digest,
 #                   build attestation and SBOM, smoke of the pushed digest,
 #                   then the channel's tags
 #   github-release  GitHub Release "field <version>" with notes, manifest and
 #                   .sha256 files
 #   npm             starts Field NPM Release (field-npm-release.yml) for the
-#                   tarball this run proved; for a stable release it
-#                   publishes after its own approval
+#                   tarball this run proved; it publishes on this run's
+#                   approval, without a second one
 #
 # Channels follow openclaw/openclaw: a beta (vYYYY.M.D-beta.N) goes to npm and
 # GHCR `beta` and a GitHub pre-release; a stable release (vYYYY.M.D) goes to
@@ -46,12 +47,50 @@ jobs:
     name: guard
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    outputs:
+      channel: ${{ steps.tag.outputs.channel }}
     steps:
       - name: Require the workflow from main
         if: github.ref != 'refs/heads/main'
         run: |
           echo "::error::Run Field Release Publish from main, not ${GITHUB_REF}." >&2
           exit 1
+
+      # Only a release tag: vYYYY.M.D (stable) or vYYYY.M.D-beta.N (beta).
+      # Field Release Checks also requires it to be on main and to match
+      # package.json, and runs every CI lane on its commit.
+      - name: Read the channel from the tag
+        id: tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]?-beta\.[1-9][0-9]*$ ]]; then
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]?$ ]]; then
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::${TAG} is not a release tag (vYYYY.M.D or vYYYY.M.D-beta.N)." >&2
+            exit 1
+          fi
+
+  # The one human gate of a stable release: Samuel approves environment
+  # release here, while the checks run. Field NPM Release accepts this
+  # approval and does not ask again. A beta runs in release-beta, which has
+  # no reviewer, so nothing waits.
+  approve:
+    name: Approve ${{ inputs.tag }}
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment: ${{ needs.guard.outputs.channel == 'stable' && 'release' || 'release-beta' }}
+    permissions: {}
+    steps:
+      - name: Record the approval
+        env:
+          TAG: ${{ inputs.tag }}
+          CHANNEL: ${{ needs.guard.outputs.channel }}
+        run: echo "Approved field ${TAG} (${CHANNEL})"
 
   checks:
     name: checks
@@ -62,13 +101,9 @@ jobs:
 
   image:
     name: image
-    needs: checks
+    needs: [checks, approve]
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    # Only a stable release waits for a person: a beta runs straight through.
-    environment:
-      name: ${{ needs.checks.outputs.channel == 'stable' && 'release' || 'release-beta' }}
-      url: https://github.com/arcforgelabs/field/pkgs/container/field
     permissions:
       contents: read
       packages: write
@@ -199,7 +234,7 @@ jobs:
 
   github-release:
     name: github-release
-    needs: [checks, image]
+    needs: [checks, approve, image]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -297,7 +332,7 @@ jobs:
   # tarball this run proved.
   npm:
     name: npm
-    needs: [checks, github-release]
+    needs: [checks, approve, github-release]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
