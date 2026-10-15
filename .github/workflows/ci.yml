@@ -19,12 +19,21 @@ on:
         description: Commit to test
         required: true
         type: string
+      tag:
+        description: Release tag this run checks, so releases of one commit (a beta and a stable) test in parallel
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
+# One group per commit, and per release tag for a release check: a beta and a
+# stable cut from one commit run side by side instead of queueing (a group
+# also keeps only one pending run, so a third would cancel the waiting one).
+# Pull request and main runs keep their group names.
 concurrency:
-  group: field-ci-${{ inputs.ref || github.ref }}
+  group: field-ci-${{ inputs.tag && format('{0}-', inputs.tag) || '' }}${{ inputs.ref || github.ref }}
   cancel-in-progress: false
 
 env:
