@@ -8,10 +8,10 @@
  * families are ported from OpenClaw's Control UI by
  * scripts/port-openclaw-themes.mjs into ./theme-palettes.js (DESIGN.md).
  */
-import { HEX, inkOn, readableOn } from "./color-contrast.js";
+import { boundaryOn, HEX, inkOn, readableOn } from "./color-contrast.js";
 import { OPENCLAW_FAMILIES } from "./theme-palettes.js";
 
-export { contrast, inkOn, readableOn } from "./color-contrast.js";
+export { boundaryOn, contrast, inkOn, readableOn } from "./color-contrast.js";
 
 // Field Crew: warm paper, near-black ink, the logo's yellow,
 // square corners, 2px ink strokes and spaced uppercase labels. Yellow is too
@@ -80,6 +80,15 @@ const FIELD = {
 // OpenClaw's own, Site is Field's original paper and ink), then the other families.
 const { beacon, tide, claw, knot, dash, ...otherOpenclaw } = OPENCLAW_FAMILIES;
 const FAMILIES = { beacon, tide, claw, knot, dash, field: FIELD, ...otherOpenclaw };
+
+// --t-control: the edge of an input or an outlined button on --t-paper, the
+// text colour faded toward the paper only as far as it still reads at 3:1.
+for (const family of Object.values(FAMILIES)) {
+  for (const mode of ["light", "dark"]) {
+    const tokens = family[mode];
+    tokens["--t-control"] = boundaryOn(tokens["--t-paper"], tokens["--t-text"]);
+  }
+}
 
 /** The design system a browser starts on until someone picks another in Settings. */
 export const DEFAULT_FAMILY = "beacon";

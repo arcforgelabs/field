@@ -37,7 +37,7 @@ Appearance is three choices, per browser, in Settings (`client/src/features/sett
 
 `shared/themes.js` is the one source of the `--t-*` tokens and the picker order. The client injects every family as `[data-theme][data-mode]` rules at startup, `index.html` puts the stored family and mode on `<html>` before first paint, and `client/src/lib/color-mode.ts` applies the choice and any accent override. Server-rendered pages (wall renders, the MCP authorization page) keep Site as their default (`DEFAULT_THEME`), so customer-facing renders don't change with the app's look. Screens use the tokens rather than literal colours, radii or strokes, so every family reaches every screen.
 
-Clerk's widgets (sign-in, and the account screens embedded in Settings) are themed from the same tokens at render time (`client/src/lib/clerk-appearance.ts`), so they change with the design system and mode.
+Clerk's widgets (sign-in, and the account screens embedded in Settings) are themed from the same tokens at render time (`client/src/lib/clerk-appearance.ts`), so they change with the design system and mode. Their inputs and the Google button take a 1px edge in `--t-control`, so a control's outline reads at 3:1 on the paper (WCAG 1.4.11).
 
 ## Logo
 
@@ -83,6 +83,8 @@ These are Site's values (theme id `field`), shown as the reference; every family
 Dark mode, `[data-theme="field"][data-mode="dark"]`, is Site's dark palette: background `#11110d`, surfaces `#1e1e18` / `#2b2b24`, text `#f5f3eb`, dim `#b8b7ae`, borders off-white, danger `#e36a4d`.
 
 Yellow is too light to read on paper (1.5:1), so in light mode it is never text: `--t-accent` is ink, and the yellow is the logo, focus rings, highlights (`--t-accent-bg`) and the label on filled buttons. On near-black yellow reads at 11.6:1, so in dark mode `--t-accent` is yellow. Filled controls use `--t-primary` with `--t-on-primary` (ink with a yellow label in light, yellow with an ink label in dark), and anything filled with `--t-accent` is labelled with `--t-bg`, which works in both modes. The MCP authorization page carries its own copy of the Site palette and follows the device's scheme.
+
+`--t-control` is the edge of an input or outlined button: the text colour faded toward `--t-paper` only as far as it still reads at 3:1 there. `shared/themes.js` derives it for every family and mode, and `shared/themes.test.js` checks it.
 
 The same rule holds in every family and with any accent: `--t-accent` is text and reads at 4.5:1 or better on `--t-bg` (the converter and the accent override shift a colour just enough to get there; `shared/themes.test.js` checks every family and mode), while `--t-brand` is the colour as chosen, for fills, highlights and the focus ring.
 

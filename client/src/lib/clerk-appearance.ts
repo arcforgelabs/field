@@ -12,6 +12,19 @@ export function fieldClerkAppearance({ embedded = false }: { embedded?: boolean 
   const text = token("--t-text", "#333c45");
   const line = `color-mix(in srgb, ${text} 12%, transparent)`;
   const shadow = "0 1px 2px rgba(16, 24, 40, .06)";
+  // Clerk draws an input's and an outlined button's edge as a 1px box-shadow
+  // ring, so a box-shadow here replaces it. Draw it in --t-control (3:1 on
+  // the paper) and keep the hover and focus states with it.
+  const edge = (color: string) => `0 0 0 1px ${color}, ${shadow}`;
+  const control = token("--t-control", "#949494");
+  const focus = `0 0 0 3px color-mix(in srgb, ${token("--t-primary", "#1f6f8f")} 28%, transparent)`;
+  const controlEdge = {
+    boxShadow: edge(control),
+    "&:hover": { boxShadow: edge(text) },
+    "&:focus-visible, &:focus-within, &[data-focus-within=\"true\"]": { boxShadow: `${edge(text)}, ${focus}` },
+  };
+  const danger = token("--t-danger", "#b8442a");
+  const inputEdge = { ...controlEdge, '&[data-feedback="error"]': { boxShadow: edge(danger) } };
   return {
     variables: {
       colorPrimary: token("--t-primary", "#1f6f8f"),
@@ -22,7 +35,7 @@ export function fieldClerkAppearance({ embedded = false }: { embedded?: boolean 
       colorMuted: token("--t-bg", "#f7f9fb"),
       colorInput: token("--t-paper", "#ffffff"),
       colorInputForeground: text,
-      colorDanger: token("--t-danger", "#b8442a"),
+      colorDanger: danger,
       colorSuccess: token("--t-success", "#3f6b2a"),
       colorNeutral: text,
       colorBorder: line,
@@ -41,9 +54,9 @@ export function fieldClerkAppearance({ embedded = false }: { embedded?: boolean 
       cardBox: embedded ? { width: "100%", maxWidth: "none", boxShadow: "none", border: `1px solid ${line}`, borderRadius: token("--t-radius-lg", "10px") } : undefined,
       navbar: embedded ? { background: token("--t-bg", "#f7f9fb"), borderRight: `1px solid ${line}` } : undefined,
       scrollBox: embedded ? { borderRadius: 0 } : undefined,
-      formFieldInput: { boxShadow: shadow },
+      formFieldInput: inputEdge,
       formButtonPrimary: { boxShadow: shadow, textTransform: "none" as const, fontWeight: 600 },
-      socialButtonsBlockButton: { boxShadow: shadow },
+      socialButtonsBlockButton: controlEdge,
       footer: embedded ? { display: "none" } : undefined,
     },
   };

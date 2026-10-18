@@ -27,6 +27,7 @@ test("every family defines the same tokens in both modes, with readable text", (
       assert.deepEqual(Object.keys(t).sort(), keys, `${id} ${mode} token set`);
       assert.ok(contrast(t["--t-text"], t["--t-bg"]) >= 4.5, `${id} ${mode} text`);
       assert.ok(contrast(t["--t-accent"], t["--t-bg"]) >= 4.5, `${id} ${mode} accent`);
+      assert.ok(contrast(t["--t-control"], t["--t-paper"]) >= 3, `${id} ${mode} control edge`);
     }
   }
 });
