@@ -405,7 +405,19 @@ Adjust settings), never in the workspace's `[env]` or Secrets. The workspace
 has its own database ("Database"), so durable storage there would only store
 the workspace's data directory in the workspace's database. Two Field
 processes on one database compete for the lock: the second to start waits
-60 s, then exits.
+60 s (10 minutes in the published app; `FIELD_STORAGE_LOCK_TIMEOUT_MS` sets
+it), then exits.
+
+A republish is such a hand-over. Replit starts the new copy while the old copy
+still serves and holds the lock, and stops the old copy only after the new
+copy answers its health check (`GET /`). So while the new copy waits for the
+lock, it answers on the app's port in standby (`server/standby-server.js`):
+`GET /` is 200, `GET /health` is 503 with `storage.state: "waiting-for-lock"`,
+and every other request is 503 with `Retry-After: 5`. When Replit stops the old
+copy, it stores its last changes and releases the lock; the new copy takes the
+lock, rebuilds the data directory and serves. Users can see "Field is
+starting" for a few seconds. The log line `[storage] another Field process
+holds the storage lock; waiting for it to stop` marks the standby.
 
 Moving existing data in (once, before the first publish with durable storage,
 with no Field process using the database). The script writes to the database
