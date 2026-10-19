@@ -60,6 +60,9 @@ if (dsn) {
     release: String(runtime.release || import.meta.env.VITE_SENTRY_RELEASE || "").trim() || undefined,
     initialScope: { tags: routingTags },
     sendDefaultPii: false,
+    // A cancelled fetch (the user left the page, a newer request replaced it)
+    // rejects with AbortError. Nothing failed, so it is not reported.
+    ignoreErrors: [/^AbortError\b/],
     dataCollection: {
       userInfo: false,
       cookies: false,
