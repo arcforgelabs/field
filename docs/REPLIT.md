@@ -651,8 +651,11 @@ What is reported:
 - Counters: `field.document.issued`, `field.document.delivery_failed` and
   `field.pdf.generation_failed`, by document type.
 - Problem reports: a small button in the corner opens "Report a problem".
-  It asks for no name or email; a screenshot is optional, and the operator can
-  crop or black out parts of it before sending.
+  It asks for no name; a screenshot is optional, and the operator can crop or
+  black out parts of it before sending. The email field is optional and starts
+  empty. A person who types an address asks to hear back: the report gets the
+  tag `notify=yes`, else `notify=no`, and the Sentry-to-ClickUp relay tags the
+  support task `notify`. The address stays in Sentry.
 
 What never leaves (`shared/sentry-scrub.js`, used by both halves, on errors,
 transactions, breadcrumbs and logs): request bodies, cookies, headers other
