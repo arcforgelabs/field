@@ -36,3 +36,19 @@ export function readableOn(color, bg, target = 4.5) {
   }
   return toward[0] ? "#ffffff" : "#000000";
 }
+
+/**
+ * A boundary colour for controls on `bg` (an input's or an outlined button's
+ * edge): `bg` mixed toward `ink` just enough to stand out at `target`
+ * (WCAG 1.4.11 asks 3:1 for the parts that show where a control is).
+ */
+export function boundaryOn(bg, ink, target = 3) {
+  if (!HEX.test(bg) || !HEX.test(ink)) return ink;
+  const from = rgb(bg);
+  const toward = rgb(ink);
+  for (let pct = 0; pct <= 100; pct += 2) {
+    const mixed = `#${from.map((c, i) => Math.round(c + (toward[i] - c) * pct / 100).toString(16).padStart(2, "0")).join("")}`;
+    if (contrast(mixed, bg) >= target) return mixed;
+  }
+  return ink;
+}
