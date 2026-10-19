@@ -6,6 +6,7 @@
 //   recordEvent(input)            one document_events row
 //   readIssuedDocument(uid)       the row and its bytes, hash-checked
 //   listJobDocuments(jobId)       a job's documents, each with its events
+//   listEmailedInvoicesByJob()    every emailed invoice, by job, in one transaction
 //
 // A document is issued once, under its number. Recording the same number with
 // the same bytes again is a no-op that returns the existing row, so a retried
@@ -338,6 +339,30 @@ export function createIssuedDocumentService({
           documents: rows.map((row) => ({ ...documentFromRow(row), byteLength: sizes.get(row.pdfSha256) ?? null, events: byDocument.get(row.uid) })),
           unattachedEvents: unattached,
         };
+      });
+    },
+
+    /**
+     * Every invoice with an `emailed` event, as a Map of job id to its
+     * documents (each with its emailed events, oldest first). One transaction,
+     * so a report over every job does not open one per job.
+     */
+    async listEmailedInvoicesByJob() {
+      return scope.transaction(async (tx) => {
+        const events = await tx.select().from(documentEvents)
+          .where(and(eq(documentEvents.documentType, "invoice"), eq(documentEvents.event, "emailed")))
+          .orderBy(asc(documentEvents.at), asc(documentEvents.createdAt), asc(documentEvents.uid));
+        const uids = [...new Set(events.map((event) => event.issuedDocumentUid).filter(Boolean))];
+        const rows = uids.length ? await tx.select().from(issuedDocuments).where(inArray(issuedDocuments.uid, uids)) : [];
+        const byDocument = new Map(rows.map((row) => [row.uid, []]));
+        for (const event of events) byDocument.get(event.issuedDocumentUid)?.push(eventFromRow(event));
+        const byJob = new Map();
+        for (const row of rows.sort((a, b) => new Date(a.issuedAt) - new Date(b.issuedAt) || compareDocumentNumbers(a.number, b.number))) {
+          const list = byJob.get(row.jobId) || [];
+          list.push({ ...documentFromRow(row), events: byDocument.get(row.uid) });
+          byJob.set(row.jobId, list);
+        }
+        return byJob;
       });
     },
 
