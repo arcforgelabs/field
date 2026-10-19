@@ -29,6 +29,8 @@ import {
 import {
   BLOB_BATCH_ROWS,
   DurableStore,
+  PUBLISHED_LOCK_TIMEOUT_MS,
+  resolveLockTimeoutMs,
   StorageLockLostError,
   StorageUnavailableError,
   describeStorageError,
@@ -498,6 +500,13 @@ test("blob inserts are batched by row count too, so many tiny files stay under t
   assert.equal(Number(row.n), count);
 });
 
+test("lock timeout: 60 s, 10 minutes on a published Replit app, else the setting", () => {
+  assert.equal(resolveLockTimeoutMs({}), 60_000);
+  assert.equal(resolveLockTimeoutMs({ REPL_ID: "x" }), 60_000);
+  assert.equal(resolveLockTimeoutMs({ REPLIT_DEPLOYMENT: "1" }), PUBLISHED_LOCK_TIMEOUT_MS);
+  assert.equal(resolveLockTimeoutMs({ REPLIT_DEPLOYMENT: "1", FIELD_STORAGE_LOCK_TIMEOUT_MS: "5000" }), 5000);
+});
+
 // --- Real PostgreSQL ---------------------------------------------------------
 
 const pg = await startTestPostgres();
@@ -529,9 +538,11 @@ test("PostgreSQL: the advisory lock admits one writer at a time", needsPostgres,
   const first = pgStore(pg.url, tempDir());
   setDataRoot(first.dataDir);
   await first.start();
-  const second = pgStore(pg.url, tempDir(), { lockTimeoutMs: 300 });
+  let waits = 0;
+  const second = pgStore(pg.url, tempDir(), { lockTimeoutMs: 600, onLockWait: () => { waits += 1; } });
   try {
     await assert.rejects(second.acquireLock(), /another Field process holds the storage lock/);
+    assert.equal(waits, 1, "onLockWait is called once, when the lock is busy");
     await first.close();
     setDataRoot(second.dataDir);
     await second.start();

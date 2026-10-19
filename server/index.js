@@ -53,6 +53,7 @@ import { resolveDocumentReplicaConfig } from "./documents/r2-config.js";
 import { createR2ObjectStore } from "./documents/r2-client.js";
 import { createDisabledReplicator, createDocumentReplicator } from "./documents/replicator.js";
 import { startDurableStorage } from "./storage/durable-store.js";
+import { openStandbyServer } from "./standby-server.js";
 import { heldDataMigrations, runDataMigrations } from "./data-migrations/index.js";
 import { createDataMigrationDryRunHandler, DRY_RUN_PATH as DATA_MIGRATIONS_DRY_RUN_PATH } from "./data-migrations/dry-run-route.js";
 import { AMOUNT_DISAGREEMENTS_PATH, AMOUNT_SETTLE_PATH, createInvoiceAmountDisagreementsHandler, createInvoiceAmountSettleHandler } from "./invoices/amount-routes.js";
@@ -388,10 +389,18 @@ try {
 // Durable storage: with FIELD_STORAGE=postgres the data directory is a
 // working copy of PostgreSQL. Take the single-writer lock and rebuild it before
 // anything below reads it; refuse to start if that fails. Unset: no-op.
+// While another process holds the lock (the old copy during a republish), a
+// standby server answers on PORT so the old copy can be stopped
+// (server/standby-server.js).
 let durableStorage = null;
+let standby = null;
 try {
   durableStorage = await startDurableStorage({
     dataDir: DATA_DIR,
+    onLockWait: () => {
+      console.log("[storage] another Field process holds the storage lock; waiting for it to stop");
+      standby = openStandbyServer({ port: PORT });
+    },
     onLockLost: (error) => {
       console.error(`[storage] ${error.message}; exiting so a restart rebuilds from PostgreSQL`);
       process.exit(1);
@@ -6199,11 +6208,18 @@ if (durableStorage) {
     process.exit(1);
   }
 }
-const server = app.listen(PORT, "0.0.0.0", () => {
+const logListening = () => {
   console.log(`[field] listening on http://0.0.0.0:${PORT}`);
   console.log(`[field] data: ${DATA_DIR}`);
   console.log(`[field] client: ${existsSync(clientDist) ? "React (client/dist)" : "not built (run npm run build)"}`);
-});
+};
+let server;
+if (standby) {
+  server = standby.handOver(app);
+  logListening();
+} else {
+  server = app.listen(PORT, "0.0.0.0", logListening);
+}
 
 // Graceful shutdown: stop accepting new connections, drain in-flight
 // requests, then exit. Caddy's lb_try_duration holds incoming requests

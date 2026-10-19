@@ -63,6 +63,7 @@ import {
 import { getDataRoot, setWriteRecorder } from "./write-recorder.js";
 import { installDurableStore } from "./durable-hooks.js";
 import { queryRows, resolveDbConfig, schema } from "../db-runtime/index.js";
+import { replitPlacement } from "../runtime-config.js";
 
 const { fieldBlobs, fieldFiles, fieldSqliteImages } = schema;
 
@@ -72,6 +73,11 @@ export const STORAGE_LOCK_KEY = 7_139_000_002n;
 export const DEFAULT_KEEP_IMAGES = 20;
 export const DEFAULT_RECONCILE_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_LOCK_TIMEOUT_MS = 60_000;
+// A published Replit app: a republish starts the new copy while the old one
+// still serves and holds the lock, and stops the old copy only after the new
+// one answers its health check (server/standby-server.js). The new copy waits
+// for that hand-over.
+export const PUBLISHED_LOCK_TIMEOUT_MS = 10 * 60_000;
 const QUERY_CHUNK = 500;
 const BLOB_BATCH_BYTES = 16 * 1024 * 1024;
 // One INSERT binds 2 parameters per blob; PostgreSQL's protocol allows at most
@@ -553,6 +559,7 @@ export class DurableStore {
     lockTimeoutMs = DEFAULT_LOCK_TIMEOUT_MS,
     lockKey = STORAGE_LOCK_KEY,
     onLockLost = null,
+    onLockWait = null,
     target = "postgres",
     keepReadBytes = KEEP_READ_BYTES,
   }) {
@@ -565,6 +572,7 @@ export class DurableStore {
     this.lockTimeoutMs = lockTimeoutMs;
     this.lockKey = lockKey;
     this.onLockLost = onLockLost;
+    this.onLockWait = onLockWait;
     this.target = target;
     this.keepReadBytes = keepReadBytes;
     this.index = new Map();
@@ -601,10 +609,16 @@ export class DurableStore {
 
   async acquireLock() {
     const deadline = performance.now() + this.lockTimeoutMs;
+    let waiting = false;
     for (;;) {
       if (await tryStorageLock(this.db, this.lockKey)) {
         this.lockHeld = true;
         return;
+      }
+      if (!waiting) {
+        // Once, when another process holds the lock.
+        waiting = true;
+        this.onLockWait?.();
       }
       if (performance.now() >= deadline) {
         throw new StorageUnavailableError(
@@ -1066,6 +1080,12 @@ function envMs(env, name, fallback) {
   return Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
+// FIELD_STORAGE_LOCK_TIMEOUT_MS, else 10 minutes on a published Replit app
+// (the hand-over at a republish), else 60 s.
+export function resolveLockTimeoutMs(env = process.env) {
+  return envMs(env, "FIELD_STORAGE_LOCK_TIMEOUT_MS", replitPlacement(env) === "published" ? PUBLISHED_LOCK_TIMEOUT_MS : DEFAULT_LOCK_TIMEOUT_MS);
+}
+
 // A dedicated one-connection session for the lock and every storage write:
 // never idle-closed or recycled, since closing it drops the lock. Uses the
 // direct endpoint when the URL is a pooler (session advisory locks need one).
@@ -1088,7 +1108,7 @@ export function openStorageSession(config, { onClose } = {}) {
 // is refused: the data directory would not survive a publish), takes the
 // lock, rebuilds `dataDir`, starts recording and installs the store for
 // ./durable-hooks.js. Throws (boot must exit) on any failure.
-export async function startDurableStorage({ dataDir, env = process.env, logger = console, onLockLost = null } = {}) {
+export async function startDurableStorage({ dataDir, env = process.env, logger = console, onLockLost = null, onLockWait = null } = {}) {
   if (!resolveStorageMode(env).enabled) return null;
   const config = resolveDbConfig({ env, dataDir });
   if (config.driver !== "postgres") {
@@ -1104,8 +1124,9 @@ export async function startDurableStorage({ dataDir, env = process.env, logger =
     close: session.close,
     logger,
     onLockLost,
+    onLockWait,
     target: config.target,
-    lockTimeoutMs: envMs(env, "FIELD_STORAGE_LOCK_TIMEOUT_MS", DEFAULT_LOCK_TIMEOUT_MS),
+    lockTimeoutMs: resolveLockTimeoutMs(env),
     reconcileIntervalMs: envMs(env, "FIELD_STORAGE_RECONCILE_MS", DEFAULT_RECONCILE_INTERVAL_MS),
   });
   try {
