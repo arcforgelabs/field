@@ -8,6 +8,7 @@ import {
   resolveSentryDsn,
   resolveSentryEnvironment,
   resolveSentryRelease,
+  resolveSentryTags,
   resolveSampleRate,
   ignoreIncomingRequest,
   SENTRY_DEFAULTS,
@@ -34,6 +35,14 @@ test("the release is SENTRY_RELEASE, then the build's FIELD_REVISION", () => {
   assert.equal(resolveSentryRelease({}), "");
   assert.equal(resolveSentryRelease({ FIELD_REVISION: "abc123" }), "abc123");
   assert.equal(resolveSentryRelease({ FIELD_REVISION: "abc123", SENTRY_RELEASE: "field@1" }), "field@1");
+});
+
+test("every event is tagged product=field, and client=SENTRY_CLIENT when it is a short name", () => {
+  assert.deepEqual(resolveSentryTags({}), { product: "field" });
+  assert.deepEqual(resolveSentryTags({ SENTRY_CLIENT: " Embark " }), { product: "field", client: "embark" });
+  assert.deepEqual(resolveSentryTags({ SENTRY_CLIENT: "acme_co-2" }), { product: "field", client: "acme_co-2" });
+  assert.deepEqual(resolveSentryTags({ SENTRY_CLIENT: "two words" }), { product: "field" });
+  assert.deepEqual(resolveSentryTags({ SENTRY_CLIENT: "x".repeat(33) }), { product: "field" });
 });
 
 test("sample rates come from settings, within 0 to 1, else the free-plan defaults", () => {
@@ -89,6 +98,7 @@ test("5xx answers and background failures reach Sentry once, scrubbed", async (t
     SENTRY_REPLAYS_SESSION_SAMPLE_RATE: "1",
     // Every request is traced, so the transaction checks below always run.
     SENTRY_TRACES_SAMPLE_RATE: "1",
+    SENTRY_CLIENT: "acme",
   });
   const events = [];
   Sentry.getClient().on("beforeSendEvent", (event) => events.push(event));
@@ -102,6 +112,7 @@ test("5xx answers and background failures reach Sentry once, scrubbed", async (t
   assert.match(script, /"replaysSessionSampleRate":1/);
   assert.match(script, /"replaysOnErrorSampleRate":1/);
   assert.match(script, /"feedback":true/);
+  assert.match(script, /"tags":\{"product":"field","client":"acme"\}/);
 
   const app = express();
   app.use(sentryErrorResponseReporter());
@@ -145,4 +156,8 @@ test("5xx answers and background failures reach Sentry once, scrubbed", async (t
   const background = errors.find((event) => event.exception.values[0].value === "Gmail quota for [email]");
   assert.equal(background.tags["field.area"], "scheduled-email");
   assert.equal(background.tags["field.stage"], "send");
+  for (const event of [...errors, ...transactions]) {
+    assert.equal(event.tags.product, "field");
+    assert.equal(event.tags.client, "acme");
+  }
 });

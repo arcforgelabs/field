@@ -12,6 +12,7 @@ interface FieldSentryConfig {
   dsn?: string;
   environment?: string;
   release?: string;
+  tags?: Record<string, string>;
   tracesSampleRate?: number;
   replaysSessionSampleRate?: number;
   replaysOnErrorSampleRate?: number;
@@ -40,6 +41,14 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// product and client (SENTRY_CLIENT), from the server, as on its events. The
+// scrub redacts any key that names a client, so they are put back after it.
+const routingTags: Record<string, string> = runtime.tags || { product: "field" };
+function withRoutingTags<T extends { tags?: Record<string, unknown> }>(event: T | null): T | null {
+  if (event) event.tags = { ...event.tags, ...routingTags };
+  return event;
+}
+
 // Trace headers go only to Field's own server, never to a third party.
 const ownOrigin = typeof window !== "undefined" ? window.location.origin : "http://localhost";
 
@@ -49,6 +58,7 @@ if (dsn) {
     dsn,
     environment: String(runtime.environment || import.meta.env.MODE),
     release: String(runtime.release || import.meta.env.VITE_SENTRY_RELEASE || "").trim() || undefined,
+    initialScope: { tags: routingTags },
     sendDefaultPii: false,
     dataCollection: {
       userInfo: false,
@@ -58,9 +68,9 @@ if (dsn) {
     // Same error at most once an hour, at most 20 an hour in all, per open tab.
     beforeSend: (event) => {
       const allowed = throttle(event);
-      return allowed && scrubEvent(allowed);
+      return allowed && withRoutingTags(scrubEvent(allowed));
     },
-    beforeSendTransaction: (event) => scrubEvent(event),
+    beforeSendTransaction: (event) => withRoutingTags(scrubEvent(event)),
     beforeBreadcrumb: (breadcrumb) => scrubBreadcrumb(breadcrumb),
     integrations: [
       // Page loads and navigations, with Web Vitals: how fast the page shows,

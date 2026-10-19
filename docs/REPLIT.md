@@ -677,6 +677,7 @@ deployment Configuration is written into `.replit` and committed.
 | Name | Value |
 | --- | --- |
 | `SENTRY_DSN` | The Sentry project's DSN (Project settings > Client Keys). A DSN only lets a client send events; Field hands it to the browser in the page |
+| `SENTRY_CLIENT` | Optional. A short name for the business this installation serves (letters, digits, `-` and `_`, at most 32 characters, for example `embark`). Every server and browser event is tagged `client:<name>` and `product:field`, so one Sentry organisation can route events from many installations. Unset: `product:field` only |
 | `SENTRY_ENVIRONMENT` | Unset on Replit: the published app reports `production` and the workspace `replit-workspace`. Set it only to override both |
 | `SENTRY_RELEASE` | Unset. Each build records its git commit (below), which becomes the release |
 | `SENTRY_TRACES_SAMPLE_RATE` | Unset: `0.2` (about one page load or request in five). From 0 to 1 |
@@ -686,6 +687,18 @@ deployment Configuration is written into `.replit` and committed.
 | `SENTRY_METRICS` | Unset: on. `0` stops the counters |
 | `SENTRY_FEEDBACK` | Unset: on. `0` hides the "Report a problem" button |
 | `SENTRY_VERIFY` | `1` for one publish only: boot sends `Field Sentry verification (server)`. Remove it at the next publish, or every restart sends another |
+
+Which DSN wins, when you move to another Sentry project:
+
+- Server: `SENTRY_DSN`, then `SENTRY_DSN_CMD` (a command that prints a DSN).
+  `SENTRY_DSN_CMD` runs only when `SENTRY_DSN` is unset, so delete it, or
+  point it at the new project too: if `SENTRY_DSN` is ever removed, the
+  command's DSN is used.
+- Browser: `VITE_SENTRY_DSN`, then the server's DSN from the page.
+  `VITE_SENTRY_DSN` is read at build time and is written into the bundle, so
+  if it is set, browser events go to its project whatever `SENTRY_DSN` says.
+  Leave it unset on Replit. If it was set, delete it and publish again (the
+  build reads it).
 
 The defaults are sized for the free plan from the start, including during a
 Sentry trial, so nothing needs changing when a trial ends. Raise the rates
@@ -722,6 +735,9 @@ stack traces against the real source with no upload token.
 3. Browser: open the app, open the browser's developer console and run
    `setTimeout(() => { throw new Error("Field Sentry verification (browser)") })`.
    It arrives with the same environment and release, and a replay.
+   Both errors carry the `product` tag (and `client`, with `SENTRY_CLIENT`),
+   and both arrive in the same Sentry project. If the browser error goes to
+   another project, `VITE_SENTRY_DSN` is set (above).
 4. Resolve both verification issues in Sentry, then remove `SENTRY_VERIFY`
    at the next publish.
 
