@@ -58,15 +58,15 @@ These are Site's values (theme id `field`), shown as the reference; every family
   --t-brd: rgba(17,17,13,.18);
   --t-brd-hi: #11110d;
   --t-text: #11110d;    /* ink */
-  --t-dim: #65645d;
-  --t-mute: #7a786f;
+  --t-dim: #616059;
+  --t-mute: #706e66;
   --t-accent: #11110d;  /* ink: text, icons, filled buttons */
   --t-accent-bg: rgba(244,197,24,.24);
   --t-accent-brd: #d9ad0c;
   --t-brand: #f4c518;   /* yellow */
   --t-primary: #11110d; /* filled controls */
   --t-on-primary: #f4c518;
-  --t-danger: #b8442a;
+  --t-danger: #b44329;
   --t-warn: #8a5a00;
   --t-success: #3f6b2a;
   --t-body: 'Inter Variable', system-ui, sans-serif;
@@ -76,17 +76,19 @@ These are Site's values (theme id `field`), shown as the reference; every family
   --t-stroke: 2px;          /* frame weight, in --t-stroke-color (ink) */
   --t-label-case: uppercase;
   --t-display-weight: 800;
-  --t-ring: #f4c518;        /* focus */
+  --t-ring: #a88711;        /* focus */
 }
 ```
 
 Dark mode, `[data-theme="field"][data-mode="dark"]`, is Site's dark palette: background `#11110d`, surfaces `#1e1e18` / `#2b2b24`, text `#f5f3eb`, dim `#b8b7ae`, borders off-white, danger `#e36a4d`.
 
-Yellow is too light to read on paper (1.5:1), so in light mode it is never text: `--t-accent` is ink, and the yellow is the logo, focus rings, highlights (`--t-accent-bg`) and the label on filled buttons. On near-black yellow reads at 11.6:1, so in dark mode `--t-accent` is yellow. Filled controls use `--t-primary` with `--t-on-primary` (ink with a yellow label in light, yellow with an ink label in dark), and anything filled with `--t-accent` is labelled with `--t-bg`, which works in both modes. The MCP authorization page carries its own copy of the Site palette and follows the device's scheme.
+Yellow is too light to read on paper (1.5:1), so in light mode it is never text: `--t-accent` is ink, and the yellow is the logo, highlights (`--t-accent-bg`) and the label on filled buttons. On near-black yellow reads at 11.6:1, so in dark mode `--t-accent` is yellow. Filled controls use `--t-primary` with `--t-on-primary` (ink with a yellow label in light, yellow with an ink label in dark), and anything filled with `--t-accent` is labelled with `--t-bg`, which works in both modes. The MCP authorization page carries its own copy of the Site palette and follows the device's scheme. The light focus ring is a darker gold (`#a88711`), because a yellow ring is 1.6:1 on paper and a focus ring needs 3:1.
 
 `--t-control` is the edge of an input or outlined button: the text colour faded toward `--t-paper` only as far as it still reads at 3:1 there. `shared/themes.js` derives it for every family and mode, and `shared/themes.test.js` checks it.
 
-The same rule holds in every family and with any accent: `--t-accent` is text and reads at 4.5:1 or better on `--t-bg` (the converter and the accent override shift a colour just enough to get there; `shared/themes.test.js` checks every family and mode), while `--t-brand` is the colour as chosen, for fills, highlights and the focus ring.
+The same rule holds in every family and with any accent: `--t-accent` is text and reads at 4.5:1 or better on `--t-bg` (the converter and the accent override shift a colour just enough to get there; `shared/themes.test.js` checks every family and mode), while `--t-brand` is the colour as chosen, for fills and highlights.
+
+`shared/theme-contrast.test.js` runs a WCAG AA audit (`shared/contrast-audit.js`) on every family and mode: text, secondary and muted text, links, tinted badges, buttons, toasts and Clerk's badge at 4.5:1; control edges and the focus ring at 3:1. Translucent tints are laid over their surface first. A ported family that misses is nudged in `shared/themes.js` just far enough (`--t-dim`, `--t-accent`, `--t-brand-ink`). Clerk takes the opaque text colour as `colorBorder`, because it fades that colour again for its dividers and badge text. The audit is shared with Arc Forge Labs' Flow, so a family passes in both apps.
 
 ## Shape and type
 

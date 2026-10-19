@@ -25,20 +25,24 @@ export function fieldClerkAppearance({ embedded = false }: { embedded?: boolean 
   };
   const danger = token("--t-danger", "#b8442a");
   const inputEdge = { ...controlEdge, '&[data-feedback="error"]': { boxShadow: edge(danger) } };
+  const dim = token("--t-dim", "#5b6773");
   return {
     variables: {
       colorPrimary: token("--t-primary", "#1f6f8f"),
       colorPrimaryForeground: token("--t-on-primary", "#ffffff"),
       colorBackground: token("--t-paper", "#ffffff"),
       colorForeground: text,
-      colorMutedForeground: token("--t-dim", "#5b6773"),
+      colorMutedForeground: dim,
       colorMuted: token("--t-bg", "#f7f9fb"),
       colorInput: token("--t-paper", "#ffffff"),
       colorInputForeground: text,
       colorDanger: danger,
       colorSuccess: token("--t-success", "#3f6b2a"),
       colorNeutral: text,
-      colorBorder: line,
+      // Clerk builds its border shades (dividers, hover edges, the badge text)
+      // as fractions of colorBorder, so it takes the opaque text colour: a
+      // colour already faded to 12% left the "Primary" badge near 1:1.
+      colorBorder: text,
       fontFamily: token("--t-body", "ui-sans-serif, system-ui, sans-serif"),
       fontSize: "13px",
       borderRadius: token("--t-radius", "6px"),
@@ -55,6 +59,10 @@ export function fieldClerkAppearance({ embedded = false }: { embedded?: boolean 
       navbar: embedded ? { background: token("--t-bg", "#f7f9fb"), borderRight: `1px solid ${line}` } : undefined,
       scrollBox: embedded ? { borderRadius: 0 } : undefined,
       formFieldInput: inputEdge,
+      // Clerk's default badge ("Primary" by an email address) draws its text
+      // in a 62% border shade, under 4.5:1 on light papers; --t-dim reads.
+      // The doubled class (&&) outranks Clerk's own variant rule.
+      badge: { "&&": { color: dim, background: `color-mix(in srgb, ${text} 5%, transparent)`, borderColor: line } },
       formButtonPrimary: { boxShadow: shadow, textTransform: "none" as const, fontWeight: 600 },
       socialButtonsBlockButton: controlEdge,
       footer: embedded ? { display: "none" } : undefined,
