@@ -1478,34 +1478,58 @@ function renderHeader(doc, {
   doc.rect(0, 0, W, 6).fill(C.brand);
   doc.restore();
 
+  // The business name never runs under the document title: it is set
+  // smaller until it fits on one line left of the title, and only a name
+  // too long even then wraps, inside the left column. On the right, a long
+  // reference that wraps pushes the date down instead of printing over it.
+  const RIGHT_X = 300;
+  const rightW = W - M - RIGHT_X;
+
+  // A longer title ("Adjustment note") starts smaller.
+  const titleSize = fitFontSize(doc.font("Helvetica-Bold"), documentLabel, rightW, String(documentLabel || "").length > 8 ? 22 : 28, 16);
+  const titleLeft = W - M - doc.fontSize(titleSize).widthOfString(String(documentLabel || ""));
+
   // Business name block
-  doc.fillColor(C.dark).font("Helvetica-Bold").fontSize(22);
-  doc.text(configuresBusinessName() ? businessDisplayName(biz) : (deliveryDefaults.issuerName || businessDisplayName(biz)), M, 30);
+  const businessName = String(configuresBusinessName() ? businessDisplayName(biz) : (deliveryDefaults.issuerName || businessDisplayName(biz)));
+  const nameW = titleLeft - 16 - M;
+  const nameSize = fitFontSize(doc, businessName, nameW, 22, 14);
+  doc.fillColor(C.dark).font("Helvetica-Bold").fontSize(nameSize);
+  if (doc.widthOfString(businessName) <= nameW) doc.text(businessName, M, 30, { lineBreak: false });
+  else doc.text(businessName, M, 30, { width: RIGHT_X - M - 10 });
 
   doc.font("Helvetica").fontSize(9).fillColor(C.muted);
-  const bizY = 56;
+  const bizY = Math.max(56, doc.y);
   doc.text(`ABN ${biz.abn}`, M, bizY);
   doc.text(biz.address, M, bizY + 12);
   doc.text(`${biz.phone}  ·  ${biz.email}`, M, bizY + 24);
+  const leftBottom = doc.y;
 
   // Document title + ref block (right side)
-  // A longer title ("Adjustment note") is set smaller so it clears the business name.
-  doc.fillColor(C.dark).font("Helvetica-Bold").fontSize(String(documentLabel || "").length > 8 ? 22 : 28);
-  doc.text(documentLabel, 300, 30, { width: CW - 250, align: "right" });
+  doc.fillColor(C.dark).font("Helvetica-Bold").fontSize(titleSize);
+  doc.text(documentLabel, RIGHT_X, 30, { width: rightW, align: "right" });
 
   doc.font("Helvetica").fontSize(9).fillColor(C.muted);
-  doc.text(quoteRef, 300, 60, { width: CW - 250, align: "right" });
-  doc.text(formatDate(issuedAt), 300, 72, { width: CW - 250, align: "right" });
+  doc.text(quoteRef, RIGHT_X, 60, { width: rightW, align: "right" });
+  doc.text(formatDate(issuedAt), RIGHT_X, Math.max(72, doc.y), { width: rightW, align: "right" });
   if (reconstructed) {
     // Drawn again because the stored PDF was lost: never passed off as the
     // copy that was sent.
     doc.font("Helvetica-Bold").fontSize(9).fillColor(C.brand);
-    doc.text("Reconstructed copy", 300, 86, { width: CW - 250, align: "right" });
+    doc.text("Reconstructed copy", RIGHT_X, Math.max(86, doc.y), { width: rightW, align: "right" });
   }
+  const rightBottom = doc.y;
 
   // Separator
-  doc.moveTo(M, 104).lineTo(W - M, 104).strokeColor(C.rule).lineWidth(0.5).stroke();
-  doc.y = 114;
+  const ruleY = Math.max(104, leftBottom + 8, rightBottom + 8);
+  doc.moveTo(M, ruleY).lineTo(W - M, ruleY).strokeColor(C.rule).lineWidth(0.5).stroke();
+  doc.y = ruleY + 10;
+}
+
+/** The largest font size from `max` down to `min` that fits `text` on one line in `width`. */
+function fitFontSize(doc, text, width, max, min) {
+  let size = max;
+  while (size > min && doc.fontSize(size).widthOfString(String(text || "")) > width) size -= 1;
+  return size;
 }
 
 function renderParties(doc, {

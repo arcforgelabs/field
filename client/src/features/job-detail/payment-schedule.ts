@@ -56,6 +56,15 @@ export function buildMilestoneDraftRows(paymentSchedule: PaymentSchedule): Miles
   ));
 }
 
+/** The rows with the one at `from` moved to `to`; out-of-range moves return the rows unchanged. */
+export function moveMilestoneDraftRow(rows: MilestoneScheduleDraftRow[], from: number, to: number): MilestoneScheduleDraftRow[] {
+  if (from === to || from < 0 || to < 0 || from >= rows.length || to >= rows.length) return rows;
+  const next = rows.slice();
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
 export function buildPaymentScheduleFromDraftRows(rows: MilestoneScheduleDraftRow[]): PaymentSchedule {
   return {
     milestones: rows.map((row, index) => ({
