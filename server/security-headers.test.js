@@ -40,14 +40,15 @@ test("FIELD_CSP is report-only unless set, and a wrong value is refused", () => 
 test("the policy allows scripts only from Field, Clerk and the response's nonce", () => {
   const policy = directives(buildContentSecurityPolicy({ nonce: "abc123" }));
   assert.deepEqual(policy["default-src"], ["'self'"]);
-  assert.ok(policy["script-src"].includes("'self'"));
-  assert.ok(policy["script-src"].includes("'nonce-abc123'"));
-  assert.ok(policy["script-src"].includes("https://*.clerk.com"));
-  assert.equal(policy["script-src"].includes("'unsafe-inline'"), false);
-  assert.equal(policy["script-src"].includes("'unsafe-eval'"), false);
-  assert.ok(policy["connect-src"].includes("https://*.sentry.io"));
-  assert.ok(policy["connect-src"].includes("https://nominatim.openstreetmap.org"));
-  assert.ok(policy["worker-src"].includes("blob:"));
+  // The whole source lists, so a widened policy fails here.
+  assert.deepEqual(policy["script-src"], [
+    "'self'", "'nonce-abc123'", "https://*.clerk.com", "https://*.clerk.accounts.dev", "https://challenges.cloudflare.com",
+  ]);
+  assert.deepEqual(policy["connect-src"], [
+    "'self'", "https://*.clerk.com", "https://*.clerk.accounts.dev", "https://clerk-telemetry.com",
+    "https://*.sentry.io", "https://nominatim.openstreetmap.org",
+  ]);
+  assert.deepEqual(policy["worker-src"], ["'self'", "blob:"]);
   assert.deepEqual(policy["object-src"], ["'none'"]);
   assert.deepEqual(policy["base-uri"], ["'self'"]);
   assert.deepEqual(policy["frame-ancestors"], ["'none'"]);
@@ -58,7 +59,7 @@ test("every script tag in the built page gets the nonce, once", async () => {
   const source = await readFile(join(ROOT, "client/index.html"), "utf8");
   const sentry = "<script>window.__FIELD_SENTRY__={};</script>";
   const html = addScriptNonce(source.replace("</head>", `${sentry}</head>`), "n0nce");
-  const tags = html.match(/<script\b[^>]*>/g);
+  const tags = html.match(/<script\b[^>]*>/gi);
   assert.equal(tags.length, 3);
   for (const tag of tags) assert.match(tag, /\snonce="n0nce"/);
   assert.equal(addScriptNonce(html, "n0nce"), html);
