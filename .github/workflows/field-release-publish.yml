@@ -6,9 +6,9 @@ run-name: field ${{ inputs.tag }}
 # existing tag, which re-runs the checks and skips what is already published.
 #
 #   checks          field-release-checks.yml: tag, every CI lane, npm tarball
-#   approve         the one approval of a stable release: environment
-#                   release (Samuel), alongside the checks. A beta uses
-#                   release-beta, which has no reviewer.
+#   approve         the gate of a stable release: environment release,
+#                   alongside the checks (no reviewer at present). A beta
+#                   uses release-beta, which has no reviewer.
 #   image           after both: GHCR by digest,
 #                   build attestation and SBOM, smoke of the pushed digest,
 #                   then the channel's tags
@@ -74,10 +74,10 @@ jobs:
             exit 1
           fi
 
-  # The one human gate of a stable release: Samuel approves environment
-  # release here, while the checks run. Field NPM Release accepts this
-  # approval and does not ask again. A beta runs in release-beta, which has
-  # no reviewer, so nothing waits.
+  # The gate of a stable release: environment release, while the checks
+  # run. It has no reviewer at present (docs/RELEASING.md); with one, Field
+  # NPM Release accepts its approval and does not ask again. A beta runs in
+  # release-beta, which has no reviewer, so nothing waits.
   approve:
     name: Approve ${{ inputs.tag }}
     needs: guard
