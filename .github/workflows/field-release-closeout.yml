@@ -137,24 +137,40 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "branch=${branch}" >> "$GITHUB_OUTPUT"
 
+      # Arc Forge's enterprise policy stops GITHUB_TOKEN from opening pull
+      # requests, so the Barnacle App opens it, as openclaw/openclaw's
+      # workflows use an App token. Its pull request also starts CI.
+      - name: Create pull request token
+        id: app-token
+        if: steps.commit.outputs.changed == 'true' && vars.BARNACLE_APP_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ vars.BARNACLE_APP_ID }}
+          private-key: ${{ secrets.BARNACLE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+
       - name: Open the closeout pull request
         if: steps.commit.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           TAG: ${{ inputs.tag }}
           VERSION: ${{ steps.release.outputs.version }}
           BRANCH: ${{ steps.commit.outputs.branch }}
         run: |
           set -euo pipefail
           title="chore(release): close out ${VERSION} on main"
-          url="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json url --jq '.[0].url // ""')"
+          url="$(GH_TOKEN="$PR_TOKEN" gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json url --jq '.[0].url // ""')"
           if [[ -z "$url" ]]; then
             body="$(printf '%s\n\n%s\n\n%s\n' \
               "Before: main does not carry what ${TAG} shipped." \
               "After: main has the ${VERSION} changelog files, its docs page and the shipped version, as the release branch has them." \
               "Opened by Field Release Closeout (docs/RELEASING.md, Close out on main).")"
-            if ! url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$title" --body "$body")"; then
-              echo "::warning::GitHub Actions cannot open pull requests here; open ${BRANCH} into main by hand (release:stable does)."
+            if ! url="$(GH_TOKEN="$PR_TOKEN" gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$title" --body "$body")"; then
+              echo "::warning::Neither the Barnacle App nor GitHub Actions could open the pull request; open ${BRANCH} into main by hand (release:stable does)."
               url=""
             fi
           fi

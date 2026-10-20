@@ -297,10 +297,13 @@ installation's deploy as the one step):
    Prepare tags as `IAMSamuelRodda <7961255+IAMSamuelRodda@users.noreply.github.com>`;
    a repository variable `RELEASE_TAGGER` (`Name <email>`) names another
    account that holds the signing key.
-3. **Pull requests from GitHub Actions.** Settings → Actions → General →
-   Workflow permissions: tick **Allow GitHub Actions to create and approve
-   pull requests**, so Field Release Closeout opens its pull request. Without
-   it, `release:stable` opens the pull request itself.
+3. **The closeout pull request.** Arc Forge's enterprise policy keeps
+   **Allow GitHub Actions to create and approve pull requests** off, so
+   Field Release Closeout opens its pull request with the Barnacle App token
+   (`BARNACLE_APP_ID` variable, `BARNACLE_APP_PRIVATE_KEY` secret), as
+   openclaw/openclaw's workflows use an App token. The App needs **Pull
+   requests: Read and write** on this repository. Without the token,
+   `release:stable` opens the pull request itself.
 
 Later, when Field has many paying clients and becomes a target: sign each
 tag with a key that a person holds, as openclaw/openclaw's maintainers do.
