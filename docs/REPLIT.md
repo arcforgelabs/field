@@ -2,7 +2,8 @@
 
 Field can run as a published Replit app. This is the runbook for an
 installation on Replit, for people and agents alike. Replit's Agent reads
-`replit.md`, which links to `AGENTS.md` like the other harness files.
+`replit.md`, which lists the tasks of an installation and the sections here
+that cover them.
 
 ## What runs here
 
@@ -863,9 +864,52 @@ release of all, betas and stable releases alike, so it is never behind
 stable.
 
 A publish deploys whatever the channel points at when it runs; a new release
-does not publish itself. To upgrade, publish again after a release.
+does not publish itself. An owner can see that one is out from
+`GET /api/updates` (`docs/SELF_HOSTING.md`, "Update notice").
 
 The default is still `main`.
+
+### Updating to a new release
+
+With `FIELD_DEPLOY_REF=stable`, after a release is published:
+
+1. Read the release's notes on GitHub. If it changes one of the deploy files
+   ("When to pull the workspace"), run `scripts/github-sync.sh pull` in the
+   Shell first.
+2. Publishing > Republish. If Replit stops at "Development database changes
+   detected", press Cancel.
+3. Open `GET /health`. `build.release` must be the new tag, `build.checks`
+   `passed`, and `storage.state` `ok`.
+4. In the Shell: `npm ci --no-audit --no-fund && npm run db:apply && npm run
+   db:smoke`. `db:smoke` must report `"pending":0`. Skip this when the
+   release adds no migrations.
+
+### When to pull the workspace
+
+A publish takes these files from the workspace, not from the release:
+`.replit`, `scripts/replit-deploy.sh`, `scripts/deploy-checks.js`,
+`scripts/deploy-release.js` and `server/release-channel.js`. They stay as
+they were when the workspace was last pulled. Pull (`scripts/github-sync.sh
+pull`) when:
+
+| When | Why |
+| --- | --- |
+| A release changes one of those files | Its fix takes effect only from the workspace. The build log says `note: <file> in the workspace differs from <ref>` |
+| Before the first release of a month numbered above 31 (`2026.10.32`), if the workspace was last pulled before v2026.10.21 | An older `server/release-channel.js` reads the last number as a day, so it cannot read the tag and the build stops. Nothing is deployed and the live app keeps running |
+| After you change `FIELD_DEPLOY_REF` or the deploy settings in `.replit` | So the workspace and the publish agree |
+
+If `git pull` cannot fast-forward (the workspace has commits of its own),
+take the deploy files from the newest stable release instead:
+
+```bash
+git fetch --tags origin
+T=$(git tag -l 'v20*' --sort=-v:refname | grep -v beta | head -1)
+git checkout "$T" -- .replit .gitignore scripts/replit-deploy.sh \
+  scripts/deploy-checks.js scripts/deploy-release.js server/release-channel.js
+```
+
+`--sort=-v:refname` sorts each number as a number, so `2026.10.32` comes
+after `2026.10.9`.
 
 ### Pinning a release and rolling back
 
@@ -953,3 +997,50 @@ from the workspace. When used, it is a fine-grained token whose resource owner
 is the repository's owner, scoped to this repo only, with Contents and Pull
 requests read/write. Without it, the workspace only pulls, and changes reach
 GitHub through pull requests opened elsewhere. The Agent's instructions are in `.agents/skills/github-sync/SKILL.md`.
+
+### A production installation: fetch only
+
+A workspace that runs a production installation should only follow
+releases. It reads from GitHub and never writes to it. Development happens
+elsewhere and reaches the installation as a release.
+
+To make the workspace fetch-only:
+
+1. Delete the `GITHUB_TOKEN` secret (Secrets), if there is one. Revoke the
+   token on GitHub too (Settings > Developer settings > Personal access
+   tokens).
+2. In the Shell:
+
+   ```sh
+   git remote set-url --push origin no-push--this-workspace-is-fetch-only
+   git config --unset credential.helper
+   printf '#!/bin/sh\ncase "$2" in *github.com*|no-push*) echo "push refused: this install is fetch-only" >&2; exit 1;; esac\n' > .git/hooks/pre-push
+   chmod +x .git/hooks/pre-push
+   ```
+
+   Use the name of the GitHub remote from `git remote -v` in place of
+   `origin` if it differs. `git remote -v` then shows the GitHub URL for
+   fetch and `no-push--this-workspace-is-fetch-only` for push. A push from
+   the Shell or the Git pane fails. The hook refuses only GitHub, so
+   Replit's own backup remote keeps working.
+3. Do not press Push or Sync Changes in the Git pane. Pull is safe.
+
+Publishing is not affected: the build fetches from GitHub without a token.
+Replit's "Published your App" commits stay local, and
+`scripts/github-sync.sh pull` drops them when together they change no files.
+
+### Where an installation's settings go
+
+Nothing specific to one installation goes in git. The repository is shared
+by every installation.
+
+| Setting | Where |
+| --- | --- |
+| Secrets: keys, tokens, client secrets (`FIELD_CONFIG_JSON`, `FIELD_SECRETS_KEY`, Clerk, Sentry, R2) | Replit Secrets (workspace) and Publishing > Adjust settings > Secrets (published app) |
+| Start-up settings: `FIELD_STORAGE`, `FIELD_DEPLOY_REF`, `FIELD_DOCUMENT_REPLICA` | Publishing > Adjust settings > Secrets, for the published app only ("Durable storage", "Issued documents in R2"). A deployment Configuration value is written into `.replit`, so use a secret |
+| Business data and in-app settings: people and roles, business profile, prices, integration connections | Field's database (PostgreSQL), changed in Field's own screens |
+| Code, migrations, defaults for every installation | This repository, through a pull request |
+
+When an installation needs a setting that does not exist, add it to Field as
+a generic option (an environment variable or an in-app setting) by a pull
+request, and set its value in the installation.

@@ -21,7 +21,8 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | Document | What it is for |
 | --- | --- |
 | `VISION.md` | What Field is for, who it serves, and what it will not do |
-| `AGENTS.md` | Agent entry point (`CLAUDE.md`, `GEMINI.md` and Replit's `replit.md` link to it) |
+| `AGENTS.md` | Agent entry point (`CLAUDE.md` and `GEMINI.md` link to it) |
+| `replit.md` | Replit Agent's entry point: what an installation on Replit does, and its rules |
 | `CONTRIBUTING.md` | How to file issues and PRs, and this repo's working rules |
 | `SECURITY.md` | How to report a security problem, the trust model, and the rules held hard |
 | `LICENSE` | MIT licence |
