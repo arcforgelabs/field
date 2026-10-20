@@ -109,7 +109,9 @@ async function standInProduction() {
   const state = { health: { ok: true, build: {} }, status: 200, requests: [] };
   const server = createServer((req, res) => {
     state.requests.push({ url: req.url, authorization: req.headers.authorization ?? null, cookie: req.headers.cookie ?? null });
-    res.writeHead(state.status, { "content-type": "application/json" });
+    // One request for each connection, as for a real CLI run: a kept-alive
+    // socket the server closes between tests would reset the next request.
+    res.writeHead(state.status, { "content-type": "application/json", connection: "close" });
     res.end(JSON.stringify(state.health));
   });
   await new Promise((done) => server.listen(0, "127.0.0.1", done));
