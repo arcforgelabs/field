@@ -249,7 +249,7 @@ import {
 } from "./quote-internal-breakdown.js";
 import { buildWallZoneRenderPayloadForJob, readWallZones } from "./wall-zones.js";
 import { runExclusiveJobMutation } from "./job-mutation-guard.js";
-import { installJobGenerationCommitListener, resolveActiveJobGeneration, runAtomicJobGeneration } from "./job-generation.js";
+import { installJobGenerationCommitListener, resolveActiveJobGeneration, runAtomicJobGeneration, withJobGenerationReadScope } from "./job-generation.js";
 import {
   findIssuedQuoteVersion,
   readIssuedQuoteArtifact,
@@ -1702,11 +1702,12 @@ app.get("/api/jobs", requireAuth, async (_req, res) => {
           reportJobListSkip({ id: null, step: "scheduled emails", reason: error?.code === "FIELD_JOB_LIST_TIMEOUT" ? "timeout" : "error" }, error);
           return { ...jobDeletionDeps(), listScheduledEmails: async () => [] };
         });
-      const { jobs, skipped } = await listJobsWithinDeadline(rows, {
+      // Each job's active generation is resolved once, not once per file read.
+      const { jobs, skipped } = await withJobGenerationReadScope(() => listJobsWithinDeadline(rows, {
         readMeta: (row) => readNormalizedJobMeta(row.dir),
         listJob: (row, meta) => listJobWithDeletable(row.dir, meta, deletionDeps),
         onSkip: reportJobListSkip,
-      });
+      }));
       if (skipped.length) res.set("X-Field-Jobs-Skipped", String(skipped.length));
       return res.json(jobs);
     } catch { /* fall through to directory scan */ }

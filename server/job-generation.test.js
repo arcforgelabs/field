@@ -12,6 +12,7 @@ import {
   resolveActiveJobGeneration,
   runAtomicJobGeneration,
   withJobGenerationLock,
+  withJobGenerationReadScope,
 } from "./job-generation.js";
 import { storeRawFile } from "./ingestion-ledger.js";
 
@@ -247,6 +248,34 @@ test("reading a job with a long history stays fast: committed generations are no
       warm * 4 < cold,
       `a remembered read took ${warm.toFixed(1)} ms, not under a quarter of a re-hashing read (${cold.toFixed(1)} ms)`,
     );
+  } finally {
+    await rm(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("a read scope resolves each job once, and a write inside it still targets the newest generation", async () => {
+  const jobDir = await mkdtemp(join(tmpdir(), "field-generation-scope-"));
+  try {
+    await writeFile(join(jobDir, "meta.json"), JSON.stringify({ version: 1 }));
+    await runAtomicJobGeneration(jobDir, async (stage) => {
+      await writeFile(join(stage, "meta.json"), JSON.stringify({ version: 2 }));
+    });
+    const before = await resolveActiveJobGeneration(jobDir);
+    await withJobGenerationReadScope(async () => {
+      const first = resolveActiveJobGeneration(jobDir);
+      assert.equal(resolveActiveJobGeneration(`${jobDir}/`), first, "one resolve per job in the scope, however the path is written");
+      assert.equal(await first, before);
+      // A write in the scope stages from, and publishes over, the newest
+      // generation; it does not use the remembered answer.
+      await runAtomicJobGeneration(jobDir, async (stage) => {
+        assert.equal(JSON.parse(await readFile(join(stage, "meta.json"))).version, 2);
+        await writeFile(join(stage, "meta.json"), JSON.stringify({ version: 3 }));
+      });
+      assert.equal(await resolveActiveJobGeneration(jobDir), before, "readers in the scope keep one generation");
+    });
+    const after = await resolveActiveJobGeneration(jobDir);
+    assert.notEqual(after, before);
+    assert.equal(JSON.parse(await readFile(join(after, "meta.json"))).version, 3, "outside the scope the new generation is read");
   } finally {
     await rm(jobDir, { recursive: true, force: true });
   }
