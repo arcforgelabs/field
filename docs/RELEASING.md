@@ -30,10 +30,17 @@ The notes are generated from the pull requests merged since the last release.
 
 ## Versions and channels
 
-Field names its releases as `openclaw/openclaw` names its own. Versions are
-calendar versions with no leading zeros. A stable release is `2026.10.15`; a
-beta is a pre-release of the **upcoming** stable version, so
-`2026.10.15-beta.1` and `2026.10.15-beta.2` come before `2026.10.15`. Tags add
+Field names its releases as `openclaw/openclaw` names its own, with one
+change: the last number is a count, not the day. A version is `YYYY.M.N`
+with no leading zeros. `YYYY.M` is the month the release is cut in (UTC). `N`
+is one more than the month's highest stable release, starts at 1 each month,
+and can pass 31. For example, after `2026.10.20` comes `2026.10.21`, after
+`2026.10.31` comes `2026.10.32`, and the first release of November is
+`2026.11.1`. Versions before October 2026 used the day; the count carries on
+from them. A stable release is `2026.10.15`; a beta is a pre-release of the
+**upcoming** stable version, so `2026.10.15-beta.1` and `2026.10.15-beta.2`
+come before `2026.10.15`. Field Release Prepare refuses a version that is not
+the next one this month. Tags add
 a `v`, and each GitHub Release is titled `field <version>`. `package.json`
 holds the upcoming stable version. `scripts/release/release.mjs` holds the
 rules, and `scripts/release/release.test.js` tests them.
@@ -64,13 +71,13 @@ Promote, and dispatching Field NPM Release by hand, each need one approval of
 
 | Action | Approvals |
 | --- | --- |
-| Beta (`vYYYY.M.D-beta.N`) | 0 |
-| Stable release (`vYYYY.M.D`) | 1: `release` |
+| Beta (`vYYYY.M.N-beta.B`) | 0 |
+| Stable release (`vYYYY.M.N`) | 1: `release` |
 | Promote or roll back a channel | 1: `npm-release` |
 | Field NPM Release dispatched by hand | 1: `npm-release` |
 
 A beta has guards instead of a gate: it runs only from `main`, only for a
-`vYYYY.M.D-beta.N` tag on a `main` commit whose required checks passed
+`vYYYY.M.N-beta.B` tag on a `main` commit whose required checks passed
 (Field Release Prepare), and only after every CI lane passes again on that
 commit (Field Release Checks). Every environment accepts only runs from
 `main`, and `npm-publish`, the environment npm's trusted publisher names, has
@@ -91,11 +98,19 @@ forward with a new tag.
 
 ## Cut a release
 
-1. Open a pull request that sets the upcoming stable version:
-   `npm version 2026.10.15 --no-git-tag-version`, which updates
-   `package.json` and `package-lock.json`. Title it
-   `chore: release 2026.10.15`. Merge it when CI passes. Do this once per
-   version; its betas reuse it.
+1. Open a pull request that sets the upcoming stable version. Get the next
+   version from the tags, then set it:
+
+   ```bash
+   git fetch --tags origin
+   V=$(node scripts/release/release.mjs next | jq -r .version)
+   npm version "$V" --no-git-tag-version
+   ```
+
+   That updates `package.json` and `package-lock.json`. Title it
+   `chore: release <version>`. Merge it when CI passes, in the same month.
+   Do this once per version; its betas reuse it. If the month changes before
+   the release is cut, open a new pull request for the new month's version.
 2. Start a beta:
 
    ```bash

@@ -18,8 +18,8 @@ run-name: field ${{ inputs.tag }}
 #                   tarball this run proved; it publishes on this run's
 #                   approval, without a second one
 #
-# Channels follow openclaw/openclaw: a beta (vYYYY.M.D-beta.N) goes to npm and
-# GHCR `beta` and a GitHub pre-release; a stable release (vYYYY.M.D) goes to
+# Channels follow openclaw/openclaw: a beta (vYYYY.M.N-beta.B) goes to npm and
+# GHCR `beta` and a GitHub pre-release; a stable release (vYYYY.M.N) goes to
 # npm `latest`, GHCR `stable` and `latest`, and GitHub's latest release.
 
 on:
@@ -56,7 +56,7 @@ jobs:
           echo "::error::Run Field Release Publish from main, not ${GITHUB_REF}." >&2
           exit 1
 
-      # Only a release tag: vYYYY.M.D (stable) or vYYYY.M.D-beta.N (beta).
+      # Only a release tag: vYYYY.M.N (stable) or vYYYY.M.N-beta.B (beta).
       # Field Release Checks also requires it to be on main and to match
       # package.json, and runs every CI lane on its commit.
       - name: Read the channel from the tag
@@ -65,12 +65,12 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          if [[ "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]?-beta\.[1-9][0-9]*$ ]]; then
+          if [[ "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]*-beta\.[1-9][0-9]*$ ]]; then
             echo "channel=beta" >> "$GITHUB_OUTPUT"
-          elif [[ "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]?$ ]]; then
+          elif [[ "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]*$ ]]; then
             echo "channel=stable" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::${TAG} is not a release tag (vYYYY.M.D or vYYYY.M.D-beta.N)." >&2
+            echo "::error::${TAG} is not a release tag (vYYYY.M.N or vYYYY.M.N-beta.B)." >&2
             exit 1
           fi
 
