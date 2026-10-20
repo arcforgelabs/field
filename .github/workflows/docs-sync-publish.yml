@@ -1,0 +1,117 @@
+name: Docs Sync Publish Repo
+
+# Mirrors docs/ into arcforgelabs/docs, which renders and hosts the docs site
+# (https://arcforgelabs.github.io/docs/field/). Copied from openclaw/openclaw's
+# docs-sync-publish.yml. The push needs ARCFORGE_DOCS_SYNC_TOKEN: a
+# fine-grained token with Contents read and write on arcforgelabs/docs only.
+# Without it the job skips.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "scripts/docs-sync-publish.mjs"
+      - ".github/workflows/docs-sync-publish.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Queue rather than cancel: a cancelled run leaves no successor, so the mirror
+# would stop advancing under a run of merges (openclaw/openclaw's note).
+concurrency:
+  group: docs-sync-publish
+  cancel-in-progress: false
+
+jobs:
+  sync-publish-repo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ARCFORGE_DOCS_SYNC_TOKEN: ${{ secrets.ARCFORGE_DOCS_SYNC_TOKEN }}
+    steps:
+      - name: Skip publish sync without token
+        if: env.ARCFORGE_DOCS_SYNC_TOKEN == ''
+        run: echo "ARCFORGE_DOCS_SYNC_TOKEN is not configured; skipping docs publish repo sync."
+
+      - name: Check out source repo
+        if: env.ARCFORGE_DOCS_SYNC_TOKEN != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Ancestry for the stale-source check below.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        if: env.ARCFORGE_DOCS_SYNC_TOKEN != ''
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Check docs
+        if: env.ARCFORGE_DOCS_SYNC_TOKEN != ''
+        run: node scripts/docs-sync-publish.mjs --check
+
+      - name: Clone publish repo
+        if: env.ARCFORGE_DOCS_SYNC_TOKEN != ''
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            rm -rf publish
+            if git clone --quiet "https://x-access-token:${ARCFORGE_DOCS_SYNC_TOKEN}@github.com/arcforgelabs/docs.git" publish; then
+              exit 0
+            fi
+            echo "Clone attempt ${attempt} failed; retrying."
+            sleep $((attempt * 2))
+          done
+          echo "Failed to clone publish repo after retries." >&2
+          exit 1
+
+      - name: Sync docs into publish repo
+        if: env.ARCFORGE_DOCS_SYNC_TOKEN != ''
+        run: |
+          node scripts/docs-sync-publish.mjs \
+            --target "$GITHUB_WORKSPACE/publish" \
+            --source-repo "$GITHUB_REPOSITORY" \
+            --source-sha "$GITHUB_SHA"
+
+      - name: Commit publish repo sync
+        if: env.ARCFORGE_DOCS_SYNC_TOKEN != ''
+        working-directory: publish
+        env:
+          PRODUCT: field
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- "docs/${PRODUCT}" ".arcforge-sync/${PRODUCT}.json" \
+            && [ -z "$(git ls-files --others --exclude-standard -- "docs/${PRODUCT}" ".arcforge-sync")" ]; then
+            echo "No publish-repo changes."
+            exit 0
+          fi
+          # Skip when main already mirrors a newer commit of this repo.
+          stale() {
+            local current
+            current="$(git show "origin/main:.arcforge-sync/${PRODUCT}.json" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).sha||"")}catch{}})')"
+            [ -n "$current" ] && [ "$current" != "$GITHUB_SHA" ] \
+              && git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$GITHUB_SHA" "$current" 2>/dev/null
+          }
+          git config user.name "arcforge-docs-sync[bot]"
+          git config user.email "arcforge-docs-sync[bot]@users.noreply.github.com"
+          git add "docs/${PRODUCT}" ".arcforge-sync/${PRODUCT}.json"
+          git commit --quiet -m "chore(sync): mirror docs from ${GITHUB_REPOSITORY}@${GITHUB_SHA}"
+          for attempt in 1 2 3 4 5; do
+            if git fetch --quiet origin main; then
+              if stale; then
+                echo "Skipping stale publish sync; origin/main already mirrors a newer commit."
+                exit 0
+              fi
+              if git rebase --quiet -X theirs origin/main && git push --quiet origin HEAD:main; then
+                exit 0
+              fi
+              git rebase --abort >/dev/null 2>&1 || true
+            fi
+            echo "Publish sync attempt ${attempt} failed; retrying."
+            sleep $((attempt * 2))
+          done
+          echo "Failed to push publish-repo sync after retries." >&2
+          exit 1

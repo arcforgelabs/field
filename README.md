@@ -27,6 +27,9 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `LICENSE` | MIT licence |
 | `ARCHITECTURE.md` | How Field is built: system boundary, storage, generations, quote engine, deployment |
 | `DESIGN.md` | The design system: tokens, components, light and dark mode |
+| `docs/docs.json` | The docs site navigation. `docs/` is published at https://arcforgelabs.github.io/docs/field/ by arcforgelabs/docs |
+| `docs/index.md` | The docs site home page |
+| `docs/releases/` | One release notes page per version (`<version>.md`), shown on the docs site |
 | `docs/REPLIT.md` | Running, publishing, storing data and monitoring errors for an installation on Replit |
 | `docs/PRICING_ENGINE.md` | Target data model for the price book, quotes and invoices |
 | `docs/CLERK_SIGN_IN.md` | Clerk sign-in runbook and cutover |
