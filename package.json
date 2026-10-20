@@ -61,6 +61,8 @@
     "db:check:ci": "npm run db:generate && npm run db:check && git diff --exit-code -- server/db/drizzle && test -z \"$(git ls-files --others --exclude-standard -- server/db/drizzle)\"",
     "db:apply": "drizzle-kit migrate --config=server/db/drizzle.config.ts",
     "db:smoke": "node scripts/db-smoke.js",
+    "db:follow-production": "node scripts/replit-workspace-db.js sync",
+    "db:follow-production:status": "node scripts/replit-workspace-db.js status",
     "db:studio": "drizzle-kit studio --config=server/db/drizzle.config.ts",
     "db:test": "npm run db:build && node --test server/db/test/data-layer-mode.test.js server/db/test/data-layer.test.js",
     "db:test:docker": "FIELD_DB_TEST_DOCKER=1 npm run db:test",

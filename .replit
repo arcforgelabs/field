@@ -1,5 +1,10 @@
 modules = ["nodejs-24", "web", "bash"]
 run = ["bash", "scripts/replit-start.sh"]
+# When the workspace boots, bring its database to the migrations production
+# runs (needs the FIELD_PRODUCTION_URL Secret; never fails the boot). The
+# published app refuses it and migrates itself (docs/REPLIT.md, "The
+# workspace database").
+onBoot = "node scripts/replit-workspace-db.js sync --warn-only"
 
 # Marks the Replit runtime for the app and for operator CLIs run from the
 # shell (a local PGlite database is refused; use DATABASE_URL).

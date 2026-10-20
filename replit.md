@@ -30,9 +30,12 @@ Rules for an installation:
   installation's settings go").
 - When Replit shows "Development database changes detected", always press
   Cancel. Field migrates production itself when it starts.
-- After each publish, bring the workspace's database to the same release:
-  `npm ci --no-audit --no-fund && npm run db:apply && npm run db:smoke`
-  (`"pending":0`).
+- The workspace's database follows production by itself when the Secret
+  `FIELD_PRODUCTION_URL` holds the published app's address
+  (`docs/REPLIT.md`, "The workspace database"). To do it by hand:
+  `npm run db:follow-production`. Never run `npm run db:apply` here: it
+  applies the workspace checkout's migrations, which can be ahead of
+  production.
 - Do not run SQL by hand on the production database.
 
 ## If this workspace develops Field

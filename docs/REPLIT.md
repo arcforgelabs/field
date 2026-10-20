@@ -72,9 +72,9 @@ print, log or paste it; Field's logs and `npm run db:smoke` name the variable,
 not its value.
 
 The workspace and the published app have separate databases, each with its
-own `DATABASE_URL`. The workspace's database is a copy: `npm run db:apply`
-keeps its schema in step with production (see "Publishing"), but its data is
-not production's. A command run in the workspace shell reads and writes the
+own `DATABASE_URL`. The workspace's database is a copy: it follows
+production's migrations by itself ("The workspace database" below), but its
+data is not production's. A command run in the workspace shell reads and writes the
 workspace's database, never production's. Never copy production's database
 credentials into the workspace. Field checks and changes production's data
 from inside the published app instead: data migrations and backfills run at
@@ -122,6 +122,83 @@ boot, and an owner checks them with the dry-run route ("Data migrations").
   direct endpoint.
 
 See `server/db/README.md` for the runtime module and how to add tables.
+
+### The workspace database
+
+Before each publish, Replit compares the workspace's tables with
+production's. If they differ, it stops at "Development database changes
+detected" and offers to make production match the workspace. That breaks
+Field: Field migrates production itself when it starts, and a table made
+ahead of time stops that migration. The tables differ when the workspace
+database has fewer migrations than production (production gained a
+release's migrations when that release started) or more (the workspace
+applied migrations production does not run yet).
+
+So the workspace database follows production by itself. Set it up once:
+
+1. Tools > Secrets in the workspace: add `FIELD_PRODUCTION_URL` with the
+   published app's address, for example `https://field.example.com`. It is
+   not a credential. Put it in the workspace's Secrets, not in the
+   deployment's.
+2. Pull the workspace once (`scripts/github-sync.sh pull`), so it has
+   `scripts/replit-workspace-db.js` and the `.replit` that runs it.
+3. Check it in the Shell: `npm run db:follow-production`. The last line is
+   JSON. `"state":"level"` means the workspace database has exactly
+   production's migrations.
+
+Then `scripts/replit-workspace-db.js sync` runs each time the workspace
+boots (`.replit` `onBoot`) and each time the workspace's Run button starts
+Field (`scripts/replit-start.sh`). It:
+
+1. Reads `GET <FIELD_PRODUCTION_URL>/health` (no credentials) for
+   `build.revision`, the commit production runs, and `build.release`.
+2. Fetches that commit's `server/db/drizzle/` from GitHub, without a token,
+   into `.field-workspace-db/` (gitignored). It checks that the fetched
+   commit is `build.revision`. `FIELD_DEPLOY_REPO` names a fork's
+   repository, as for the publish.
+3. Compares those migrations with the rows in the workspace database's
+   `drizzle.__drizzle_migrations` (each migration file's hash and its
+   journal time), and acts on the result:
+
+| `state` | What it means | What it does |
+| --- | --- | --- |
+| `level` | The workspace database has exactly production's migrations | Nothing |
+| `behind` | It lacks some of production's migrations | Applies them, from production's commit, under the same migration lock the server holds (`appliedNow` counts them) |
+| `ahead` | It has migrations production does not run (`extra` names them) | Nothing. Exit code 3 |
+| `diverged` | It has different migrations from production | Nothing. Exit code 3 |
+
+It only touches the workspace's database (`DATABASE_URL` or `FIELD_DB_URL`,
+as `npm run db:smoke` chooses), never production's: production is only asked
+for its public `/health`. It refuses to run in the published app
+(`REPLIT_DEPLOYMENT` set), which migrates itself as before. It never prints
+the connection string. Without `FIELD_PRODUCTION_URL` it says how to set it
+and does nothing. At boot and at Run, a failure prints a warning and Field
+starts anyway.
+
+`ahead` corrects itself: when production publishes the release that has
+those migrations, the workspace is `level` again. Until then, the next
+publish stops at the prompt; press Cancel. To be `level` sooner, replace the
+workspace's database (delete it in the Database tool and add it again) and
+run `npm run db:follow-production`. The workspace database holds no
+production data, but this deletes everything in it.
+
+The workspace's Run button starts the workspace checkout's code, and Field
+applies that checkout's own migrations when it starts. If the checkout has
+migrations production does not run (usually the workspace was pulled to
+`main` while production follows `stable`), starting it puts the workspace
+database ahead again. The sync warns about this:
+`WARNING: this workspace's checkout has migrations production does not run`,
+and its JSON shows `"checkout":{"state":"ahead",...}`. Then do not press
+Run until production runs a release with those migrations, or press Cancel
+at the prompt.
+
+`npm run db:follow-production:status` compares without changing anything
+(exit code 2 when the workspace is behind). Do not use `npm run db:apply` in
+an installation's workspace: it applies the checkout's migrations, not
+production's.
+
+If Replit still shows "Development database changes detected", press Cancel.
+Never pick an option there.
 
 ## Data migrations
 
@@ -841,13 +918,14 @@ To deploy what is merged on `main`:
    `checks` (`passed`, or `unchecked` when an emergency override built it). Check that
    `revision` is the commit you meant to deploy (the tip of `main` on
    GitHub) and that `checks` is `passed`.
-3. Bring the workspace to the same level, so the next publish does not stop
-   at the prompt above: `scripts/github-sync.sh pull`, then
-   `npm run db:apply`, then `npm run db:smoke` must report `"pending":0`. Do
-   this after each publish, not before: production only gains a release's
-   migrations when that release boots. If production runs a pinned ref
-   instead of `main`, apply only that ref's migrations, from a checkout of
-   it.
+3. Nothing to do for the workspace's database: it follows production by
+   itself the next time the workspace boots or Field starts in it ("The
+   workspace database"; needs the `FIELD_PRODUCTION_URL` Secret). To do it
+   now, run `npm run db:follow-production` in the Shell: it must report
+   `"state":"level"`. Run it after the publish, not before: production only
+   gains a release's migrations when that release boots. It follows a
+   pinned ref or a channel the same way, because it asks production which
+   commit it runs.
 
 `.replit`, `scripts/replit-deploy.sh`, `scripts/deploy-checks.js`,
 `scripts/deploy-release.js` and `server/release-channel.js` are the only files
@@ -902,9 +980,9 @@ With `FIELD_DEPLOY_REF=stable`, after a release is published:
    detected", press Cancel.
 3. Open `GET /health`. `build.release` must be the new tag, `build.checks`
    `passed`, and `storage.state` `ok`.
-4. In the Shell: `npm ci --no-audit --no-fund && npm run db:apply && npm run
-   db:smoke`. `db:smoke` must report `"pending":0`. Skip this when the
-   release adds no migrations.
+4. The workspace's database follows by itself ("The workspace database").
+   To check it now: `npm run db:follow-production` in the Shell must report
+   `"state":"level"`. If the prompt ever appears, press Cancel.
 
 ### When to pull the workspace
 
