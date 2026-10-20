@@ -151,11 +151,10 @@ test("the check refuses a section that breaks the format rules", () => {
   assert.throws(() => checkSection("Unreleased.md", section("Unreleased", ok)), /Unreleased has no record/);
 });
 
-test("the highlight budget is 1-8 for a stable release and 0-8 for a beta", () => {
+test("the highlight budget is 5-8 for a stable release and 0-8 for a beta", () => {
   const five = Array.from({ length: 5 }, (_, i) => `- Story ${i}. (#10)`);
   assert.equal(highlightCountError("2026.10.40", section("2026.10.40", { highlights: five })), null);
-  assert.equal(highlightCountError("2026.10.40", section("2026.10.40", { highlights: five.slice(4) })), null);
-  assert.match(highlightCountError("2026.10.40", section("2026.10.40", { highlights: [] })), /1-8 top-level bullets; found 0/);
+  assert.match(highlightCountError("2026.10.40", section("2026.10.40", { highlights: five.slice(1) })), /5-8 top-level bullets; found 4/);
   assert.match(highlightCountError("2026.10.40", section("2026.10.40", { highlights: [...five, ...five] })), /found 10/);
   assert.equal(highlightCountError("2026.10.40-beta.1", section("2026.10.40-beta.1")), null);
 });
@@ -221,8 +220,8 @@ test("draft, write and verify work from a git history and GitHub", () => {
   assert.throws(() => main(["verify", "--version", "2026.10.2"], dir, { request }), /missing #3/);
   save(edited.replace("- Sign-in loop. (#3)\n", "- Release tooling. (#4)\n"));
   assert.throws(() => main(["verify", "--version", "2026.10.2"], dir, { request }), /PR #4 \(chore\) belongs only in the record/);
-  save(edited.replace(/### Highlights\n\n[\s\S]*?\n\n### Changes/, "### Highlights\n\n### Changes"));
-  assert.throws(() => main(["verify", "--version", "2026.10.2"], dir, { request }), /1-8 top-level bullets; found 0/);
+  save(edited.replace("- Sign-in loop. (#3)\n", ""));
+  assert.throws(() => main(["verify", "--version", "2026.10.2"], dir, { request }), /5-8 top-level bullets; found 4/);
   save(edited);
 
   const notes = main(["notes", "--version", "2026.10.2"], dir);

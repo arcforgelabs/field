@@ -66,7 +66,7 @@ stable release gets a new, cumulative file, and a correction
    direct commits. They are editorial input; they get no row.
 
 3. Read the manifest, then edit the prose, not the record:
-   - Highlights: 1 to 8 bullets for a stable release, 0 to 8 for a beta.
+   - Highlights: 5 to 8 bullets for a stable release, 0 to 8 for a beta.
      One user story per bullet, in one sentence, with every pull request
      that tells it: `- Text. (#N, #M) Thanks @a.` Leave out tests, CI,
      refactors and docs unless the outcome is a material install, update or
@@ -131,10 +131,6 @@ OpenClaw's post-release docs route, with Field's names:
 
 ## Differences from OpenClaw
 
-- A stable release has 1 to 8 highlights, not OpenClaw's 5 to 8. Reason:
-  Arc Forge's stable releases are often small, and a highlight must be a
-  real user-facing change; the maintainer chose this on 20 Oct 2026 rather
-  than pad highlights with internal work.
 - The docs page is written from the changelog file at the cut, and the file
   stays the one source. OpenClaw writes its docs page by hand in a separate,
   approved docs pull request after the release, then turns the changelog
