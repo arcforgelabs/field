@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 // Release helpers for the release workflows (docs/RELEASING.md).
 //
-//   node scripts/release/release.mjs plan --channel beta|stable [--tags <file>]
+//   node scripts/release/release.mjs plan --channel beta|stable [--tags <file>] [--today YYYY-MM-DD]
 //     The next release tag for package.json's version on that channel, given
 //     the existing tags (one per line in <file>, default: git tag --list).
+//     Refuses a version that is not the next release this month.
+//   node scripts/release/release.mjs next [--tags <file>] [--today YYYY-MM-DD]
+//     The version the next release takes, for the `chore: release` pull
+//     request.
 //   node scripts/release/release.mjs check --tag <tag>
 //     Whether <tag> is a release tag that matches package.json's version.
 //   node scripts/release/release.mjs migrations
@@ -14,10 +18,13 @@
 //
 // Each prints JSON on stdout and exits 1 with a reason on stderr.
 //
-// Versions are calendar versions, named as openclaw/openclaw names its own.
-// A stable release is vYYYY.M.D (no leading zeros) and a beta is
-// vYYYY.M.D-beta.N, where the beta number belongs to the upcoming stable
-// version: v2026.10.15-beta.1 and -beta.2 come before v2026.10.15.
+// Versions are calendar versions, named as openclaw/openclaw names its own,
+// except that N is the release count in the month, not the day.
+// A stable release is vYYYY.M.N (no leading zeros) and a beta is
+// vYYYY.M.N-beta.B, where the beta number belongs to the upcoming stable
+// version: v2026.10.15-beta.1 and -beta.2 come before v2026.10.15. N is one
+// more than the month's highest stable release (1 for a month's first), and
+// can pass 31. YYYY.M is the month the release is cut in (UTC).
 // package.json holds that upcoming stable version. npm dist-tags: a beta
 // publishes to `beta`, a stable release to `latest`.
 import { execFileSync } from "node:child_process";
@@ -25,21 +32,21 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const BASE = /^(20\d{2})\.([1-9]|1[0-2])\.([1-9]|[12]\d|3[01])$/;
-const TAG = /^v(20\d{2}\.(?:[1-9]|1[0-2])\.(?:[1-9]|[12]\d|3[01]))(?:-beta\.([1-9]\d*))?$/;
+const BASE = /^(20\d{2})\.([1-9]|1[0-2])\.([1-9]\d*)$/;
+const TAG = /^v(20\d{2}\.(?:[1-9]|1[0-2])\.[1-9]\d*)(?:-beta\.([1-9]\d*))?$/;
 
 export class ReleaseError extends Error {}
 
 export function parseBaseVersion(version) {
   const match = BASE.exec(String(version ?? ""));
-  if (!match) throw new ReleaseError(`"${version}" is not a calendar version YYYY.M.D (no leading zeros)`);
+  if (!match) throw new ReleaseError(`"${version}" is not a calendar version YYYY.M.N (no leading zeros)`);
   return { version: match[0], parts: [Number(match[1]), Number(match[2]), Number(match[3])] };
 }
 
 // A release tag: its version, base version, channel and beta number.
 export function parseTag(tag) {
   const match = TAG.exec(String(tag ?? ""));
-  if (!match) throw new ReleaseError(`"${tag}" is not a release tag (vYYYY.M.D or vYYYY.M.D-beta.N)`);
+  if (!match) throw new ReleaseError(`"${tag}" is not a release tag (vYYYY.M.N or vYYYY.M.N-beta.B)`);
   const base = match[1];
   const beta = match[2] ? Number(match[2]) : null;
   const channel = beta ? "beta" : "stable";
@@ -72,8 +79,18 @@ function releaseTags(tags) {
   return parsed;
 }
 
+// The version the next stable release takes in the month of `now` (UTC):
+// YYYY.M.N, N one more than that month's highest stable release.
+export function nextVersion({ tags, now = new Date() }) {
+  const month = `${now.getUTCFullYear()}.${now.getUTCMonth() + 1}`;
+  const counts = releaseTags(tags)
+    .filter((tag) => tag.channel === "stable" && tag.base.startsWith(`${month}.`))
+    .map((tag) => parseBaseVersion(tag.base).parts[2]);
+  return `${month}.${Math.max(0, ...counts) + 1}`;
+}
+
 // The tag field-release-prepare.yml creates for package.json's version.
-export function planTag({ packageVersion, channel, tags }) {
+export function planTag({ packageVersion, channel, tags, now = new Date() }) {
   const { version } = parseBaseVersion(packageVersion);
   if (channel !== "beta" && channel !== "stable") throw new ReleaseError(`channel must be beta or stable, not "${channel}"`);
   const existing = releaseTags(tags);
@@ -81,6 +98,12 @@ export function planTag({ packageVersion, channel, tags }) {
   if (newestStable && compareBase(version, newestStable) <= 0) {
     throw new ReleaseError(
       `package.json's version ${version} is not newer than the latest stable release v${newestStable}. Open a pull request that sets a newer version first (docs/RELEASING.md).`,
+    );
+  }
+  const next = nextVersion({ tags, now });
+  if (version !== next) {
+    throw new ReleaseError(
+      `package.json's version ${version} is not the next release this month, ${next} (YYYY.M.N: N counts the month's releases). Open a pull request that sets ${next} first (docs/RELEASING.md).`,
     );
   }
   if (channel === "stable") return parseTag(`v${version}`);
@@ -157,10 +180,14 @@ async function main(argv) {
   const packageVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
   const [command, ...args] = argv;
   let result;
-  if (command === "plan") {
+  if (command === "plan" || command === "next") {
     const file = option(args, "--tags");
     const tags = (file ? readFileSync(file, "utf8") : execFileSync("git", ["tag", "--list"], { cwd: root, encoding: "utf8" })).split("\n");
-    result = planTag({ packageVersion, channel: option(args, "--channel"), tags });
+    const today = option(args, "--today");
+    const now = today ? new Date(`${today}T00:00:00Z`) : new Date();
+    if (Number.isNaN(now.getTime())) throw new ReleaseError(`--today must be YYYY-MM-DD, not "${today}"`);
+    if (command === "plan") result = planTag({ packageVersion, channel: option(args, "--channel"), tags, now });
+    else result = { version: nextVersion({ tags, now }) };
   } else if (command === "check") {
     result = checkTag({ tag: option(args, "--tag"), packageVersion });
   } else if (command === "migrations") {
@@ -170,7 +197,7 @@ async function main(argv) {
     const migrations = JSON.parse(readFileSync(option(args, "--migrations"), "utf8"));
     result = buildManifest(facts, migrations);
   } else {
-    throw new ReleaseError("usage: release.mjs plan|check|migrations|manifest (see the header of this file)");
+    throw new ReleaseError("usage: release.mjs plan|next|check|migrations|manifest (see the header of this file)");
   }
   return result;
 }

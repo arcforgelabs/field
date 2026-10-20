@@ -26,7 +26,7 @@ import { pathToFileURL } from "node:url";
 export const PACKAGE = "@arcforgelabs/field";
 export const DEFAULT_REPOSITORY = "arcforgelabs/field";
 export const RELEASE_WORKFLOW = ".github/workflows/field-npm-release.yml";
-const VERSION = /^20\d{2}\.(?:[1-9]|1[0-2])\.(?:[1-9]|[12]\d|3[01])(?:-beta\.[1-9]\d*)?$/;
+const VERSION = /^20\d{2}\.(?:[1-9]|1[0-2])\.[1-9]\d*(?:-beta\.[1-9]\d*)?$/;
 const SLSA_V1 = "https://slsa.dev/provenance/v1";
 
 export class VerifyError extends Error {}
@@ -66,7 +66,7 @@ export function readLock(path) {
 
 // field.lock for a published release.
 export async function pin(version, { env = process.env, fetchImpl = fetch, repository = DEFAULT_REPOSITORY } = {}) {
-  if (!VERSION.test(String(version))) fail(`"${version}" is not a Field release version (YYYY.M.D or YYYY.M.D-beta.N)`);
+  if (!VERSION.test(String(version))) fail(`"${version}" is not a Field release version (YYYY.M.N or YYYY.M.N-beta.B)`);
   const base = `${releasesUrl(env, repository)}/v${version}`;
   const manifestBytes = await fetchOk(`${base}/release-manifest.json`, fetchImpl, "bytes");
   const sidecar = (await fetchOk(`${base}/release-manifest.json.sha256`, fetchImpl, "bytes")).toString("utf8");

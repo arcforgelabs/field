@@ -83,8 +83,8 @@ jobs:
           RUN_ID: ${{ inputs.release_publish_run_id }}
         run: |
           set -euo pipefail
-          if [[ ! "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]?(-beta\.[1-9][0-9]*)?$ ]]; then
-            echo "::error::${TAG} is not a release tag (vYYYY.M.D or vYYYY.M.D-beta.N)." >&2
+          if [[ ! "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]*(-beta\.[1-9][0-9]*)?$ ]]; then
+            echo "::error::${TAG} is not a release tag (vYYYY.M.N or vYYYY.M.N-beta.B)." >&2
             exit 1
           fi
           run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
