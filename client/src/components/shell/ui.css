@@ -672,7 +672,9 @@ html[data-theme="field"][data-mode] .fx-table th, html[data-theme="field"][data-
   .fx-nav__label, .fx-nav--recent, .fx-nav__count { display: none; }
   .fx-side__foot { margin: 0 0 0 auto; border: 0; padding: 0 4px; }
   .fx-who { display: none; }
-  .fx-job, .fx-set { grid-template-columns: 1fr; }
+  /* One column: rows hug their content. The grid still fills the page height
+     (flex: 1), and stretched rows would open a gap under the settings tabs. */
+  .fx-job, .fx-set { grid-template-columns: 1fr; align-content: start; }
   .fx-rail { position: static; max-height: none; border-top: 1px solid var(--fx-line); }
   .fx-doc { border-right: 0; min-height: 0; }
   .fx-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
