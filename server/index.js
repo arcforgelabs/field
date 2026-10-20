@@ -70,6 +70,7 @@ import {
 } from "./auth/clerk-auth.js";
 import { createClerkFrontendApiProxy, resolveClerkProxyPath } from "./auth/clerk-proxy.js";
 import { resolveTrustProxy } from "./auth/trust-proxy.js";
+import { addScriptNonce, resolveCspMode, securityHeaders } from "./security-headers.js";
 import rateLimit from "express-rate-limit";
 import { addressLimitOptions, createRateLimits, describeConfiguredBudgets, resolveRateLimitBudgets } from "./rate-limits.js";
 import multer from "multer";
@@ -702,6 +703,8 @@ const priceCatalogRuntimeStatus = buildPriceCatalogRuntimeStatus({
 });
 
 const app = express();
+// No framework banner on any response (#179).
+app.disable("x-powered-by");
 // Behind Replit's proxy every request comes from the proxy's address; `trust
 // proxy` makes req.ip the client's (rate limits, break-glass's too, are per client).
 // See server/auth/trust-proxy.js for the choice and FIELD_TRUST_PROXY.
@@ -724,6 +727,17 @@ if (TRUST_PROXY.value !== false) {
 // rateLimit() is called here, on the app, so code scanning (CodeQL
 // js/missing-rate-limiting) sees a rate limiter ahead of every route.
 const rateLimits = createRateLimits(RATE_LIMIT_BUDGETS);
+// Security headers (server/security-headers.js, #179) on every response,
+// a 429 included. FIELD_CSP: report-only (default), enforce or off.
+let CSP_MODE;
+try {
+  CSP_MODE = resolveCspMode(process.env);
+} catch (err) {
+  console.error(`[field] ${err.message}`);
+  process.exit(1);
+}
+console.log(`[field] content security policy: ${CSP_MODE}`);
+app.use(securityHeaders({ cspMode: CSP_MODE }));
 app.use(rateLimit(addressLimitOptions(RATE_LIMIT_BUDGETS)));
 app.use(rateLimits.byAddress);
 // First, so every 5xx answer below is reported (server/observability/sentry.js).
@@ -778,6 +792,8 @@ function sendClientIndex(res) {
       ? html.replace("</head>", `${snippet}</head>`)
       : `${snippet}${html}`;
   }
+  // The theme script and Sentry's settings run under the policy's nonce.
+  html = addScriptNonce(html, res.locals.cspNonce);
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache");
   res.send(html);
@@ -1106,7 +1122,7 @@ app.get(["/demo", "/demo-account-create"], async (_req, res) => {
     if (!minted?.token) throw new Error("demo token could not be minted");
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(renderDemoBootstrapPage({ token: minted.token }));
+    res.send(addScriptNonce(renderDemoBootstrapPage({ token: minted.token }), res.locals.cspNonce));
   } catch (err) {
     console.error(`[demo] failed to create demo session: ${err.message}`);
     res.status(500).send("Demo unavailable");
@@ -5953,7 +5969,7 @@ app.get("/api/jobs/:id/wall-zones/:zoneId/render", requireAuth, async (req, res)
     if (requestedFormat === "html") {
       const requestedTheme = String(req.query?.theme || "").trim() || null;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.end(renderRetainingWallStandaloneHtml({ payload: visiblePayload, theme: requestedTheme }));
+      res.end(addScriptNonce(renderRetainingWallStandaloneHtml({ payload: visiblePayload, theme: requestedTheme }), res.locals.cspNonce));
       return;
     }
     res.json({ data: visiblePayload });
