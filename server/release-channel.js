@@ -2,9 +2,9 @@
 // GitHub Releases (with npm's dist-tags as the fallback). Used by the Replit
 // deploy (scripts/deploy-release.js, FIELD_DEPLOY_REF=stable|beta).
 //
-// Release names follow docs/RELEASING.md: vYYYY.M.N is stable, and
-// vYYYY.M.N-beta.B is a beta of the upcoming YYYY.M.N (N counts the
-// month's releases, so it can pass 31).
+// Release names follow docs/RELEASING.md: vYYYY.M.N is stable,
+// vYYYY.M.N-beta.B is a beta of the upcoming YYYY.M.N, and vYYYY.M.N-C is a
+// stable correction of YYYY.M.N.
 //
 //   stable  GitHub's latest release (what Field Release Promote points at, so
 //           a rollback is followed), else npm `latest`
@@ -14,7 +14,7 @@
 // Nothing here sends anything about the installation: each request is an
 // anonymous GET of public data.
 
-const TAG = /^v(20\d{2})\.([1-9]|1[0-2])\.([1-9]\d*)(?:-beta\.([1-9]\d*))?$/;
+const TAG = /^v(20\d{2})\.([1-9]|1[0-2])\.([1-9]\d*)(?:-beta\.([1-9]\d*)|-([1-9]\d*))?$/;
 export const CHANNELS = ["stable", "beta"];
 export const DEFAULT_GITHUB_API = "https://api.github.com";
 export const DEFAULT_GITHUB_DOWNLOADS = "https://github.com";
@@ -36,8 +36,9 @@ export function parseReleaseTag(value) {
     tag,
     version: tag.slice(1),
     channel: beta ? "beta" : "stable",
-    // A stable release sorts after every beta of its own version.
-    parts: [Number(match[1]), Number(match[2]), Number(match[3]), beta ?? Number.POSITIVE_INFINITY],
+    // A stable release sorts after every beta of its own version, and its
+    // corrections after it.
+    parts: [Number(match[1]), Number(match[2]), Number(match[3]), beta ?? Number.POSITIVE_INFINITY, Number(match[5] ?? 0)],
   };
 }
 
@@ -45,7 +46,7 @@ export function parseReleaseTag(value) {
 export function compareReleases(a, b) {
   const [x, y] = [parseReleaseTag(a), parseReleaseTag(b)];
   if (!x || !y) throw new ReleaseUnavailable(`cannot compare ${a} with ${b}`);
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < 5; index += 1) {
     if (x.parts[index] !== y.parts[index]) return x.parts[index] < y.parts[index] ? -1 : 1;
   }
   return 0;

@@ -20,6 +20,8 @@ Name the workflow. Leave the code-level cause for Why This Change Was Made.
 <!--
 What a user, operator, or developer can now do or expect.
 If nobody outside the change can tell, say there is no user-visible change.
+The release cut writes the changelog from the title and this section;
+do not edit CHANGELOG.md, CHANGELOG/ or docs/releases/<version>.md here.
 -->
 
 ## Why This Change Was Made

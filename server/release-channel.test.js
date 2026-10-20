@@ -29,9 +29,9 @@ const options = (fetchImpl) => ({ slug: SLUG, githubApi: API, npmRegistry: NPM, 
 test("release tags parse as openclaw/openclaw's do, and a stable release sorts after its own betas", () => {
   assert.deepEqual(parseReleaseTag("v2026.10.15").channel, "stable");
   assert.deepEqual(parseReleaseTag("2026.10.15-beta.2").tag, "v2026.10.15-beta.2");
-  for (const bad of ["v2026.01.15", "0.0.0-placeholder", "v2026.10.15-rc.1", "main", ""]) assert.equal(parseReleaseTag(bad), null, bad);
-  // The last number counts the month's releases, so it can pass 31.
-  const ordered = ["v2026.9.30", "v2026.10.15-beta.1", "v2026.10.15-beta.2", "v2026.10.15", "v2026.10.16-beta.1", "v2026.10.32", "v2026.10.104-beta.1", "v2026.11.1"];
+  for (const bad of ["v2026.01.15", "0.0.0-placeholder", "v2026.10.15-rc.1", "v2026.10.15-0", "main", ""]) assert.equal(parseReleaseTag(bad), null, bad);
+  assert.deepEqual(parseReleaseTag("v2026.10.15-2").channel, "stable");
+  const ordered = ["v2026.9.30", "v2026.10.15-beta.1", "v2026.10.15-beta.2", "v2026.10.15", "v2026.10.15-1", "v2026.10.15-2", "v2026.10.16-beta.1", "v2026.10.31", "v2026.10.32-beta.1", "v2026.10.32"];
   assert.deepEqual([...ordered].reverse().sort(compareReleases), ordered);
 });
 

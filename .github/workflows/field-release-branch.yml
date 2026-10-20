@@ -1,0 +1,225 @@
+name: Field Release Branch
+run-name: ${{ inputs.operation }} release/${{ inputs.version }}
+
+# The release branch release/YYYY.M.N (docs/RELEASING.md), as openclaw/openclaw
+# keeps one per release. Run from main; it is the only writer of the branch.
+#
+#   cut          creates release/YYYY.M.N at a main commit a release agent
+#                picked, with one release commit on top: package.json's
+#                version and the version's changelog files, taken from
+#                notes_ref. After the cut, main moves on and the branch takes
+#                only blocker fixes.
+#   cherry-pick  copies merged main commits onto the branch with
+#                `git cherry-pick -x`, for confirmed release blockers only,
+#                and the refreshed changelog files from notes_ref if given.
+#   notes        replaces the version's changelog files with notes_ref's.
+#
+# Each push starts Field Full Release Validation, CI and the secret scan on
+# the branch. Field Release Prepare tags only a branch commit that the
+# validation proved.
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: cut, cherry-pick or notes
+        required: true
+        type: choice
+        options: [cut, cherry-pick, notes]
+      version:
+        description: The release version, YYYY.M.N (the branch is release/YYYY.M.N)
+        required: true
+        type: string
+      commits:
+        description: "cut: the main commit to cut at. cherry-pick: main commits, oldest first, space-separated"
+        required: false
+        type: string
+      notes_ref:
+        description: A branch or commit whose CHANGELOG/ holds this version's files (required for cut and notes)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: field-release-branch-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  branch:
+    name: ${{ inputs.operation }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Require the workflow from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run Field Release Branch from main, not ${GITHUB_REF}." >&2
+          exit 1
+
+      - name: Check out main with its tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Resolve the branch
+        id: branch
+        env:
+          OPERATION: ${{ inputs.operation }}
+          VERSION: ${{ inputs.version }}
+          NOTES_REF: ${{ inputs.notes_ref }}
+        run: |
+          set -euo pipefail
+          branch="$(node scripts/release/release.mjs branch --version "$VERSION" | jq -r .branch)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          exists=false
+          if git fetch --quiet origin "+refs/heads/${branch}:refs/remotes/origin/${branch}" 2>/dev/null; then exists=true; fi
+          if [[ "$OPERATION" == "cut" && "$exists" == "true" ]]; then
+            echo "::error::${branch} already exists. A second cut on newer main needs the maintainer's word: blocker fixes go in with cherry-pick." >&2
+            exit 1
+          fi
+          if [[ "$OPERATION" != "cut" && "$exists" != "true" ]]; then
+            echo "::error::${branch} does not exist. Cut it first." >&2
+            exit 1
+          fi
+          if [[ "$OPERATION" != "cherry-pick" && -z "$NOTES_REF" ]]; then
+            echo "::error::${OPERATION} takes the changelog files from notes_ref." >&2
+            exit 1
+          fi
+          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+
+      - name: Cut the branch at the picked main commit
+        if: inputs.operation == 'cut'
+        env:
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commits }}
+        run: |
+          set -euo pipefail
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::commits must be one full main commit to cut at." >&2; exit 1; }
+          if ! git merge-base --is-ancestor "$COMMIT" refs/remotes/origin/main; then
+            echo "::error::${COMMIT} is not on main." >&2
+            exit 1
+          fi
+          git switch --quiet -c "$BRANCH" "$COMMIT"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version > /dev/null
+          # The new version must be newer than every stable release.
+          node scripts/release/release.mjs plan --channel stable > /dev/null
+
+      - name: Cherry-pick the blocker fixes
+        if: inputs.operation == 'cherry-pick'
+        env:
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          COMMITS: ${{ inputs.commits }}
+        run: |
+          set -euo pipefail
+          git switch --quiet -c "$BRANCH" "refs/remotes/origin/${BRANCH}"
+          read -r -a picks <<< "$COMMITS"
+          (( ${#picks[@]} )) || { echo "::error::cherry-pick needs the main commits to copy." >&2; exit 1; }
+          for commit in "${picks[@]}"; do
+            [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::${commit} is not a full commit hash." >&2; exit 1; }
+            if ! git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
+              echo "::error::${commit} is not on main. A fix merges to main first, then comes here." >&2
+              exit 1
+            fi
+            if git log --format=%B "$(git merge-base HEAD refs/remotes/origin/main)..HEAD" | grep -qF "(cherry picked from commit ${commit})" \
+              || git merge-base --is-ancestor "$commit" HEAD; then
+              echo "::error::${commit} is already on ${BRANCH}." >&2
+              exit 1
+            fi
+            if ! git cherry-pick -x "$commit"; then
+              git cherry-pick --abort
+              echo "::error::${commit} does not apply cleanly to ${BRANCH}. Open a pull request into ${BRANCH} with the resolved cherry-pick (keep its -x line), and merge it." >&2
+              exit 1
+            fi
+          done
+
+      - name: Check out the branch for its notes
+        if: inputs.operation == 'notes'
+        env:
+          BRANCH: ${{ steps.branch.outputs.branch }}
+        run: git switch --quiet -c "$BRANCH" "refs/remotes/origin/${BRANCH}"
+
+      # The version's files only (YYYY.M.N, its betas and corrections), with
+      # their records, the index and the docs pages written again. Nothing
+      # else of notes_ref reaches the branch.
+      - name: Take the changelog files from notes_ref
+        if: inputs.notes_ref != ''
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          NOTES_REF: ${{ inputs.notes_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet --no-tags origin "$NOTES_REF"
+          notes="$(git rev-parse FETCH_HEAD)"
+          mapfile -t files < <(git ls-tree -r --name-only "$notes" -- CHANGELOG/ \
+            | grep -E "^CHANGELOG/(records/)?${VERSION//./\\.}(-beta\.[1-9][0-9]*|-[1-9][0-9]*)?\.md$" || true)
+          (( ${#files[@]} )) || { echo "::error::${NOTES_REF} has no CHANGELOG file for ${VERSION}." >&2; exit 1; }
+          git checkout "$notes" -- "${files[@]}"
+          node scripts/release/changelog.mjs index > /dev/null
+          npm run --silent changelog:check
+          versions=()
+          for file in "${files[@]}"; do
+            [[ "$file" == CHANGELOG/records/* ]] || versions+=("$(basename "$file" .md)")
+          done
+          # Each untagged file must list this branch's history; a tagged
+          # release's file is checked against its tag.
+          for name in "${versions[@]}"; do
+            node scripts/release/changelog.mjs verify --version "$name"
+          done
+          echo "versions=${versions[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        env:
+          OPERATION: ${{ inputs.operation }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          VERSION: ${{ inputs.version }}
+          NOTES: ${{ steps.notes.outputs.versions }}
+        run: |
+          set -euo pipefail
+          git add -A package.json package-lock.json CHANGELOG.md CHANGELOG docs/releases
+          if ! git diff --cached --quiet; then
+            if [[ "$OPERATION" == "cut" ]]; then
+              git commit --quiet -m "chore(release): ${VERSION}"
+            else
+              git commit --quiet -m "docs(changelog): ${NOTES} notes"
+            fi
+          elif [[ "$OPERATION" == "notes" ]]; then
+            echo "The changelog files on ${BRANCH} are already these."
+          fi
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          {
+            echo "## ${BRANCH}"
+            echo
+            echo "${OPERATION}: $(git rev-parse HEAD)"
+            echo
+            git log --oneline "$(git merge-base HEAD refs/remotes/origin/main)..HEAD"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # A push with GITHUB_TOKEN starts no workflow, so start them explicitly:
+      # the validation Prepare requires, and CI and the secret scan, whose
+      # `test` and `gitleaks` checks on the release commit are what an
+      # installation's deploy asks for (scripts/deploy-checks.js).
+      - name: Start the validation and the checks on the branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+        run: |
+          set -euo pipefail
+          for workflow in field-full-release-validation.yml ci.yml secret-scan.yml; do
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          done

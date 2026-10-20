@@ -50,6 +50,8 @@
     "start": "node --import ./server/observability/instrument.js server/index.js",
     "dev": "FIELD_PGLITE=\"${FIELD_PGLITE:-1}\" node --watch server/index.js",
     "dev:client": "cd client && npx vite",
+    "changelog:check": "node scripts/release/changelog.mjs check",
+    "release:stable": "node scripts/release/release-stable.mjs",
     "test": "npm run db:build && bash -lc 'find server scripts shared -name \"*.test.js\" -print0 | xargs -0 node --test --test-concurrency=\"${FIELD_TEST_CONCURRENCY:-8}\"'",
     "test:client": "npm --prefix client test",
     "build": "npm run db:build && npm run build:client",

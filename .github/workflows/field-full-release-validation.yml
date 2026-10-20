@@ -1,0 +1,147 @@
+name: Field Full Release Validation
+run-name: Full release validation of ${{ github.ref_name }}
+
+# openclaw/openclaw's Full Release Validation (and its nightly schedule): main
+# is kept ready to release, so every 3 hours this proves one exact main
+# commit with every lane a release needs (docs/RELEASING.md). A release
+# agent picks a cut from the commits it proved. Field Release Branch starts it
+# on a release branch after each change there, and Field Release Prepare tags
+# only a release-branch commit that it proved. It publishes nothing.
+#
+#   ci              every CI lane on the commit (ci.yml, docs/CI.md)
+#   gitleaks        the secret scan over the commit's whole history
+#   release-branch  on release/YYYY.M.N only: package.json holds YYYY.M.N, and
+#                   each changelog file of that version matches its history
+#   seal            the run passes only when every lane passed
+
+on:
+  schedule:
+    # Every 3 hours while main moves toward a release; one main commit per run.
+    - cron: "7 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time per branch: a new run queues behind the running one.
+concurrency:
+  group: field-full-release-validation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scope:
+    name: scope
+    if: github.repository == 'arcforgelabs/field' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      reused: ${{ steps.reuse.outputs.run }}
+    steps:
+      # A quiet main: a scheduled run reuses an earlier pass of this exact
+      # commit instead of proving it again, as OpenClaw's reuse_evidence does.
+      - name: Reuse an earlier pass of this commit
+        id: reuse
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/field-full-release-validation.yml/runs?head_sha=${GITHUB_SHA}&status=success&per_page=1" \
+            --jq '.workflow_runs[0].id // ""')"
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+          if [[ -n "$run" ]]; then
+            echo "Run ${run} already proved ${GITHUB_SHA}; not proving it again." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  ci:
+    name: ci
+    needs: scope
+    if: needs.scope.outputs.reused == ''
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.sha }}
+      tag: full-release-validation
+
+  gitleaks:
+    name: gitleaks
+    needs: scope
+    if: needs.scope.outputs.reused == ''
+    uses: ./.github/workflows/secret-scan.yml
+
+  release-branch:
+    name: release-branch
+    needs: scope
+    if: needs.scope.outputs.reused == '' && startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the branch with its tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Require the branch's version and changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${BRANCH#release/}"
+          node scripts/release/release.mjs branch --version "$version" > /dev/null
+          package="$(jq -r .version package.json)"
+          if [[ "$package" != "$version" ]]; then
+            echo "::error::${BRANCH} holds package.json version ${package}, not ${version}." >&2
+            exit 1
+          fi
+          shopt -s nullglob
+          files=(CHANGELOG/"${version}".md CHANGELOG/"${version}"-*.md)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::${BRANCH} has no changelog file for ${version}." >&2
+            exit 1
+          fi
+          # A file whose release is tagged is checked against its tag; the
+          # rest against this commit.
+          for file in "${files[@]}"; do
+            name="$(basename "$file" .md)"
+            node scripts/release/changelog.mjs verify --version "$name"
+          done
+
+  seal:
+    name: seal
+    needs: [scope, ci, gitleaks, release-branch]
+    if: ${{ always() && needs.scope.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every lane
+        env:
+          REUSED: ${{ needs.scope.outputs.reused }}
+          CI: ${{ needs.ci.result }}
+          GITLEAKS: ${{ needs.gitleaks.result }}
+          BRANCH: ${{ needs.release-branch.result }}
+          RELEASE_BRANCH: ${{ startsWith(github.ref, 'refs/heads/release/') }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$REUSED" ]]; then
+            echo "Validated ${GITHUB_SHA} (run ${REUSED})." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          failed=()
+          [[ "$CI" == "success" ]] || failed+=("ci: ${CI}")
+          [[ "$GITLEAKS" == "success" ]] || failed+=("gitleaks: ${GITLEAKS}")
+          if [[ "$RELEASE_BRANCH" == "true" && "$BRANCH" != "success" ]]; then failed+=("release-branch: ${BRANCH}"); fi
+          if (( ${#failed[@]} )); then
+            printf '::error::%s\n' "${failed[@]}" >&2
+            exit 1
+          fi
+          echo "Validated ${GITHUB_SHA}: every lane passed." >> "$GITHUB_STEP_SUMMARY"

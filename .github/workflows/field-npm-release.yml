@@ -13,7 +13,10 @@ run-name: field npm ${{ inputs.tag }}
 #             run (below). A manual dispatch always waits for it.
 #   publish   environment npm-publish: npm trusted publishing with
 #             provenance, no stored token
-#   evidence  verifies what npm serves and attaches postpublish-evidence.json
+#   evidence  verifies what npm serves, attaches postpublish-evidence.json,
+#             and makes the draft GitHub Release public
+#   closeout  for a stable release or a correction, starts Field Release
+#             Closeout, which brings what shipped back to main
 #
 # A stable release has one approval: environment release, at the start of
 # Field Release Publish. This run accepts it instead of asking again only
@@ -83,8 +86,8 @@ jobs:
           RUN_ID: ${{ inputs.release_publish_run_id }}
         run: |
           set -euo pipefail
-          if [[ ! "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]*(-beta\.[1-9][0-9]*)?$ ]]; then
-            echo "::error::${TAG} is not a release tag (vYYYY.M.N or vYYYY.M.N-beta.B)." >&2
+          if [[ ! "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]*(-beta\.[1-9][0-9]*|-[1-9][0-9]*)?$ ]]; then
+            echo "::error::${TAG} is not a release tag (vYYYY.M.N, vYYYY.M.N-beta.B or vYYYY.M.N-C)." >&2
             exit 1
           fi
           run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
@@ -98,8 +101,11 @@ jobs:
           fi
           mkdir -p "$RUNNER_TEMP/package" "$RUNNER_TEMP/release"
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name npm-package --dir "$RUNNER_TEMP/package"
+          # The manifest comes from the same Publish run as the tarball: the
+          # GitHub Release is still a draft, which this read-only token
+          # cannot see.
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name release-manifest --dir "$RUNNER_TEMP/release"
           cd "$RUNNER_TEMP/release"
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'release-manifest.json*'
           sha256sum -c release-manifest.json.sha256
           manifest="$RUNNER_TEMP/release/release-manifest.json"
           jq -e --arg tag "$TAG" '.tag == $tag' "$manifest" >/dev/null || { echo "::error::The manifest is not for ${TAG}." >&2; exit 1; }
@@ -349,3 +355,41 @@ jobs:
           sha256sum postpublish-evidence.json > postpublish-evidence.json.sha256
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber postpublish-evidence.json postpublish-evidence.json.sha256
           jq . postpublish-evidence.json >> "$GITHUB_STEP_SUMMARY"
+
+      # openclaw/openclaw makes the GitHub Release public as soon as npm is
+      # verified, never before: Field Release Publish left it a draft, so a
+      # channel follower (GitHub's latest release) never sees a version npm
+      # does not serve.
+      - name: Make the GitHub Release public
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+        run: |
+          set -euo pipefail
+          if [[ "$CHANNEL" == "beta" ]]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          fi
+          echo "${TAG} is public: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
+
+  # openclaw/openclaw's stable main closeout starts once the published stable
+  # release is verified: main gets what shipped (field-release-closeout.yml).
+  closeout:
+    name: closeout
+    needs: [resolve, evidence]
+    if: ${{ !cancelled() && needs.evidence.result == 'success' && needs.resolve.outputs.channel == 'stable' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Start Field Release Closeout
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run field-release-closeout.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$TAG"
+          echo "Started Field Release Closeout for ${TAG}." >> "$GITHUB_STEP_SUMMARY"
