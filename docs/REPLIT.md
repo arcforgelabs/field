@@ -44,6 +44,25 @@ Gmail OAuth refresh tokens granted through the app are stored in
 (also set in `.replit`), which makes Field refuse a local PGlite database: on
 Replit the database is always `DATABASE_URL`.
 
+### Security headers
+
+Every response carries `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`
+and a Content-Security-Policy (`server/security-headers.js`). The
+configuration value `FIELD_CSP` sets how the policy applies:
+
+| `FIELD_CSP` | Effect |
+| --- | --- |
+| Unset or `report-only` | The policy is sent as `Content-Security-Policy-Report-Only`. The browser console names each script, frame or request the policy would block, and nothing is blocked. |
+| `enforce` | The policy is sent as `Content-Security-Policy`, and the browser blocks what it does not allow. |
+| `off` | No policy is sent. The other headers stay. |
+
+The page's inline scripts run under a nonce made for each response, so the
+policy has no `'unsafe-inline'` for scripts. Before you set `enforce`, open
+the published app with the browser console open, in report-only. Sign in
+with Google, open a quote PDF and send a problem report. Then look for
+`[Report Only]` messages. A wrong value stops Field at boot.
+
 ## Database
 
 Field's PostgreSQL connection comes from `DATABASE_URL`, the secret Replit
