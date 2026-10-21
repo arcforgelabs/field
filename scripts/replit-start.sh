@@ -11,5 +11,15 @@ export FIELD_RUNTIME="${FIELD_RUNTIME:-replit}"
 if [ -z "${FIELD_REVISION:-}" ] && [ -s .field-revision ]; then
   export FIELD_REVISION="$(cat .field-revision)"
 fi
+# In the workspace only: bring the workspace's database to the migrations
+# production runs, so Replit's "Development database changes detected" prompt
+# does not appear (scripts/replit-workspace-db.js, docs/REPLIT.md "The
+# workspace database"). It needs the FIELD_PRODUCTION_URL Secret. The
+# published app (REPLIT_DEPLOYMENT, started by scripts/replit-deploy.sh)
+# skips this and migrates itself. A failure only warns; Field still starts.
+if [ -z "${REPLIT_DEPLOYMENT:-}" ] && [ -z "${FIELD_DEPLOYED_FROM:-}" ] && [ -n "${FIELD_PRODUCTION_URL:-}" ]; then
+  node scripts/replit-workspace-db.js sync --warn-only \
+    || echo "[workspace-db] WARNING: the workspace database could not follow production. Starting anyway" >&2
+fi
 # Sentry starts before Express so its routes are traced (no-op without SENTRY_DSN).
 exec node --import ./server/observability/instrument.js server/index.js

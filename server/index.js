@@ -53,6 +53,7 @@ import { resolveDocumentReplicaConfig } from "./documents/r2-config.js";
 import { createR2ObjectStore } from "./documents/r2-client.js";
 import { createDisabledReplicator, createDocumentReplicator } from "./documents/replicator.js";
 import { startDurableStorage } from "./storage/durable-store.js";
+import { openStandbyServer } from "./standby-server.js";
 import { heldDataMigrations, runDataMigrations } from "./data-migrations/index.js";
 import { createDataMigrationDryRunHandler, DRY_RUN_PATH as DATA_MIGRATIONS_DRY_RUN_PATH } from "./data-migrations/dry-run-route.js";
 import { AMOUNT_DISAGREEMENTS_PATH, AMOUNT_SETTLE_PATH, createInvoiceAmountDisagreementsHandler, createInvoiceAmountSettleHandler } from "./invoices/amount-routes.js";
@@ -69,6 +70,7 @@ import {
 } from "./auth/clerk-auth.js";
 import { createClerkFrontendApiProxy, resolveClerkProxyPath } from "./auth/clerk-proxy.js";
 import { resolveTrustProxy } from "./auth/trust-proxy.js";
+import { addScriptNonce, resolveCspMode, securityHeaders } from "./security-headers.js";
 import rateLimit from "express-rate-limit";
 import { addressLimitOptions, createRateLimits, describeConfiguredBudgets, resolveRateLimitBudgets } from "./rate-limits.js";
 import multer from "multer";
@@ -248,7 +250,7 @@ import {
 } from "./quote-internal-breakdown.js";
 import { buildWallZoneRenderPayloadForJob, readWallZones } from "./wall-zones.js";
 import { runExclusiveJobMutation } from "./job-mutation-guard.js";
-import { installJobGenerationCommitListener, resolveActiveJobGeneration, runAtomicJobGeneration } from "./job-generation.js";
+import { installJobGenerationCommitListener, resolveActiveJobGeneration, runAtomicJobGeneration, withJobGenerationReadScope } from "./job-generation.js";
 import {
   findIssuedQuoteVersion,
   readIssuedQuoteArtifact,
@@ -388,10 +390,18 @@ try {
 // Durable storage: with FIELD_STORAGE=postgres the data directory is a
 // working copy of PostgreSQL. Take the single-writer lock and rebuild it before
 // anything below reads it; refuse to start if that fails. Unset: no-op.
+// While another process holds the lock (the old copy during a republish), a
+// standby server answers on PORT so the old copy can be stopped
+// (server/standby-server.js).
 let durableStorage = null;
+let standby = null;
 try {
   durableStorage = await startDurableStorage({
     dataDir: DATA_DIR,
+    onLockWait: () => {
+      console.log("[storage] another Field process holds the storage lock; waiting for it to stop");
+      standby = openStandbyServer({ port: PORT });
+    },
     onLockLost: (error) => {
       console.error(`[storage] ${error.message}; exiting so a restart rebuilds from PostgreSQL`);
       process.exit(1);
@@ -693,6 +703,8 @@ const priceCatalogRuntimeStatus = buildPriceCatalogRuntimeStatus({
 });
 
 const app = express();
+// No framework banner on any response (#179).
+app.disable("x-powered-by");
 // Behind Replit's proxy every request comes from the proxy's address; `trust
 // proxy` makes req.ip the client's (rate limits, break-glass's too, are per client).
 // See server/auth/trust-proxy.js for the choice and FIELD_TRUST_PROXY.
@@ -715,6 +727,17 @@ if (TRUST_PROXY.value !== false) {
 // rateLimit() is called here, on the app, so code scanning (CodeQL
 // js/missing-rate-limiting) sees a rate limiter ahead of every route.
 const rateLimits = createRateLimits(RATE_LIMIT_BUDGETS);
+// Security headers (server/security-headers.js, #179) on every response,
+// a 429 included. FIELD_CSP: report-only (default), enforce or off.
+let CSP_MODE;
+try {
+  CSP_MODE = resolveCspMode(process.env);
+} catch (err) {
+  console.error(`[field] ${err.message}`);
+  process.exit(1);
+}
+console.log(`[field] content security policy: ${CSP_MODE}`);
+app.use(securityHeaders({ cspMode: CSP_MODE }));
 app.use(rateLimit(addressLimitOptions(RATE_LIMIT_BUDGETS)));
 app.use(rateLimits.byAddress);
 // First, so every 5xx answer below is reported (server/observability/sentry.js).
@@ -769,6 +792,8 @@ function sendClientIndex(res) {
       ? html.replace("</head>", `${snippet}</head>`)
       : `${snippet}${html}`;
   }
+  // The theme script and Sentry's settings run under the policy's nonce.
+  html = addScriptNonce(html, res.locals.cspNonce);
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache");
   res.send(html);
@@ -1097,7 +1122,7 @@ app.get(["/demo", "/demo-account-create"], async (_req, res) => {
     if (!minted?.token) throw new Error("demo token could not be minted");
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(renderDemoBootstrapPage({ token: minted.token }));
+    res.send(addScriptNonce(renderDemoBootstrapPage({ token: minted.token }), res.locals.cspNonce));
   } catch (err) {
     console.error(`[demo] failed to create demo session: ${err.message}`);
     res.status(500).send("Demo unavailable");
@@ -1693,11 +1718,12 @@ app.get("/api/jobs", requireAuth, async (_req, res) => {
           reportJobListSkip({ id: null, step: "scheduled emails", reason: error?.code === "FIELD_JOB_LIST_TIMEOUT" ? "timeout" : "error" }, error);
           return { ...jobDeletionDeps(), listScheduledEmails: async () => [] };
         });
-      const { jobs, skipped } = await listJobsWithinDeadline(rows, {
+      // Each job's active generation is resolved once, not once per file read.
+      const { jobs, skipped } = await withJobGenerationReadScope(() => listJobsWithinDeadline(rows, {
         readMeta: (row) => readNormalizedJobMeta(row.dir),
         listJob: (row, meta) => listJobWithDeletable(row.dir, meta, deletionDeps),
         onSkip: reportJobListSkip,
-      });
+      }));
       if (skipped.length) res.set("X-Field-Jobs-Skipped", String(skipped.length));
       return res.json(jobs);
     } catch { /* fall through to directory scan */ }
@@ -5944,7 +5970,7 @@ app.get("/api/jobs/:id/wall-zones/:zoneId/render", requireAuth, async (req, res)
     if (requestedFormat === "html") {
       const requestedTheme = String(req.query?.theme || "").trim() || null;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.end(renderRetainingWallStandaloneHtml({ payload: visiblePayload, theme: requestedTheme }));
+      res.end(addScriptNonce(renderRetainingWallStandaloneHtml({ payload: visiblePayload, theme: requestedTheme }), res.locals.cspNonce));
       return;
     }
     res.json({ data: visiblePayload });
@@ -6199,11 +6225,18 @@ if (durableStorage) {
     process.exit(1);
   }
 }
-const server = app.listen(PORT, "0.0.0.0", () => {
+const logListening = () => {
   console.log(`[field] listening on http://0.0.0.0:${PORT}`);
   console.log(`[field] data: ${DATA_DIR}`);
   console.log(`[field] client: ${existsSync(clientDist) ? "React (client/dist)" : "not built (run npm run build)"}`);
-});
+};
+let server;
+if (standby) {
+  server = standby.handOver(app);
+  logListening();
+} else {
+  server = app.listen(PORT, "0.0.0.0", logListening);
+}
 
 // Graceful shutdown: stop accepting new connections, drain in-flight
 // requests, then exit. Caddy's lb_try_duration holds incoming requests

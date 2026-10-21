@@ -367,8 +367,8 @@ export async function queryRows(query, db = getDb()) {
   return Array.isArray(result) ? Array.from(result) : result.rows;
 }
 
-function migrationJournal() {
-  return JSON.parse(readFileSync(join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf8")).entries;
+function migrationJournal(migrationsFolder = MIGRATIONS_FOLDER) {
+  return JSON.parse(readFileSync(join(migrationsFolder, "meta", "_journal.json"), "utf8")).entries;
 }
 
 async function appliedMigrationCount(db) {
@@ -379,8 +379,11 @@ async function appliedMigrationCount(db) {
 }
 
 // Migration counts without changing anything: { total, applied, pending }.
-export async function getMigrationStatus(db = getDb()) {
-  const total = migrationJournal().length;
+// `migrationsFolder` names another set of migrations to count against (the
+// Replit workspace follows the release production runs:
+// scripts/replit-workspace-db.js).
+export async function getMigrationStatus(db = getDb(), { migrationsFolder = MIGRATIONS_FOLDER } = {}) {
+  const total = migrationJournal(migrationsFolder).length;
   const applied = await appliedMigrationCount(db);
   return { total, applied, pending: Math.max(total - applied, 0) };
 }
@@ -392,16 +395,20 @@ export async function getMigrationStatus(db = getDb()) {
 //
 // With no database configured it opens nothing (no PGlite, no connection) and
 // returns { driver: "none", target, total, applied: 0, skipped: true }.
-export async function runMigrations(options = {}) {
+//
+// `migrationsFolder` applies another folder of migrations instead, under the
+// same lock. The server always uses its own; scripts/replit-workspace-db.js
+// passes the folder of the release production runs.
+export async function runMigrations({ migrationsFolder = MIGRATIONS_FOLDER, ...options } = {}) {
   if (!state) {
     const config = resolveDbConfig(options);
     if (config.driver === "none") {
-      return { driver: "none", target: config.target, total: migrationJournal().length, applied: 0, skipped: true };
+      return { driver: "none", target: config.target, total: migrationJournal(migrationsFolder).length, applied: 0, skipped: true };
     }
   }
   const db = getDb(options);
   const { config } = state;
-  return withDbErrors(config.target, () => migrateDb(db, config));
+  return withDbErrors(config.target, () => migrateDb(db, config, migrationsFolder));
 }
 
 const DEFAULT_MIGRATION_LOCK_TIMEOUT_MS = 60_000;
@@ -464,11 +471,11 @@ export async function migratePostgresDatabase(db, { migrationsFolder = MIGRATION
   }
 }
 
-async function migrateDb(db, config) {
+async function migrateDb(db, config, migrationsFolder) {
   let before;
   if (config.driver === "pglite") {
     before = await appliedMigrationCount(db);
-    await migratePglite(db, { migrationsFolder: MIGRATIONS_FOLDER });
+    await migratePglite(db, { migrationsFolder });
   } else {
     // A pool of exactly one connection, so the session advisory lock and the
     // migration are guaranteed to share a backend. That needs a direct
@@ -478,13 +485,13 @@ async function migrateDb(db, config) {
       await takeMigrationLock(client);
       const lockedDb = drizzlePostgres(client, { schema });
       before = await appliedMigrationCount(lockedDb);
-      await migratePostgresDatabase(lockedDb);
+      await migratePostgresDatabase(lockedDb, { migrationsFolder });
       await client`select pg_advisory_unlock(${MIGRATION_LOCK_KEY.toString()}::bigint)`;
     } finally {
       await client.end({ timeout: 5 });
     }
   }
-  const status = await getMigrationStatus(db);
+  const status = await getMigrationStatus(db, { migrationsFolder });
   return { driver: config.driver, target: config.target, total: status.total, applied: status.applied - before };
 }
 

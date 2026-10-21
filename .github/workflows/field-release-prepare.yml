@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: beta (a pre-release, vYYYY.M.D-beta.N) or stable (vYYYY.M.D)
+        description: beta (a pre-release, vYYYY.M.N-beta.B) or stable (vYYYY.M.N)
         required: true
         type: choice
         default: beta

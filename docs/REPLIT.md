@@ -2,7 +2,8 @@
 
 Field can run as a published Replit app. This is the runbook for an
 installation on Replit, for people and agents alike. Replit's Agent reads
-`replit.md`, which links to `AGENTS.md` like the other harness files.
+`replit.md`, a link to `AGENTS.md`, which lists the tasks of an installation
+and the sections here that cover them.
 
 ## What runs here
 
@@ -43,6 +44,25 @@ Gmail OAuth refresh tokens granted through the app are stored in
 (also set in `.replit`), which makes Field refuse a local PGlite database: on
 Replit the database is always `DATABASE_URL`.
 
+### Security headers
+
+Every response carries `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`
+and a Content-Security-Policy (`server/security-headers.js`). The
+configuration value `FIELD_CSP` sets how the policy applies:
+
+| `FIELD_CSP` | Effect |
+| --- | --- |
+| Unset or `report-only` | The policy is sent as `Content-Security-Policy-Report-Only`. The browser console names each script, frame or request the policy would block, and nothing is blocked. |
+| `enforce` | The policy is sent as `Content-Security-Policy`, and the browser blocks what it does not allow. |
+| `off` | No policy is sent. The other headers stay. |
+
+The page's inline scripts run under a nonce made for each response, so the
+policy has no `'unsafe-inline'` for scripts. Before you set `enforce`, open
+the published app with the browser console open, in report-only. Sign in
+with Google, open a quote PDF and send a problem report. Then look for
+`[Report Only]` messages. A wrong value stops Field at boot.
+
 ## Database
 
 Field's PostgreSQL connection comes from `DATABASE_URL`, the secret Replit
@@ -52,9 +72,9 @@ print, log or paste it; Field's logs and `npm run db:smoke` name the variable,
 not its value.
 
 The workspace and the published app have separate databases, each with its
-own `DATABASE_URL`. The workspace's database is a copy: `npm run db:apply`
-keeps its schema in step with production (see "Publishing"), but its data is
-not production's. A command run in the workspace shell reads and writes the
+own `DATABASE_URL`. The workspace's database is a copy: it follows
+production's migrations by itself ("The workspace database" below), but its
+data is not production's. A command run in the workspace shell reads and writes the
 workspace's database, never production's. Never copy production's database
 credentials into the workspace. Field checks and changes production's data
 from inside the published app instead: data migrations and backfills run at
@@ -102,6 +122,83 @@ boot, and an owner checks them with the dry-run route ("Data migrations").
   direct endpoint.
 
 See `server/db/README.md` for the runtime module and how to add tables.
+
+### The workspace database
+
+Before each publish, Replit compares the workspace's tables with
+production's. If they differ, it stops at "Development database changes
+detected" and offers to make production match the workspace. That breaks
+Field: Field migrates production itself when it starts, and a table made
+ahead of time stops that migration. The tables differ when the workspace
+database has fewer migrations than production (production gained a
+release's migrations when that release started) or more (the workspace
+applied migrations production does not run yet).
+
+So the workspace database follows production by itself. Set it up once:
+
+1. Tools > Secrets in the workspace: add `FIELD_PRODUCTION_URL` with the
+   published app's address, for example `https://field.example.com`. It is
+   not a credential. Put it in the workspace's Secrets, not in the
+   deployment's.
+2. Pull the workspace once (`scripts/github-sync.sh pull`), so it has
+   `scripts/replit-workspace-db.js` and the `.replit` that runs it.
+3. Check it in the Shell: `npm run db:follow-production`. The last line is
+   JSON. `"state":"level"` means the workspace database has exactly
+   production's migrations.
+
+Then `scripts/replit-workspace-db.js sync` runs each time the workspace
+boots (`.replit` `onBoot`) and each time the workspace's Run button starts
+Field (`scripts/replit-start.sh`). It:
+
+1. Reads `GET <FIELD_PRODUCTION_URL>/health` (no credentials) for
+   `build.revision`, the commit production runs, and `build.release`.
+2. Fetches that commit's `server/db/drizzle/` from GitHub, without a token,
+   into `.field-workspace-db/` (gitignored). It checks that the fetched
+   commit is `build.revision`. `FIELD_DEPLOY_REPO` names a fork's
+   repository, as for the publish.
+3. Compares those migrations with the rows in the workspace database's
+   `drizzle.__drizzle_migrations` (each migration file's hash and its
+   journal time), and acts on the result:
+
+| `state` | What it means | What it does |
+| --- | --- | --- |
+| `level` | The workspace database has exactly production's migrations | Nothing |
+| `behind` | It lacks some of production's migrations | Applies them, from production's commit, under the same migration lock the server holds (`appliedNow` counts them) |
+| `ahead` | It has migrations production does not run (`extra` names them) | Nothing. Exit code 3 |
+| `diverged` | It has different migrations from production | Nothing. Exit code 3 |
+
+It only touches the workspace's database (`DATABASE_URL` or `FIELD_DB_URL`,
+as `npm run db:smoke` chooses), never production's: production is only asked
+for its public `/health`. It refuses to run in the published app
+(`REPLIT_DEPLOYMENT` set), which migrates itself as before. It never prints
+the connection string. Without `FIELD_PRODUCTION_URL` it says how to set it
+and does nothing. At boot and at Run, a failure prints a warning and Field
+starts anyway.
+
+`ahead` corrects itself: when production publishes the release that has
+those migrations, the workspace is `level` again. Until then, the next
+publish stops at the prompt; press Cancel. To be `level` sooner, replace the
+workspace's database (delete it in the Database tool and add it again) and
+run `npm run db:follow-production`. The workspace database holds no
+production data, but this deletes everything in it.
+
+The workspace's Run button starts the workspace checkout's code, and Field
+applies that checkout's own migrations when it starts. If the checkout has
+migrations production does not run (usually the workspace was pulled to
+`main` while production follows `stable`), starting it puts the workspace
+database ahead again. The sync warns about this:
+`WARNING: this workspace's checkout has migrations production does not run`,
+and its JSON shows `"checkout":{"state":"ahead",...}`. Then do not press
+Run until production runs a release with those migrations, or press Cancel
+at the prompt.
+
+`npm run db:follow-production:status` compares without changing anything
+(exit code 2 when the workspace is behind). Do not use `npm run db:apply` in
+an installation's workspace: it applies the checkout's migrations, not
+production's.
+
+If Replit still shows "Development database changes detected", press Cancel.
+Never pick an option there.
 
 ## Data migrations
 
@@ -405,7 +502,19 @@ Adjust settings), never in the workspace's `[env]` or Secrets. The workspace
 has its own database ("Database"), so durable storage there would only store
 the workspace's data directory in the workspace's database. Two Field
 processes on one database compete for the lock: the second to start waits
-60 s, then exits.
+60 s (10 minutes in the published app; `FIELD_STORAGE_LOCK_TIMEOUT_MS` sets
+it), then exits.
+
+A republish is such a hand-over. Replit starts the new copy while the old copy
+still serves and holds the lock, and stops the old copy only after the new
+copy answers its health check (`GET /`). So while the new copy waits for the
+lock, it answers on the app's port in standby (`server/standby-server.js`):
+`GET /` is 200, `GET /health` is 503 with `storage.state: "waiting-for-lock"`,
+and every other request is 503 with `Retry-After: 5`. When Replit stops the old
+copy, it stores its last changes and releases the lock; the new copy takes the
+lock, rebuilds the data directory and serves. Users can see "Field is
+starting" for a few seconds. The log line `[storage] another Field process
+holds the storage lock; waiting for it to stop` marks the standby.
 
 Moving existing data in (once, before the first publish with durable storage,
 with no Field process using the database). The script writes to the database
@@ -639,8 +748,11 @@ What is reported:
 - Counters: `field.document.issued`, `field.document.delivery_failed` and
   `field.pdf.generation_failed`, by document type.
 - Problem reports: a small button in the corner opens "Report a problem".
-  It asks for no name or email; a screenshot is optional, and the operator can
-  crop or black out parts of it before sending.
+  It asks for no name; a screenshot is optional, and the operator can crop or
+  black out parts of it before sending. The email field is optional and starts
+  empty. A person who types an address asks to hear back: the report gets the
+  tag `notify=yes`, else `notify=no`, and the Sentry-to-ClickUp relay tags the
+  support task `notify`. The address stays in Sentry.
 
 What never leaves (`shared/sentry-scrub.js`, used by both halves, on errors,
 transactions, breadcrumbs and logs): request bodies, cookies, headers other
@@ -677,6 +789,7 @@ deployment Configuration is written into `.replit` and committed.
 | Name | Value |
 | --- | --- |
 | `SENTRY_DSN` | The Sentry project's DSN (Project settings > Client Keys). A DSN only lets a client send events; Field hands it to the browser in the page |
+| `SENTRY_CLIENT` | Optional. A short name for the business this installation serves (letters, digits, `-` and `_`, at most 32 characters, for example `embark`). Every server and browser event is tagged `client:<name>` and `product:field`, so one Sentry organisation can route events from many installations. Unset: `product:field` only |
 | `SENTRY_ENVIRONMENT` | Unset on Replit: the published app reports `production` and the workspace `replit-workspace`. Set it only to override both |
 | `SENTRY_RELEASE` | Unset. Each build records its git commit (below), which becomes the release |
 | `SENTRY_TRACES_SAMPLE_RATE` | Unset: `0.2` (about one page load or request in five). From 0 to 1 |
@@ -686,6 +799,18 @@ deployment Configuration is written into `.replit` and committed.
 | `SENTRY_METRICS` | Unset: on. `0` stops the counters |
 | `SENTRY_FEEDBACK` | Unset: on. `0` hides the "Report a problem" button |
 | `SENTRY_VERIFY` | `1` for one publish only: boot sends `Field Sentry verification (server)`. Remove it at the next publish, or every restart sends another |
+
+Which DSN wins, when you move to another Sentry project:
+
+- Server: `SENTRY_DSN`, then `SENTRY_DSN_CMD` (a command that prints a DSN).
+  `SENTRY_DSN_CMD` runs only when `SENTRY_DSN` is unset, so delete it, or
+  point it at the new project too: if `SENTRY_DSN` is ever removed, the
+  command's DSN is used.
+- Browser: `VITE_SENTRY_DSN`, then the server's DSN from the page.
+  `VITE_SENTRY_DSN` is read at build time and is written into the bundle, so
+  if it is set, browser events go to its project whatever `SENTRY_DSN` says.
+  Leave it unset on Replit. If it was set, delete it and publish again (the
+  build reads it).
 
 The defaults are sized for the free plan from the start, including during a
 Sentry trial, so nothing needs changing when a trial ends. Raise the rates
@@ -722,6 +847,9 @@ stack traces against the real source with no upload token.
 3. Browser: open the app, open the browser's developer console and run
    `setTimeout(() => { throw new Error("Field Sentry verification (browser)") })`.
    It arrives with the same environment and release, and a replay.
+   Both errors carry the `product` tag (and `client`, with `SENTRY_CLIENT`),
+   and both arrive in the same Sentry project. If the browser error goes to
+   another project, `VITE_SENTRY_DSN` is set (above).
 4. Resolve both verification issues in Sentry, then remove `SENTRY_VERIFY`
    at the next publish.
 
@@ -790,13 +918,14 @@ To deploy what is merged on `main`:
    `checks` (`passed`, or `unchecked` when an emergency override built it). Check that
    `revision` is the commit you meant to deploy (the tip of `main` on
    GitHub) and that `checks` is `passed`.
-3. Bring the workspace to the same level, so the next publish does not stop
-   at the prompt above: `scripts/github-sync.sh pull`, then
-   `npm run db:apply`, then `npm run db:smoke` must report `"pending":0`. Do
-   this after each publish, not before: production only gains a release's
-   migrations when that release boots. If production runs a pinned ref
-   instead of `main`, apply only that ref's migrations, from a checkout of
-   it.
+3. Nothing to do for the workspace's database: it follows production by
+   itself the next time the workspace boots or Field starts in it ("The
+   workspace database"; needs the `FIELD_PRODUCTION_URL` Secret). To do it
+   now, run `npm run db:follow-production` in the Shell: it must report
+   `"state":"level"`. Run it after the publish, not before: production only
+   gains a release's migrations when that release boots. It follows a
+   pinned ref or a channel the same way, because it asks production which
+   commit it runs.
 
 `.replit`, `scripts/replit-deploy.sh`, `scripts/deploy-checks.js`,
 `scripts/deploy-release.js` and `server/release-channel.js` are the only files
@@ -835,9 +964,106 @@ release of all, betas and stable releases alike, so it is never behind
 stable.
 
 A publish deploys whatever the channel points at when it runs; a new release
-does not publish itself. To upgrade, publish again after a release.
+does not publish itself. An owner can see that one is out from
+`GET /api/updates` (`docs/SELF_HOSTING.md`, "Update notice").
 
 The default is still `main`.
+
+### Updating to a new release
+
+With `FIELD_DEPLOY_REF=stable`, after a release is published:
+
+1. Read the release's notes on GitHub. If it changes one of the deploy files
+   ("When to pull the workspace"), run `scripts/github-sync.sh pull` in the
+   Shell first.
+2. Publishing > Republish. If Replit stops at "Development database changes
+   detected", press Cancel.
+3. Open `GET /health`. `build.release` must be the new tag, `build.checks`
+   `passed`, and `storage.state` `ok`.
+4. The workspace's database follows by itself ("The workspace database").
+   To check it now: `npm run db:follow-production` in the Shell must report
+   `"state":"level"`. If the prompt ever appears, press Cancel.
+
+### Publishing from an agent
+
+An agent with Replit's connector can publish after a release, so a fix
+reaches an installation without a person pressing Republish. The connector
+signs in to one Replit workspace per connection: connect it to the
+installation's workspace. The tool names carry the connection's name:
+`.claude/settings.json` allows `publish_app` and `get_publish_status` for
+the connection named **Replit for Embark**, the installation Field was built
+for. Another installation adds its own names in its own settings. Its `publish_app` republishes with the
+deployment's own settings (a Reserved VM stays one), and
+`get_publish_status` says `success`, `failed`, `suspended` or still running.
+
+`scripts/publish-guard.js` decides, before and after:
+
+```sh
+node scripts/publish-guard.js before https://<app> stable           # 0 publish, 3 nothing to do, 1 stop
+node scripts/publish-guard.js after https://<app> <tag> --wait 300  # 0 live, 1 stop
+```
+
+In a Claude Code cloud session, put `NODE_USE_ENV_PROXY=1
+NODE_EXTRA_CA_CERTS=/root/.ccr/ca-bundle.crt` before `node`, so Node uses the
+session's proxy.
+
+`before` passes only when GitHub's latest release and npm's `latest` name the
+same tag, its `release-manifest.json` matches its `.sha256`, its commit passed
+`test`, `client-build`, `docker-build` and `gitleaks`, and the live `/health`
+is ok, follows `stable` from `github` and runs an older release. `after` asks
+`/health` for up to `--wait` seconds until `build.release` is the tag with
+`checks: passed`. Durable storage that is not ok is a warning. Set `GH_TOKEN`
+where many machines share one address, so GitHub's anonymous limit (60
+requests an hour) is not used up; the guard sends it to `api.github.com`
+only.
+
+The agent's steps:
+
+1. Run `before`. On 3 stop quietly. On 1 stop and report the problems.
+2. Call `get_publish_status`. Go on only if the last publish says `success`.
+3. Call `publish_app` once.
+4. Call `get_publish_status` every 30 seconds, for at most 15 minutes.
+5. On `success`, run `after`. On anything else, stop.
+6. Report the result. Never publish again in the same run, and never retry a
+   publish that failed: the build refused it for a reason, and the old build
+   stays live.
+
+The workspace database follows production ("The workspace database"), so a
+publish proposes no database changes. If a publish stops at "Development
+database changes detected", a person presses **Cancel**; an agent never
+answers it.
+
+Claude Code's auto mode still asks before `publish_app`, because it deploys
+production. The person who owns the installation approves by typing
+`publish` in the same conversation as the agent. A message relayed from
+another conversation is not that approval.
+
+### When to pull the workspace
+
+A publish takes these files from the workspace, not from the release:
+`.replit`, `scripts/replit-deploy.sh`, `scripts/deploy-checks.js`,
+`scripts/deploy-release.js` and `server/release-channel.js`. They stay as
+they were when the workspace was last pulled. Pull (`scripts/github-sync.sh
+pull`) when:
+
+| When | Why |
+| --- | --- |
+| A release changes one of those files | Its fix takes effect only from the workspace. The build log says `note: <file> in the workspace differs from <ref>` |
+| Before the first release of a month numbered above 31 (`2026.10.32`), if the workspace was last pulled before v2026.10.21 | An older `server/release-channel.js` reads the last number as a day, so it cannot read the tag and the build stops. Nothing is deployed and the live app keeps running |
+| After you change `FIELD_DEPLOY_REF` or the deploy settings in `.replit` | So the workspace and the publish agree |
+
+If `git pull` cannot fast-forward (the workspace has commits of its own),
+take the deploy files from the newest stable release instead:
+
+```bash
+git fetch --tags origin
+T=$(git tag -l 'v20*' --sort=-v:refname | grep -v beta | head -1)
+git checkout "$T" -- .replit .gitignore scripts/replit-deploy.sh \
+  scripts/deploy-checks.js scripts/deploy-release.js server/release-channel.js
+```
+
+`--sort=-v:refname` sorts each number as a number, so `2026.10.32` comes
+after `2026.10.9`.
 
 ### Pinning a release and rolling back
 
@@ -925,3 +1151,50 @@ from the workspace. When used, it is a fine-grained token whose resource owner
 is the repository's owner, scoped to this repo only, with Contents and Pull
 requests read/write. Without it, the workspace only pulls, and changes reach
 GitHub through pull requests opened elsewhere. The Agent's instructions are in `.agents/skills/github-sync/SKILL.md`.
+
+### A production installation: fetch only
+
+A workspace that runs a production installation should only follow
+releases. It reads from GitHub and never writes to it. Development happens
+elsewhere and reaches the installation as a release.
+
+To make the workspace fetch-only:
+
+1. Delete the `GITHUB_TOKEN` secret (Secrets), if there is one. Revoke the
+   token on GitHub too (Settings > Developer settings > Personal access
+   tokens).
+2. In the Shell:
+
+   ```sh
+   git remote set-url --push origin no-push--this-workspace-is-fetch-only
+   git config --unset credential.helper
+   printf '#!/bin/sh\ncase "$2" in *github.com*|no-push*) echo "push refused: this install is fetch-only" >&2; exit 1;; esac\n' > .git/hooks/pre-push
+   chmod +x .git/hooks/pre-push
+   ```
+
+   Use the name of the GitHub remote from `git remote -v` in place of
+   `origin` if it differs. `git remote -v` then shows the GitHub URL for
+   fetch and `no-push--this-workspace-is-fetch-only` for push. A push from
+   the Shell or the Git pane fails. The hook refuses only GitHub, so
+   Replit's own backup remote keeps working.
+3. Do not press Push or Sync Changes in the Git pane. Pull is safe.
+
+Publishing is not affected: the build fetches from GitHub without a token.
+Replit's "Published your App" commits stay local, and
+`scripts/github-sync.sh pull` drops them when together they change no files.
+
+### Where an installation's settings go
+
+Nothing specific to one installation goes in git. The repository is shared
+by every installation.
+
+| Setting | Where |
+| --- | --- |
+| Secrets: keys, tokens, client secrets (`FIELD_CONFIG_JSON`, `FIELD_SECRETS_KEY`, Clerk, Sentry, R2) | Replit Secrets (workspace) and Publishing > Adjust settings > Secrets (published app) |
+| Start-up settings: `FIELD_STORAGE`, `FIELD_DEPLOY_REF`, `FIELD_DOCUMENT_REPLICA` | Publishing > Adjust settings > Secrets, for the published app only ("Durable storage", "Issued documents in R2"). A deployment Configuration value is written into `.replit`, so use a secret |
+| Business data and in-app settings: people and roles, business profile, prices, integration connections | Field's database (PostgreSQL), changed in Field's own screens |
+| Code, migrations, defaults for every installation | This repository, through a pull request |
+
+When an installation needs a setting that does not exist, add it to Field as
+a generic option (an environment variable or an in-app setting) by a pull
+request, and set its value in the installation.

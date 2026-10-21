@@ -15,4 +15,16 @@ describe("fieldClerkAppearance", () => {
     }
     expect(elements.formFieldInput['&[data-feedback="error"]'].boxShadow).toMatch(/^0 0 0 1px /);
   });
+
+  it("gives Clerk an opaque border base and draws the badge text in --t-dim", () => {
+    document.documentElement.style.setProperty("--t-text", "#0d4e5f");
+    document.documentElement.style.setProperty("--t-dim", "#4e6365");
+    const { variables, elements } = fieldClerkAppearance();
+    // Clerk fades colorBorder again for every shade; a pre-faded base left
+    // the "Primary" badge near 1:1.
+    expect(variables.colorBorder).toBe("#0d4e5f");
+    expect(elements.badge["&&"].color).toBe("#4e6365");
+    document.documentElement.style.removeProperty("--t-text");
+    document.documentElement.style.removeProperty("--t-dim");
+  });
 });

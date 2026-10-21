@@ -30,10 +30,17 @@ The notes are generated from the pull requests merged since the last release.
 
 ## Versions and channels
 
-Field names its releases as `openclaw/openclaw` names its own. Versions are
-calendar versions with no leading zeros. A stable release is `2026.10.15`; a
-beta is a pre-release of the **upcoming** stable version, so
-`2026.10.15-beta.1` and `2026.10.15-beta.2` come before `2026.10.15`. Tags add
+Field names its releases as `openclaw/openclaw` names its own, with one
+change: the last number is a count, not the day. A version is `YYYY.M.N`
+with no leading zeros. `YYYY.M` is the month the release is cut in (UTC). `N`
+is one more than the month's highest stable release, starts at 1 each month,
+and can pass 31. For example, after `2026.10.20` comes `2026.10.21`, after
+`2026.10.31` comes `2026.10.32`, and the first release of November is
+`2026.11.1`. Versions before October 2026 used the day; the count carries on
+from them. A stable release is `2026.10.15`; a beta is a pre-release of the
+**upcoming** stable version, so `2026.10.15-beta.1` and `2026.10.15-beta.2`
+come before `2026.10.15`. Field Release Prepare refuses a version that is not
+the next one this month. Tags add
 a `v`, and each GitHub Release is titled `field <version>`. `package.json`
 holds the upcoming stable version. `scripts/release/release.mjs` holds the
 rules, and `scripts/release/release.test.js` tests them.
@@ -52,25 +59,27 @@ step. Field does not use OpenClaw's `extended-stable` channel.
 | --- | --- | --- |
 | `field-release-prepare.yml` (Field Release Prepare) | By hand, from `main` | Takes a `main` commit (default: the head) whose required checks passed, by the rule a Replit publish uses (`scripts/deploy-checks.js`). Plans the next tag for the channel, creates it, and starts Field Release Publish. |
 | `field-release-checks.yml` (Field Release Checks) | From Field Release Publish, or by hand to rehearse | Requires the tag to be a calendar version on `main` that matches `package.json`. Runs every CI lane on its commit (`docs/CI.md`). Packs the npm tarball with a shrinkwrap of the tested dependencies, then installs it in an empty directory and starts it. Publishes nothing. |
-| `field-release-publish.yml` (Field Release Publish) | From Field Release Prepare, or by hand for an existing tag | `approve` job at the start, alongside the checks: environment `release` for a stable release (Samuel's one approval), `release-beta` for a beta (no reviewer). Then the `image` job pushes the image by digest, attests it and its SBOM, verifies the attestation, runs the Playwright smoke against the pushed digest, then adds the channel's tags. Then it creates the GitHub Release with the manifest, and starts Field NPM Release for the tarball it proved. |
-| `field-npm-release.yml` (Field NPM Release) | From Field Release Publish | Requires the tarball from that run to match the GitHub Release's manifest. Dispatched by Field Release Publish, it publishes on that run's approval: it checks that GitHub Actions dispatched it, that the run is for this tag, and, for a stable release, that GitHub's approvals record shows `release` approved. Dispatched by hand, it waits for `npm-release` first. `publish` runs in environment `npm-publish`: npm trusted publishing with provenance, to the channel's dist-tag. Then it verifies what npm serves and attaches the post-publish evidence. |
+| `field-release-publish.yml` (Field Release Publish) | From Field Release Prepare, or by hand for an existing tag | `approve` job at the start, alongside the checks: environment `release` for a stable release, `release-beta` for a beta. Neither has a reviewer now. Then the `image` job pushes the image by digest, attests it and its SBOM, verifies the attestation, runs the Playwright smoke against the pushed digest, then adds the channel's tags. Then it creates the GitHub Release with the manifest, and starts Field NPM Release for the tarball it proved. |
+| `field-npm-release.yml` (Field NPM Release) | From Field Release Publish | Requires the tarball from that run to match the GitHub Release's manifest. Dispatched by Field Release Publish, it publishes on that run's approval: it checks that GitHub Actions dispatched it, that the run is for this tag, and, for a stable release, that GitHub's approvals record shows `release` approved. Otherwise (dispatched by hand, or a stable run with no `release` approval on record) its `approve` job runs in `npm-release` first. `publish` runs in environment `npm-publish`: npm trusted publishing with provenance, to the channel's dist-tag. Then it verifies what npm serves and attaches the post-publish evidence. |
 | `field-release-promote.yml` (Field Release Promote) | By hand, from `main` | Points a channel at a published release, to roll it back or put it back. It verifies the release (the manifest's checksum, the npm integrity, signatures and provenance, and the image attestation), then in environment `npm-release` moves the channel. A stable tag moves npm `latest`, GHCR `stable` and `latest`, and GitHub's latest release, and moves `beta` up when the beta channel is behind. A beta tag moves npm and GHCR `beta`. |
 
-A beta needs no approval. A stable release needs exactly one: environment
-`release`, at the start of Field Release Publish. Field NPM Release accepts
-that approval and does not ask again. Moving a channel with Field Release
-Promote, and dispatching Field NPM Release by hand, each need one approval of
-`npm-release`.
+No release needs an approval now. Samuel removed the required reviewers
+from `release` and `npm-release` (October 2026): Field has one client and
+iterates quickly. The jobs still run in those environments, which accept only
+runs from `main`, so a reviewer can be added back on either environment
+without a workflow change. With a reviewer on `release`, a stable release
+needs that one approval and Field NPM Release accepts it; with a reviewer on
+`npm-release`, Promote and a hand-dispatched Field NPM Release wait for it.
 
 | Action | Approvals |
 | --- | --- |
-| Beta (`vYYYY.M.D-beta.N`) | 0 |
-| Stable release (`vYYYY.M.D`) | 1: `release` |
-| Promote or roll back a channel | 1: `npm-release` |
-| Field NPM Release dispatched by hand | 1: `npm-release` |
+| Beta (`vYYYY.M.N-beta.B`) | 0 |
+| Stable release (`vYYYY.M.N`) | 0 (`release` has no reviewer) |
+| Promote or roll back a channel | 0 (`npm-release` has no reviewer) |
+| Field NPM Release dispatched by hand | 0 (`npm-release` has no reviewer) |
 
 A beta has guards instead of a gate: it runs only from `main`, only for a
-`vYYYY.M.D-beta.N` tag on a `main` commit whose required checks passed
+`vYYYY.M.N-beta.B` tag on a `main` commit whose required checks passed
 (Field Release Prepare), and only after every CI lane passes again on that
 commit (Field Release Checks). Every environment accepts only runs from
 `main`, and `npm-publish`, the environment npm's trusted publisher names, has
@@ -91,11 +100,19 @@ forward with a new tag.
 
 ## Cut a release
 
-1. Open a pull request that sets the upcoming stable version:
-   `npm version 2026.10.15 --no-git-tag-version`, which updates
-   `package.json` and `package-lock.json`. Title it
-   `chore: release 2026.10.15`. Merge it when CI passes. Do this once per
-   version; its betas reuse it.
+1. Open a pull request that sets the upcoming stable version. Get the next
+   version from the tags, then set it:
+
+   ```bash
+   git fetch --tags origin
+   V=$(node scripts/release/release.mjs next | jq -r .version)
+   npm version "$V" --no-git-tag-version
+   ```
+
+   That updates `package.json` and `package-lock.json`. Title it
+   `chore: release <version>`. Merge it when CI passes, in the same month.
+   Do this once per version; its betas reuse it. If the month changes before
+   the release is cut, open a new pull request for the new month's version.
 2. Start a beta:
 
    ```bash
@@ -110,12 +127,11 @@ forward with a new tag.
    gh workflow run field-release-prepare.yml --repo arcforgelabs/field --ref main -f channel=stable -f commit=<commit>
    ```
 
-   Approve `release` in the Field Release Publish run; you can do it while
-   the checks run. That is the only approval. When the checks pass, it is npm
+   Nothing waits for approval. When the checks pass, it is npm
    `latest`, GHCR `stable` and `latest`, and GitHub's latest release.
 
 To roll back, point the channel at the previous release (a stable tag for
-`latest`, a beta tag for `beta`), and approve `npm-release`. Nothing is
+`latest`, a beta tag for `beta`). Nothing is
 unpublished:
 
 ```bash
@@ -131,9 +147,9 @@ Docker, with Node, or on Replit (`deploy/replit/`).
 
 GitHub (done with `gh`; each item can be undone in the repository settings):
 
-- Environments `release` and `npm-release`: required reviewer Samuel.
-  `release-beta` and `npm-publish`: no reviewer. All four deploy from `main`
-  only.
+- Environments `release`, `npm-release`, `release-beta` and `npm-publish`:
+  no reviewer (`release` and `npm-release` had Samuel as required reviewer
+  until October 2026). All four deploy from `main` only.
 - The release tag ruleset, from `.github/rulesets/release-tags.json`.
 
 npm (an npm owner of the `@arcforgelabs` scope does this on npmjs.com, with

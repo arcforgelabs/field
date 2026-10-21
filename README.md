@@ -21,12 +21,15 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | Document | What it is for |
 | --- | --- |
 | `VISION.md` | What Field is for, who it serves, and what it will not do |
-| `AGENTS.md` | Agent entry point (`CLAUDE.md`, `GEMINI.md` and Replit's `replit.md` link to it) |
+| `AGENTS.md` | The one instruction file for every agent, Replit Agent included. `CLAUDE.md`, `GEMINI.md` and `replit.md` link to it |
 | `CONTRIBUTING.md` | How to file issues and PRs, and this repo's working rules |
 | `SECURITY.md` | How to report a security problem, the trust model, and the rules held hard |
 | `LICENSE` | MIT licence |
 | `ARCHITECTURE.md` | How Field is built: system boundary, storage, generations, quote engine, deployment |
 | `DESIGN.md` | The design system: tokens, components, light and dark mode |
+| `docs/docs.json` | The docs site navigation. `docs/` is published at https://arcforgelabs.github.io/docs/field/ by arcforgelabs/docs |
+| `docs/index.md` | The docs site home page |
+| `docs/releases/` | One release notes page per version (`<version>.md`), shown on the docs site |
 | `docs/REPLIT.md` | Running, publishing, storing data and monitoring errors for an installation on Replit |
 | `docs/PRICING_ENGINE.md` | Target data model for the price book, quotes and invoices |
 | `docs/CLERK_SIGN_IN.md` | Clerk sign-in runbook and cutover |

@@ -30,7 +30,7 @@ import { buildCatalogQuoteRows, catalogChangesEditedSinceCheck } from "@/feature
 import { QuoteCatalogChangesBanner } from "@/features/job-detail/components/quote-catalog-changes-banner";
 import {
   buildMilestoneDraftRows, buildPaymentScheduleFromDraftRows, buildVisiblePaymentSchedule, createMilestoneDraftRow,
-  getPaymentScheduleValidationError, roundSchedulePercentage, type MilestoneScheduleDraftRow,
+  getPaymentScheduleValidationError, moveMilestoneDraftRow, roundSchedulePercentage, type MilestoneScheduleDraftRow,
 } from "@/features/job-detail/payment-schedule";
 import { ScheduleSourceBadge } from "@/features/job-detail/milestone-rules";
 import { useJobMilestoneRules } from "@/features/job-detail/use-job-milestone-rules";
@@ -708,7 +708,7 @@ export function QuoteEditor({ detail, editable: canEdit, lockReason, onNewVersio
           <div className="fx-sched__h fx-r" role="columnheader">Share</div>
           <div className="fx-sched__h fx-r" role="columnheader">Amount</div>
           <div className="fx-sched__h fx-r" role="columnheader">Due after</div>
-          <div className="fx-sched__h" role="columnheader" aria-label="Remove" />
+          <div className="fx-sched__h" role="columnheader" aria-label="Order and remove" />
           {scheduleRows.map((row, index) => (
             <ScheduleRow
               key={row.id}
@@ -718,6 +718,8 @@ export function QuoteEditor({ detail, editable: canEdit, lockReason, onNewVersio
               canRemove={scheduleRows.length > 1}
               onChange={(next) => updateSchedule(scheduleRows.map((candidate, i) => (i === index ? next : candidate)))}
               onRemove={() => updateSchedule(scheduleRows.filter((_, i) => i !== index))}
+              onMoveUp={index > 0 ? () => updateSchedule(moveMilestoneDraftRow(scheduleRows, index, index - 1)) : null}
+              onMoveDown={index < scheduleRows.length - 1 ? () => updateSchedule(moveMilestoneDraftRow(scheduleRows, index, index + 1)) : null}
             />
           ))}
           <div className="fx-sched__foot">
@@ -752,13 +754,16 @@ function sectionsCount(organizer: Organizer) {
   return organizer.root.filter((id) => organizer.nodes[id]?.kind === "group").length;
 }
 
-function ScheduleRow({ row, total, editable, canRemove, onChange, onRemove }: {
+function ScheduleRow({ row, total, editable, canRemove, onChange, onRemove, onMoveUp, onMoveDown }: {
   row: MilestoneScheduleDraftRow;
   total: number;
   editable: boolean;
   canRemove: boolean;
   onChange: (row: MilestoneScheduleDraftRow) => void;
   onRemove: () => void;
+  /** Null for the first row (up) or the last row (down). */
+  onMoveUp: (() => void) | null;
+  onMoveDown: (() => void) | null;
 }) {
   const pct = Number(row.percentage) || 0;
   return (
@@ -773,7 +778,13 @@ function ScheduleRow({ row, total, editable, canRemove, onChange, onRemove }: {
         <input className="fx-cell fx-cell--num" style={{ width: 44 }} aria-label="Due after days" inputMode="numeric" placeholder="—" value={row.dueDays ?? ""} readOnly={!editable} onChange={(event) => { const days = parseInt(event.target.value, 10); onChange({ ...row, dueDays: Number.isFinite(days) && days > 0 ? days : null }); }} />
         <span className="fx-mute" style={{ fontSize: 12 }}>days</span>
       </div>
-      <div role="cell">
+      <div role="cell" style={{ gap: 2 }}>
+        {editable && (onMoveUp || onMoveDown) && (
+          <>
+            <button type="button" className="fx-btn fx-btn--ghost fx-btn--sm fx-btn--icon" aria-label={`Move ${row.label} up`} title="Move up" disabled={!onMoveUp} onClick={onMoveUp ?? undefined}><ArrowUp /></button>
+            <button type="button" className="fx-btn fx-btn--ghost fx-btn--sm fx-btn--icon" aria-label={`Move ${row.label} down`} title="Move down" disabled={!onMoveDown} onClick={onMoveDown ?? undefined}><ArrowDown /></button>
+          </>
+        )}
         {editable && canRemove && <button type="button" className="fx-btn fx-btn--ghost fx-btn--sm fx-btn--icon" aria-label={`Remove ${row.label}`} onClick={onRemove}><Trash2 /></button>}
       </div>
     </>

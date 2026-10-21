@@ -8,7 +8,7 @@
  * families are ported from OpenClaw's Control UI by
  * scripts/port-openclaw-themes.mjs into ./theme-palettes.js (DESIGN.md).
  */
-import { boundaryOn, HEX, inkOn, readableOn } from "./color-contrast.js";
+import { boundaryOn, contrast, HEX, inkOn, over, readableOn, readableOnEvery } from "./color-contrast.js";
 import { OPENCLAW_FAMILIES } from "./theme-palettes.js";
 
 export { boundaryOn, contrast, inkOn, readableOn } from "./color-contrast.js";
@@ -41,18 +41,18 @@ const FIELD = {
   light: {
     "--t-bg": "#f5f3eb", "--t-s1": "#ebe9df", "--t-s2": "#dedbd0", "--t-paper": "#fbfaf5",
     "--t-brd": "rgba(17,17,13,.18)", "--t-brd-hi": "#11110d", "--t-stroke-color": "#11110d",
-    "--t-text": "#11110d", "--t-strong": "#11110d", "--t-dim": "#65645d", "--t-mute": "#7a786f",
+    "--t-text": "#11110d", "--t-strong": "#11110d", "--t-dim": "#616059", "--t-mute": "#706e66",
     "--t-accent": "#11110d", "--t-accent-bg": "rgba(244,197,24,.24)", "--t-accent-brd": "#d9ad0c",
     "--t-brand": "#f4c518", "--t-brand-ink": "#11110d",
-    "--t-primary": "#11110d", "--t-on-primary": "#f4c518", "--t-ring": "#f4c518",
+    "--t-primary": "#11110d", "--t-on-primary": "#f4c518", "--t-ring": "#a88711",
     "--t-mark-ink": "#202328",
     "--t-warn": "#8a5a00", "--t-warn-bg": "rgba(138,90,0,.10)", "--t-warn-brd": "rgba(138,90,0,.30)",
-    "--t-danger": "#b8442a", "--t-danger-bg": "rgba(184,68,42,.10)", "--t-danger-brd": "rgba(184,68,42,.40)",
+    "--t-danger": "#b44329", "--t-danger-bg": "rgba(184,68,42,.10)", "--t-danger-brd": "rgba(184,68,42,.40)",
     "--t-success": "#3f6b2a", "--t-success-bg": "rgba(63,107,42,.10)",
     "--t-frame-bg": "#ebe9df", "--t-frame-brd": "rgba(17,17,13,.12)",
     "--t-time": "#11110d88", "--t-hi-bar": "rgba(17,17,13,.16)",
     "--t-paper-line": "rgba(17,17,13,.06)", "--t-paper-margin": "rgba(244,197,24,.30)",
-    "--t-paper-text": "#11110d", "--t-paper-dim": "#65645d",
+    "--t-paper-text": "#11110d", "--t-paper-dim": "#616059",
     ...FIELD_SHAPE,
     "color-scheme": "light",
   },
@@ -81,12 +81,20 @@ const FIELD = {
 const { beacon, tide, claw, knot, dash, ...otherOpenclaw } = OPENCLAW_FAMILIES;
 const FAMILIES = { beacon, tide, claw, knot, dash, field: FIELD, ...otherOpenclaw };
 
+// Every family keeps WCAG AA (shared/theme-contrast.test.js). A ported palette
+// that misses it on a surface Field uses is nudged here, just far enough:
+// secondary text on every surface, accent text on the page, cards and its own
+// tint, and the ink on the brand colour. Field Crew already passes.
 // --t-control: the edge of an input or an outlined button on --t-paper, the
 // text colour faded toward the paper only as far as it still reads at 3:1.
 for (const family of Object.values(FAMILIES)) {
   for (const mode of ["light", "dark"]) {
     const tokens = family[mode];
-    tokens["--t-control"] = boundaryOn(tokens["--t-paper"], tokens["--t-text"]);
+    const { "--t-bg": bg, "--t-paper": paper, "--t-s1": s1, "--t-s2": s2 } = tokens;
+    tokens["--t-dim"] = readableOnEvery(tokens["--t-dim"], [bg, paper, s1, s2]);
+    tokens["--t-accent"] = readableOnEvery(tokens["--t-accent"], [bg, paper, over(tokens["--t-accent-bg"], paper)]);
+    if (contrast(tokens["--t-brand-ink"], tokens["--t-brand"]) < 4.5) tokens["--t-brand-ink"] = inkOn(tokens["--t-brand"]);
+    tokens["--t-control"] = boundaryOn(paper, tokens["--t-text"]);
   }
 }
 
@@ -115,7 +123,7 @@ function swatchesOf(tokens) {
 }
 
 export function isThemeFamily(id) {
-  return typeof id === "string" && Object.hasOwn(FAMILIES, id);
+  return typeof id === "string" && Object.prototype.hasOwnProperty.call(FAMILIES, id);
 }
 
 export function normalizeFamily(id) {
