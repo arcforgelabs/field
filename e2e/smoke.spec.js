@@ -50,3 +50,22 @@ test("an operator signs in and sees the jobs board and the catalogue", async ({ 
 
   expect(errors).toEqual([]);
 });
+
+test("in a tall, narrow window the settings content starts right under the tabs", async ({ page }) => {
+  await page.setViewportSize({ width: 808, height: 1264 });
+  await page.goto("/");
+  await page.getByLabel("Email address").fill(EMAIL);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/#\/jobs$/);
+
+  await page.goto("/#/settings");
+  const tabs = page.getByRole("navigation", { name: "Settings" });
+  const heading = page.getByRole("heading", { level: 2, name: "Account and security" });
+  await expect(heading).toBeVisible();
+  const tabsBox = await tabs.boundingBox();
+  const headingBox = await heading.boundingBox();
+  // The tab row is one line of buttons, and the first section follows it.
+  expect(tabsBox.height).toBeLessThan(80);
+  expect(headingBox.y - (tabsBox.y + tabsBox.height)).toBeLessThan(40);
+});

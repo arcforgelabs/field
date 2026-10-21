@@ -26,3 +26,6 @@ attached_assets/
 
 # Replit deployment build output (scripts/replit-deploy.sh)
 .field-deploy/
+
+# The migrations of the release production runs (scripts/replit-workspace-db.js)
+.field-workspace-db/
