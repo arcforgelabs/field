@@ -989,11 +989,10 @@ With `FIELD_DEPLOY_REF=stable`, after a release is published:
 An agent with Replit's connector can publish after a release, so a fix
 reaches an installation without a person pressing Republish. The connector
 signs in to one Replit workspace per connection: connect it to the
-installation's workspace, and name the connection after the app, not the
-customer (Field's own agents use **Replit for Field**, so the tools are
-`mcp__Replit_for_Field__publish_app` and
-`mcp__Replit_for_Field__get_publish_status`, the names allowed in
-`.claude/settings.json`). Its `publish_app` republishes with the
+installation's workspace. The tool names carry the connection's name:
+`.claude/settings.json` allows `publish_app` and `get_publish_status` for
+the connection named **Replit for Embark**, the installation Field was built
+for. Another installation adds its own names in its own settings. Its `publish_app` republishes with the
 deployment's own settings (a Reserved VM stays one), and
 `get_publish_status` says `success`, `failed`, `suspended` or still running.
 

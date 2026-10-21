@@ -66,8 +66,7 @@ Replit's connector. The steps and the guard script are in `docs/REPLIT.md`,
   `scripts/publish-guard.js after <live-url> <tag> --wait 300`.
 - If Replit stops at "Development database changes detected", stop and
   report. Never answer it; the owner presses Cancel.
-- Name the connector after the app (`Replit for Field`), never after a
-  customer. Never write a customer's name or address in this repository: the
-  live address comes from the project's own notes.
+- Never write an installation's address or customer data in this
+  repository: the live address comes from the project's own notes.
 - Keep the conversation that owns a scheduled publish open: a task bound to
   a closed conversation does not run.

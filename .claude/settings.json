@@ -1,8 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "mcp__Replit_for_Field__publish_app",
-      "mcp__Replit_for_Field__get_publish_status"
+      "mcp__Replit_for_Embark__publish_app",
+      "mcp__Replit_for_Embark__get_publish_status"
     ]
   }
 }
