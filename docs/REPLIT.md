@@ -2,8 +2,8 @@
 
 Field can run as a published Replit app. This is the runbook for an
 installation on Replit, for people and agents alike. Replit's Agent reads
-`replit.md`, which lists the tasks of an installation and the sections here
-that cover them.
+`replit.md`, a link to `AGENTS.md`, which lists the tasks of an installation
+and the sections here that cover them.
 
 ## What runs here
 
