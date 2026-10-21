@@ -263,7 +263,7 @@ export function renderEmailTemplate(template, context = {}) {
 }
 
 function replacePlaceholders(value, values) {
-  return String(value || "").replace(/\{\{([a-zA-Z][a-zA-Z0-9]*)\}\}/g, (_match, key) => (Object.hasOwn(values, key) ? values[key] : ""));
+  return String(value || "").replace(/\{\{([a-zA-Z][a-zA-Z0-9]*)\}\}/g, (_match, key) => (Object.prototype.hasOwnProperty.call(values, key) ? values[key] : ""));
 }
 
 function escapeHtml(value) {

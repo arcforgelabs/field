@@ -123,7 +123,7 @@ function swatchesOf(tokens) {
 }
 
 export function isThemeFamily(id) {
-  return typeof id === "string" && Object.hasOwn(FAMILIES, id);
+  return typeof id === "string" && Object.prototype.hasOwnProperty.call(FAMILIES, id);
 }
 
 export function normalizeFamily(id) {
