@@ -224,6 +224,28 @@ function publicEntry(jobId, entry, versionTotals) {
   };
 }
 
+// The report reads only emailed invoices from the issued documents. Load
+// them for every job in one transaction, not one per job; each emailed copy's
+// bytes are still read on their own. If the load fails, each job reports it
+// as it would have.
+async function preloadEmailedInvoices(issuedDocuments) {
+  if (typeof issuedDocuments?.listEmailedInvoicesByJob !== "function") return issuedDocuments;
+  let byJob = null;
+  let failure = null;
+  try {
+    byJob = await issuedDocuments.listEmailedInvoicesByJob();
+  } catch (error) {
+    failure = error;
+  }
+  return {
+    async listJobDocuments(jobId) {
+      if (failure) throw failure;
+      return { documents: byJob.get(String(jobId)) || [] };
+    },
+    readIssuedDocument: (uid) => issuedDocuments.readIssuedDocument(uid),
+  };
+}
+
 /**
  * Every issued invoice, on every job under `dataDir`, whose milestone record
  * disagrees with its stored PDF or with the copy Field emailed, settled ones
@@ -241,9 +263,10 @@ export async function listInvoiceAmountDisagreements({ dataDir, issuedDocuments 
     errors: 0,
   };
   const invoices = [];
+  const documents = await preloadEmailedInvoices(issuedDocuments);
   for (const jobDir of await listJobDirs(dataDir)) {
     try {
-      const evidence = await invoiceAmountEvidence({ jobDir, issuedDocuments });
+      const evidence = await invoiceAmountEvidence({ jobDir, issuedDocuments: documents });
       if (evidence.jobId) summary.jobs += 1;
       for (const entry of evidence.invoices) {
         summary.issuedInvoices += 1;

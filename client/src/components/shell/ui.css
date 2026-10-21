@@ -251,11 +251,13 @@ tr:hover .fx-row-menu, .fx-row-menu:focus-visible, .fx-row-menu[aria-expanded="t
 .fx-menu hr { border: 0; border-top: 1px solid var(--fx-line); margin: 4px 0; }
 
 /* Payment schedule */
-.fx-sched { display: grid; grid-template-columns: minmax(0, 1fr) 90px 120px 100px 32px; border: 1px solid var(--fx-line); box-shadow: var(--fx-shadow-xs); border-radius: var(--t-radius-lg, var(--t-radius)); background: var(--t-paper); overflow: hidden; }
+.fx-sched { display: grid; grid-template-columns: minmax(120px, 1fr) 90px 120px 100px 100px; border: 1px solid var(--fx-line); box-shadow: var(--fx-shadow-xs); border-radius: var(--t-radius-lg, var(--t-radius)); background: var(--t-paper); overflow: hidden; }
 .fx-sched > div { padding: 0 8px; min-height: 38px; display: flex; align-items: center; border-bottom: 1px solid var(--fx-line); min-width: 0; }
 .fx-sched > .fx-sched__h { font-size: 12px; color: var(--t-mute); min-height: 32px; background: var(--t-bg); }
 .fx-sched > .fx-r { justify-content: flex-end; }
 .fx-sched__foot { grid-column: 1 / -1; display: flex; gap: 10px; justify-content: space-between; border-bottom: 0 !important; font-size: 12px; }
+/* On a phone the schedule scrolls sideways so the order and remove buttons stay in reach. */
+@media (max-width: 600px) { .fx-sched { overflow-x: auto; } }
 
 /* Summary rail */
 .fx-total__k { font-size: 12px; color: var(--t-dim); }
@@ -670,7 +672,9 @@ html[data-theme="field"][data-mode] .fx-table th, html[data-theme="field"][data-
   .fx-nav__label, .fx-nav--recent, .fx-nav__count { display: none; }
   .fx-side__foot { margin: 0 0 0 auto; border: 0; padding: 0 4px; }
   .fx-who { display: none; }
-  .fx-job, .fx-set { grid-template-columns: 1fr; }
+  /* One column: rows hug their content. The grid still fills the page height
+     (flex: 1), and stretched rows would open a gap under the settings tabs. */
+  .fx-job, .fx-set { grid-template-columns: 1fr; align-content: start; }
   .fx-rail { position: static; max-height: none; border-top: 1px solid var(--fx-line); }
   .fx-doc { border-right: 0; min-height: 0; }
   .fx-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }

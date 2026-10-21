@@ -97,8 +97,8 @@ function renderPage(title, body) {
         --t-brd: rgba(17,17,13,.18);
         --t-brd-hi: #11110d;
         --t-text: #11110d;
-        --t-dim: #65645d;
-        --t-mute: #7a786f;
+        --t-dim: #616059;
+        --t-mute: #706e66;
         --t-accent: #11110d;
         --t-accent-bg: rgba(244,197,24,.24);
         --t-accent-brd: #d9ad0c;
@@ -106,7 +106,7 @@ function renderPage(title, body) {
         --t-primary: #11110d;
         --t-on-primary: #f4c518;
         --t-paper: #fbfaf5;
-        --t-danger: #b8442a;
+        --t-danger: #b44329;
         --t-body: "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif;
         --t-data: "Geist Mono Variable", ui-monospace, monospace;
         --t-radius: 0px;

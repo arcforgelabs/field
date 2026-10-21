@@ -19,6 +19,7 @@ import {
   renameSync,
   writeFileSync,
 } from "./storage/fs.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { flushDurableStorageQuietly } from "./storage/durable-hooks.js";
@@ -638,7 +639,35 @@ export function resolveActiveJobGenerationSync(jobDir) {
   return repairFromHistorySync(jobDir, pointer) || jobDir;
 }
 
-export async function resolveActiveJobGeneration(jobDir) {
+// A read-only pass over many jobs (the jobs board) resolves each job once.
+// Every file reader resolves the active generation for itself, and each
+// resolve walks every file of every generation of the job to check its stat
+// signature, so the board did that about eight times per job. Inside
+// withJobGenerationReadScope a job's first resolve is remembered for the rest
+// of the scope, which also reads all of a job's files from one generation.
+// Writers never use the remembered answer (resolveWritableJobGeneration and
+// createStagedJobGeneration resolve afresh), and a scope must not write.
+const readScope = new AsyncLocalStorage();
+
+/** Runs `operation` with each job's active generation resolved at most once. */
+export function withJobGenerationReadScope(operation) {
+  return readScope.run(new Map(), operation);
+}
+
+export function resolveActiveJobGeneration(jobDir) {
+  const remembered = readScope.getStore();
+  if (!remembered) return resolveActiveJobGenerationNow(jobDir);
+  const key = resolve(jobDir);
+  if (!remembered.has(key)) {
+    remembered.set(key, resolveActiveJobGenerationNow(jobDir).catch((error) => {
+      remembered.delete(key);
+      throw error;
+    }));
+  }
+  return remembered.get(key);
+}
+
+async function resolveActiveJobGenerationNow(jobDir) {
   await quarantineUncommittedGenerations(jobDir);
   const pointer = await readPointer(jobDir);
   const pointed = pointer?.generationId && resolveGenerationPath(jobDir, pointer.generationId);
@@ -678,7 +707,7 @@ export function assertWritableJobDir(dir, requestedDir = dir) {
 }
 
 export async function resolveWritableJobGeneration(jobDir) {
-  return assertWritableJobDir(await resolveActiveJobGeneration(jobDir), jobDir);
+  return assertWritableJobDir(await resolveActiveJobGenerationNow(jobDir), jobDir);
 }
 
 async function listFiles(dir, root = dir, allowLegacyOperational = false) {
@@ -728,7 +757,7 @@ async function writeCommitMarker(stagedJobDir, generationId) {
 }
 
 export async function createStagedJobGeneration(jobDir) {
-  const activeDir = await resolveActiveJobGeneration(jobDir);
+  const activeDir = await resolveActiveJobGenerationNow(jobDir);
   const stageDir = await mkdtemp(join(dirname(jobDir), `.field-generation-stage-${basename(jobDir)}-`));
   const activeRoot = resolve(activeDir);
   for (const entry of readdirSync(activeRoot, { withFileTypes: true })) {

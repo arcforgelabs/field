@@ -7,11 +7,13 @@ import {
   useNavigationType,
 } from "react-router-dom";
 import { createEventThrottle, scrubBreadcrumb, scrubEvent, scrubText } from "../../shared/sentry-scrub.js";
+import { tagNotify } from "./lib/sentry-feedback";
 
 interface FieldSentryConfig {
   dsn?: string;
   environment?: string;
   release?: string;
+  tags?: Record<string, string>;
   tracesSampleRate?: number;
   replaysSessionSampleRate?: number;
   replaysOnErrorSampleRate?: number;
@@ -40,6 +42,14 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// product and client (SENTRY_CLIENT), from the server, as on its events. The
+// scrub redacts any key that names a client, so they are put back after it.
+const routingTags: Record<string, string> = runtime.tags || { product: "field" };
+function withRoutingTags<T extends { tags?: Record<string, unknown> }>(event: T | null): T | null {
+  if (event) event.tags = { ...event.tags, ...routingTags };
+  return event;
+}
+
 // Trace headers go only to Field's own server, never to a third party.
 const ownOrigin = typeof window !== "undefined" ? window.location.origin : "http://localhost";
 
@@ -49,7 +59,11 @@ if (dsn) {
     dsn,
     environment: String(runtime.environment || import.meta.env.MODE),
     release: String(runtime.release || import.meta.env.VITE_SENTRY_RELEASE || "").trim() || undefined,
+    initialScope: { tags: routingTags },
     sendDefaultPii: false,
+    // A cancelled fetch (the user left the page, a newer request replaced it)
+    // rejects with AbortError. Nothing failed, so it is not reported.
+    ignoreErrors: [/^AbortError\b/],
     dataCollection: {
       userInfo: false,
       cookies: false,
@@ -58,9 +72,9 @@ if (dsn) {
     // Same error at most once an hour, at most 20 an hour in all, per open tab.
     beforeSend: (event) => {
       const allowed = throttle(event);
-      return allowed && scrubEvent(allowed);
+      return allowed && withRoutingTags(scrubEvent(allowed));
     },
-    beforeSendTransaction: (event) => scrubEvent(event),
+    beforeSendTransaction: (event) => withRoutingTags(scrubEvent(event)),
     beforeBreadcrumb: (breadcrumb) => scrubBreadcrumb(breadcrumb),
     integrations: [
       // Page loads and navigations, with Web Vitals: how fast the page shows,
@@ -114,14 +128,18 @@ if (dsn) {
       ...(runtime.feedback === false
         ? []
         : [
-          // A small "report a problem" button. It asks for no name or email;
-          // a screenshot is optional and can be cropped or blacked out first.
+          // A small "report a problem" button. It asks for no name; a
+          // screenshot is optional and can be cropped or blacked out first.
+          // The email field keeps Sentry's defaults (shown, optional, Sentry's
+          // own words) and is the "tell me when it is fixed" opt-in, so it is
+          // never filled from the signed-in person: useSentryUser points at a
+          // key setUser never sets.
           Sentry.feedbackIntegration({
             autoInject: true,
             colorScheme: "system",
             showBranding: false,
             showName: false,
-            showEmail: false,
+            useSentryUser: { name: "username", email: "notify_email" },
             enableScreenshot: true,
             triggerLabel: "",
             triggerAriaLabel: "Report a problem",
@@ -140,4 +158,6 @@ if (dsn) {
     replaysSessionSampleRate: rate(runtime.replaysSessionSampleRate, 0.05),
     replaysOnErrorSampleRate: rate(runtime.replaysOnErrorSampleRate, 1),
   });
+  // Feedback events skip beforeSend; this hook sees each one before it is sent.
+  Sentry.getClient()?.on("beforeSendFeedback", tagNotify);
 }

@@ -1,0 +1,24 @@
+{
+  "name": "Field",
+  "description": "Quote building and invoicing for trade operators: a price catalogue, quotes, invoice PDFs and email sending.",
+  "redirects": [],
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          { "group": "Get started", "pages": ["index", "self-hosting", "replit", "clerk-sign-in"] },
+          { "group": "Quotes and prices", "pages": ["pricing-engine", "concepts/surveyor", "catalog-backup-restore", "gmail-sending"] },
+          { "group": "Integrations", "pages": ["integrations", "xero", "remote-mcp", "rate-limits"] }
+        ]
+      },
+      {
+        "tab": "Project",
+        "groups": [
+          { "group": "Contributing", "pages": ["ci", "releasing", "lessons-learned"] },
+          { "group": "Releases", "pages": ["releases"] }
+        ]
+      }
+    ]
+  }
+}

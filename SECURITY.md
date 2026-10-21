@@ -55,6 +55,10 @@ credential value anywhere public.
   budget answers `429` with `Retry-After` (`docs/RATE_LIMITS.md`). The
   address is only as good as `trust proxy` (`FIELD_TRUST_PROXY`): never
   trust more proxy hops than there are.
+- **Browser headers.** Every response sends `nosniff`, refuses framing
+  (`X-Frame-Options: DENY`) and sends a Content-Security-Policy with a
+  nonce for each page's inline scripts. The policy is report-only unless
+  `FIELD_CSP=enforce` (`docs/REPLIT.md`, "Security headers").
 - **Sent documents are records.** A quote or invoice a customer has been sent
   is never changed in place; a change produces a new version. Tampering with
   that history is a security issue.

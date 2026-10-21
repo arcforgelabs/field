@@ -183,6 +183,23 @@ describe("legacy milestone invoices from two quote versions", () => {
       assert.equal(sent.jobsRefused, 0, JSON.stringify(sent.mismatches));
       const warning = sent.warnings.find((entry) => entry.kind === "rows-from-sent-copy");
       assert.match(warning.reason, /issued-document-emailed/);
+
+      // The report loads emailed invoices for every job in one transaction,
+      // not one per job, and finds what the per-job read finds.
+      const byJob = await documents.listEmailedInvoicesByJob();
+      assert.deepEqual([...byJob.keys()], ["job-sent-document"]);
+      assert.deepEqual(byJob.get("job-sent-document").map((doc) => [doc.number, doc.events.map((event) => event.event)]), [[job.number, ["emailed"]]]);
+      const calls = { preload: 0, perJob: 0 };
+      const counted = {
+        listEmailedInvoicesByJob: () => { calls.preload += 1; return documents.listEmailedInvoicesByJob(); },
+        listJobDocuments: (jobId) => { calls.perJob += 1; return documents.listJobDocuments(jobId); },
+        readIssuedDocument: (uid) => documents.readIssuedDocument(uid),
+      };
+      const preloaded = await listInvoiceAmountDisagreements({ dataDir, issuedDocuments: counted });
+      assert.deepEqual(calls, { preload: 1, perJob: 0 });
+      const perJob = await listInvoiceAmountDisagreements({ dataDir, issuedDocuments: { listJobDocuments: counted.listJobDocuments, readIssuedDocument: counted.readIssuedDocument } });
+      assert.equal(calls.perJob, 1);
+      assert.deepEqual(preloaded, perJob);
     } finally {
       await fresh.close();
     }

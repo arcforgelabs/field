@@ -2,8 +2,9 @@
 // GitHub Releases (with npm's dist-tags as the fallback). Used by the Replit
 // deploy (scripts/deploy-release.js, FIELD_DEPLOY_REF=stable|beta).
 //
-// Release names follow docs/RELEASING.md: vYYYY.M.D is stable, and
-// vYYYY.M.D-beta.N is a beta of the upcoming YYYY.M.D.
+// Release names follow docs/RELEASING.md: vYYYY.M.N is stable, and
+// vYYYY.M.N-beta.B is a beta of the upcoming YYYY.M.N (N counts the
+// month's releases, so it can pass 31).
 //
 //   stable  GitHub's latest release (what Field Release Promote points at, so
 //           a rollback is followed), else npm `latest`
@@ -13,7 +14,7 @@
 // Nothing here sends anything about the installation: each request is an
 // anonymous GET of public data.
 
-const TAG = /^v(20\d{2})\.([1-9]|1[0-2])\.([1-9]|[12]\d|3[01])(?:-beta\.([1-9]\d*))?$/;
+const TAG = /^v(20\d{2})\.([1-9]|1[0-2])\.([1-9]\d*)(?:-beta\.([1-9]\d*))?$/;
 export const CHANNELS = ["stable", "beta"];
 export const DEFAULT_GITHUB_API = "https://api.github.com";
 export const DEFAULT_GITHUB_DOWNLOADS = "https://github.com";

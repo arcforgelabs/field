@@ -24,6 +24,21 @@ export function resolveSentryRelease(env = process.env) {
   return readString(env.SENTRY_RELEASE) || readString(env.FIELD_REVISION) || "";
 }
 
+// Tags on every server and browser event, so one Sentry organisation can
+// serve many deployments: product=field, and client=SENTRY_CLIENT when set
+// (a short name such as "embark"; letters, digits, "-" and "_", lowercased,
+// at most 32 characters). The repository names no client.
+export function resolveSentryTags(env = process.env) {
+  const tags = { product: "field" };
+  const client = readString(env.SENTRY_CLIENT).toLowerCase();
+  if (/^[a-z0-9][a-z0-9_-]{0,31}$/.test(client)) tags.client = client;
+  return tags;
+}
+
+export function withRoutingTags(event, tags) {
+  return event && { ...event, tags: { ...event.tags, ...tags } };
+}
+
 export function resolveSentryDsn(env = process.env) {
   const direct = readString(env.SENTRY_DSN);
   if (direct) return direct;
@@ -91,10 +106,15 @@ export async function initFieldSentry(env = process.env) {
   const release = resolveSentryRelease(env) || undefined;
   const tracesSampleRate = resolveSampleRate(env.SENTRY_TRACES_SAMPLE_RATE, SENTRY_DEFAULTS.tracesSampleRate);
   const logs = settingOn(env.SENTRY_LOGS);
+  const tags = resolveSentryTags(env);
+  if (readString(env.SENTRY_CLIENT) && !tags.client) {
+    console.warn("[sentry] SENTRY_CLIENT is not a short name (letters, digits, - and _, at most 32); events carry no client tag");
+  }
   Sentry.init({
     dsn,
     environment,
     release,
+    initialScope: { tags },
     sendDefaultPii: false,
     includeLocalVariables: false,
     tracesSampleRate,
@@ -106,14 +126,16 @@ export async function initFieldSentry(env = process.env) {
     ],
     // Same error at most once an hour, at most 20 errors an hour in all
     // (shared/sentry-scrub.js), so a repeating failure cannot use up the plan.
+    // The scrub redacts any key that names a client; the routing tags are
+    // this deployment's own settings, so they are put back after it.
     beforeSend: (() => {
       const throttle = createEventThrottle();
       return (event) => {
         const allowed = throttle(event);
-        return allowed && scrubEvent(allowed);
+        return allowed && withRoutingTags(scrubEvent(allowed), tags);
       };
     })(),
-    beforeSendTransaction: scrubEvent,
+    beforeSendTransaction: (event) => withRoutingTags(scrubEvent(event), tags),
     beforeBreadcrumb: scrubBreadcrumb,
     beforeSendLog: scrubLog,
     beforeSendMetric: (metric) => ({ ...metric, attributes: scrubValue(metric.attributes) }),
@@ -123,6 +145,7 @@ export async function initFieldSentry(env = process.env) {
     dsn,
     environment,
     release: release || "",
+    tags,
     tracesSampleRate,
     replaysSessionSampleRate: resolveSampleRate(env.SENTRY_REPLAYS_SESSION_SAMPLE_RATE, SENTRY_DEFAULTS.replaysSessionSampleRate),
     replaysOnErrorSampleRate: resolveSampleRate(env.SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE, SENTRY_DEFAULTS.replaysOnErrorSampleRate),
