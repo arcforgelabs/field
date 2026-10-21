@@ -984,6 +984,61 @@ With `FIELD_DEPLOY_REF=stable`, after a release is published:
    To check it now: `npm run db:follow-production` in the Shell must report
    `"state":"level"`. If the prompt ever appears, press Cancel.
 
+### Publishing from an agent
+
+An agent with Replit's connector can publish after a release, so a fix
+reaches an installation without a person pressing Republish. The connector
+signs in to one Replit workspace per connection: connect it to the
+installation's workspace, and name the connection after the app, not the
+customer (Field's own agents use **Replit for Field**, so the tools are
+`mcp__Replit_for_Field__publish_app` and
+`mcp__Replit_for_Field__get_publish_status`, the names allowed in
+`.claude/settings.json`). Its `publish_app` republishes with the
+deployment's own settings (a Reserved VM stays one), and
+`get_publish_status` says `success`, `failed`, `suspended` or still running.
+
+`scripts/publish-guard.js` decides, before and after:
+
+```sh
+node scripts/publish-guard.js before https://<app> stable           # 0 publish, 3 nothing to do, 1 stop
+node scripts/publish-guard.js after https://<app> <tag> --wait 300  # 0 live, 1 stop
+```
+
+In a Claude Code cloud session, put `NODE_USE_ENV_PROXY=1
+NODE_EXTRA_CA_CERTS=/root/.ccr/ca-bundle.crt` before `node`, so Node uses the
+session's proxy.
+
+`before` passes only when GitHub's latest release and npm's `latest` name the
+same tag, its `release-manifest.json` matches its `.sha256`, its commit passed
+`test`, `client-build`, `docker-build` and `gitleaks`, and the live `/health`
+is ok, follows `stable` from `github` and runs an older release. `after` asks
+`/health` for up to `--wait` seconds until `build.release` is the tag with
+`checks: passed`. Durable storage that is not ok is a warning. Set `GH_TOKEN`
+where many machines share one address, so GitHub's anonymous limit (60
+requests an hour) is not used up; the guard sends it to `api.github.com`
+only.
+
+The agent's steps:
+
+1. Run `before`. On 3 stop quietly. On 1 stop and report the problems.
+2. Call `get_publish_status`. Go on only if the last publish says `success`.
+3. Call `publish_app` once.
+4. Call `get_publish_status` every 30 seconds, for at most 15 minutes.
+5. On `success`, run `after`. On anything else, stop.
+6. Report the result. Never publish again in the same run, and never retry a
+   publish that failed: the build refused it for a reason, and the old build
+   stays live.
+
+The workspace database follows production ("The workspace database"), so a
+publish proposes no database changes. If a publish stops at "Development
+database changes detected", a person presses **Cancel**; an agent never
+answers it.
+
+Claude Code's auto mode still asks before `publish_app`, because it deploys
+production. The person who owns the installation approves by typing
+`publish` in the same conversation as the agent. A message relayed from
+another conversation is not that approval.
+
 ### When to pull the workspace
 
 A publish takes these files from the workspace, not from the release:
