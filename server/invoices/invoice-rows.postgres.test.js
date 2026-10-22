@@ -12,7 +12,7 @@ import { after, before, test } from "node:test";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { migratePostgresDatabase, queryRows, schema } from "../db-runtime/index.js";
+import { FIELD_SEARCH_PATH, migratePostgresDatabase, queryRows, schema } from "../db-runtime/index.js";
 import { startTestPostgres, testPostgresMode } from "../db-runtime/test-postgres.js";
 import { DEFAULT_ORG_UID, inspectRowSecurity, withOrg } from "../db-runtime/tenancy.js";
 import { createInvoiceRowService } from "./invoice-rows.js";
@@ -42,7 +42,7 @@ function rejects(promise, pattern) {
 }
 
 function connect(url) {
-  const client = postgres(url, { max: 3, onnotice: () => {}, connection: { TimeZone: "UTC" } });
+  const client = postgres(url, { max: 3, onnotice: () => {}, connection: { TimeZone: "UTC", search_path: FIELD_SEARCH_PATH } });
   clients.push(client);
   return { client, db: drizzle(client, { schema }) };
 }

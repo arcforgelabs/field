@@ -10,6 +10,7 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { createTestDb, MIGRATIONS_FOLDER, queryRows, schema } from "../db-runtime/index.js";
+import { withTablesInField } from "../test-support/move-tables.js";
 import { DEFAULT_ORG_UID, withOrg } from "../db-runtime/tenancy.js";
 import { createPostgresBlobStore, sha256Hex } from "./blob-store.js";
 import { IssuedDocumentConflictError, createIssuedDocumentService } from "./issued-documents.js";
@@ -227,7 +228,7 @@ describe("issued documents", () => {
       select c.relname as "table", c.relrowsecurity as rls, c.relforcerowsecurity as forced,
              exists (select 1 from pg_policies p where p.tablename = c.relname and p.policyname = c.relname || '_tenant_isolation') as policy
       from pg_class c join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = 'public' and c.relname in ('document_blobs', 'issued_documents', 'document_events', 'document_number_counters')
+      where n.nspname = 'field' and c.relname in ('document_blobs', 'issued_documents', 'document_events', 'document_number_counters')
       order by 1`, t.db);
     assert.deepEqual(rows.map((row) => [row.table, row.rls, row.forced, row.policy]), [
       ["document_blobs", true, true, true],
@@ -295,7 +296,8 @@ describe("migration 0009 rollback", () => {
     try {
       const db = drizzle(client, { schema });
       await migrate(db, { migrationsFolder: upTo0009 });
-      await createIssuedDocumentService({ db, orgUid: ORG_A }).recordIssuedDocument(quoteInput());
+      // 0009 leaves the tables in public. The service writes field.<table>.
+      await withTablesInField(client, () => createIssuedDocumentService({ db, orgUid: ORG_A }).recordIssuedDocument(quoteInput()));
       await client.exec(`begin; ${readFileSync(join(MIGRATIONS_FOLDER, "..", "rollback", `${TAG}.down.sql`), "utf8")}; commit;`);
       await migrate(drizzle(reference, { schema }), { migrationsFolder: before0009 });
       assert.deepEqual(await schemaShape(db), await schemaShape(drizzle(reference, { schema })));

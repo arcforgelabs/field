@@ -12,12 +12,19 @@ import {
   jsonb,
   numeric,
   pgPolicy,
-  pgTable,
+  pgSchema,
   primaryKey,
   text,
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+
+/**
+ * Field's tables live in this schema, never in `public`. Replit compares only
+ * `public` before a publish; an empty `public` gives it nothing to reconcile.
+ * Define every table with `fieldSchema.table`.
+ */
+export const fieldSchema = pgSchema("field");
 
 /**
  * Drizzle toolchain proof only.
@@ -27,7 +34,7 @@ import {
  * quote, document, outbox, or customer state. Those entities belong to later
  * approved work.
  */
-export const toolchainProbe = pgTable("drizzle_toolchain_probe", {
+export const toolchainProbe = fieldSchema.table("drizzle_toolchain_probe", {
   id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   probeKey: text("probe_key").notNull(),
   payload: jsonb("payload")
@@ -63,13 +70,13 @@ const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
 });
 
 /** File contents, keyed by their SHA-256 (hex). Shared by every path with the same bytes. */
-export const fieldBlobs = pgTable("field_blobs", {
+export const fieldBlobs = fieldSchema.table("field_blobs", {
   sha256: text("sha256").primaryKey(),
   bytes: bytea("bytes").notNull(),
 });
 
 /** One row per mirrored file: its path relative to the data directory and what it holds. */
-export const fieldFiles = pgTable(
+export const fieldFiles = fieldSchema.table(
   "field_files",
   {
     path: text("path").primaryKey(),
@@ -85,7 +92,7 @@ export const fieldFiles = pgTable(
 );
 
 /** Whole-database images of SQLite files (db.serialize()); the newest version is restored at boot. */
-export const fieldSqliteImages = pgTable(
+export const fieldSqliteImages = fieldSchema.table(
   "field_sqlite_images",
   {
     /** The database's path relative to the data directory, e.g. "field.db". */
@@ -118,7 +125,7 @@ export const ORGANIZATION_STATUSES = ["active", "archived"] as const;
 export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
 
 /** Not tenant-scoped itself: the directory the runtime resolves an organisation from. */
-export const organizations = pgTable(
+export const organizations = fieldSchema.table(
   "organizations",
   {
     uid: text("uid").primaryKey(),
@@ -173,7 +180,7 @@ export type FieldUserRole = (typeof FIELD_USER_ROLES)[number];
 export type FieldUserStatus = (typeof FIELD_USER_STATUSES)[number];
 
 /** A person. Not tenant-scoped: one person can belong to several organisations. */
-export const fieldUsers = pgTable(
+export const fieldUsers = fieldSchema.table(
   "users",
   {
     /** Field's user id. Imported users keep their users.json id, so tokens and MCP grants still point at them. */
@@ -195,7 +202,7 @@ export type FieldUser = typeof fieldUsers.$inferSelect;
 export type NewFieldUser = typeof fieldUsers.$inferInsert;
 
 /** A person's role and access in one organisation. */
-export const orgMemberships = pgTable(
+export const orgMemberships = fieldSchema.table(
   "org_memberships",
   {
     orgUid: orgUid(),
@@ -242,7 +249,7 @@ const updatedAt = () =>
   timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull();
 
 /** Canonical units. `toBase` converts to the dimension's base unit; null means not convertible. */
-export const units = pgTable(
+export const units = fieldSchema.table(
   "units",
   {
     code: text("code").primaryKey(),
@@ -259,7 +266,7 @@ export const units = pgTable(
   ],
 );
 
-export const unitAliases = pgTable("unit_aliases", {
+export const unitAliases = fieldSchema.table("unit_aliases", {
   alias: text("alias").primaryKey(),
   unitCode: text("unit_code")
     .notNull()
@@ -267,7 +274,7 @@ export const unitAliases = pgTable("unit_aliases", {
 });
 
 /** Per organisation: tax depends on the country. */
-export const taxCodes = pgTable(
+export const taxCodes = fieldSchema.table(
   "tax_codes",
   {
     orgUid: orgUid(),
@@ -278,7 +285,7 @@ export const taxCodes = pgTable(
   (t) => [primaryKey({ columns: [t.orgUid, t.code] }), tenantIsolation("tax_codes")],
 );
 
-export const categories = pgTable(
+export const categories = fieldSchema.table(
   "categories",
   {
     id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
@@ -302,7 +309,7 @@ export const categories = pgTable(
   ],
 );
 
-export const suppliers = pgTable(
+export const suppliers = fieldSchema.table(
   "suppliers",
   {
     id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
@@ -330,7 +337,7 @@ export const suppliers = pgTable(
  * cost plus the row's markup (`markup`), or the kit roll-up of its components
  * (`rollup`, server/catalog/rollup.js).
  */
-export const items = pgTable(
+export const items = fieldSchema.table(
   "items",
   {
     uid: text("uid").primaryKey(),
@@ -418,7 +425,7 @@ const itemFk = (name: string, t: { orgUid: AnyPgColumn }, column: AnyPgColumn) =
  * the table complete: inserting an item records its code here, and
  * items.code can no longer change.
  */
-export const itemCodeAliases = pgTable(
+export const itemCodeAliases = fieldSchema.table(
   "item_code_aliases",
   {
     orgUid: orgUid(),
@@ -436,7 +443,7 @@ export const itemCodeAliases = pgTable(
 );
 
 /** Item-specific conversions, e.g. 1 m3 of gravel = 1.6 tonne. */
-export const itemUnitConversions = pgTable(
+export const itemUnitConversions = fieldSchema.table(
   "item_unit_conversions",
   {
     orgUid: orgUid(),
@@ -457,7 +464,7 @@ export const itemUnitConversions = pgTable(
   ],
 );
 
-export const itemSuppliers = pgTable(
+export const itemSuppliers = fieldSchema.table(
   "item_suppliers",
   {
     id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
@@ -488,7 +495,7 @@ export const itemSuppliers = pgTable(
  * with effective_from <= now (ties: highest id); its id is the `priceId`
  * quote lines record. Rows are never updated or deleted by the app.
  */
-export const itemPrices = pgTable(
+export const itemPrices = fieldSchema.table(
   "item_prices",
   {
     id: bigint("id", { mode: "number" }).generatedByDefaultAsIdentity().primaryKey(),
@@ -522,7 +529,7 @@ export const itemPrices = pgTable(
   ],
 );
 
-export const priceImports = pgTable(
+export const priceImports = fieldSchema.table(
   "price_imports",
   {
     id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
@@ -552,7 +559,7 @@ export const priceImports = pgTable(
   ],
 );
 
-export const priceImportRows = pgTable(
+export const priceImportRows = fieldSchema.table(
   "price_import_rows",
   {
     orgUid: orgUid(),
@@ -597,7 +604,7 @@ export const priceImportRows = pgTable(
  * keys to kit_uid / component_uid. The TypeScript names (`itemComponents`,
  * `parentUid`, `childUid`) are kept so the code that reads it did not move.
  */
-export const itemComponents = pgTable(
+export const itemComponents = fieldSchema.table(
   "kit_components",
   {
     id: bigint("id", { mode: "number" }).generatedByDefaultAsIdentity().primaryKey(),
@@ -639,7 +646,7 @@ export const kitComponents = itemComponents;
  * Field-level audit log for the catalogue. Not a foreign key: history
  * outlives a deleted item. `itemCode` is the code at the time of the change.
  */
-export const catalogHistory = pgTable(
+export const catalogHistory = fieldSchema.table(
   "catalog_history",
   {
     id: bigint("id", { mode: "number" }).generatedByDefaultAsIdentity().primaryKey(),
@@ -661,7 +668,7 @@ export const catalogHistory = pgTable(
 );
 
 /** Supplier quotes, links and notes behind an item's cost or sell price. */
-export const catalogEvidence = pgTable(
+export const catalogEvidence = fieldSchema.table(
   "catalog_evidence",
   {
     id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
@@ -691,7 +698,7 @@ export const catalogEvidence = pgTable(
  * One row per organisation (id = 1). `version` increases in the same transaction as every
  * catalogue write; it is the catalogue's ETag and the cache key for readers.
  */
-export const catalogMeta = pgTable(
+export const catalogMeta = fieldSchema.table(
   "catalog_meta",
   {
     orgUid: orgUid(),
@@ -713,7 +720,7 @@ export const catalogMeta = pgTable(
  * migration recorded here never runs again, so a later edit by an operator is
  * never undone by a reboot.
  */
-export const dataMigrations = pgTable(
+export const dataMigrations = fieldSchema.table(
   "data_migrations",
   {
     orgUid: orgUid(),
@@ -737,7 +744,7 @@ export const dataMigrations = pgTable(
 export const QUOTE_SNAPSHOT_DOCUMENT_TYPES = ["quote", "invoice", "receipt"] as const;
 export const QUOTE_SNAPSHOT_STATUSES = ["prepared", "sent"] as const;
 
-export const quoteSnapshots = pgTable(
+export const quoteSnapshots = fieldSchema.table(
   "quote_snapshots",
   {
     id: bigint("id", { mode: "number" }).generatedByDefaultAsIdentity().primaryKey(),
@@ -813,7 +820,7 @@ export type DocumentEvent = (typeof DOCUMENT_EVENTS)[number];
  * behind put(bytes) -> sha256 and get(sha256) -> bytes, so object storage can
  * replace this table later.
  */
-export const documentBlobs = pgTable(
+export const documentBlobs = fieldSchema.table(
   "document_blobs",
   {
     orgUid: orgUid(),
@@ -832,7 +839,7 @@ export const documentBlobs = pgTable(
 );
 
 /** One row per document a customer was issued, exactly as issued. */
-export const issuedDocuments = pgTable(
+export const issuedDocuments = fieldSchema.table(
   "issued_documents",
   {
     /** `doc_` + ULID. */
@@ -880,7 +887,7 @@ export const issuedDocuments = pgTable(
  * an event with no issued document (an email that failed before its document
  * was issued). `idempotency_key` makes a retried write a no-op.
  */
-export const documentEvents = pgTable(
+export const documentEvents = fieldSchema.table(
   "document_events",
   {
     /** `dev_` + ULID. */
@@ -919,7 +926,7 @@ export const documentEvents = pgTable(
  * server/invoices/issue.js) advances the `invoice` counter inside the issue
  * transaction, so a number is used only by an invoice that was issued.
  */
-export const documentNumberCounters = pgTable(
+export const documentNumberCounters = fieldSchema.table(
   "document_number_counters",
   {
     orgUid: orgUid(),
@@ -971,7 +978,7 @@ export type QuoteLineType = (typeof QUOTE_LINE_TYPES)[number];
 export const LINE_TOTAL_SOURCES = ["computed", "printed"] as const;
 export type LineTotalSource = (typeof LINE_TOTAL_SOURCES)[number];
 
-export const quotes = pgTable(
+export const quotes = fieldSchema.table(
   "quotes",
   {
     /** `qte_` + ULID. */
@@ -1038,7 +1045,7 @@ export const quotes = pgTable(
 );
 
 /** The groups the customer sees, flat and ordered. */
-export const quoteSections = pgTable(
+export const quoteSections = fieldSchema.table(
   "quote_sections",
   {
     /** `qsc_` + ULID. */
@@ -1074,7 +1081,7 @@ export const quoteSections = pgTable(
 );
 
 /** Every line stores the values it prints, whether or not it came from the catalogue. */
-export const quoteLines = pgTable(
+export const quoteLines = fieldSchema.table(
   "quote_lines",
   {
     /** `qln_` + ULID. */
@@ -1196,7 +1203,7 @@ export type QuoteLine = typeof quoteLines.$inferSelect;
 // server/documents/replicator.js. Migration 0012 refuses DELETE, TRUNCATE
 // and any UPDATE of a row already replicated.
 
-export const documentBlobReplicas = pgTable(
+export const documentBlobReplicas = fieldSchema.table(
   "document_blob_replicas",
   {
     orgUid: orgUid(),
@@ -1262,7 +1269,7 @@ export const INVOICE_LINE_TYPES = ["claim", "item", "custom", "note"] as const;
 export type InvoiceLineType = (typeof INVOICE_LINE_TYPES)[number];
 
 /** A job's payment schedule: one row per milestone, in order. */
-export const paymentMilestones = pgTable(
+export const paymentMilestones = fieldSchema.table(
   "payment_milestones",
   {
     /** `pms_` + ULID. */
@@ -1305,7 +1312,7 @@ export const paymentMilestones = pgTable(
 );
 
 /** One row per invoice as issued (or the draft a milestone will issue). */
-export const invoices = pgTable(
+export const invoices = fieldSchema.table(
   "invoices",
   {
     /** `inv_` + ULID. */
@@ -1414,7 +1421,7 @@ export const invoices = pgTable(
 );
 
 /** An invoice's lines. A milestone invoice has one claim line against its quote. */
-export const invoiceLines = pgTable(
+export const invoiceLines = fieldSchema.table(
   "invoice_lines",
   {
     /** `iln_` + ULID. */
@@ -1480,7 +1487,7 @@ export const invoiceLines = pgTable(
  * Credit notes apply from step 4b on: an invoice revised in place before
  * them has none (owner's decision, 2026-10-13).
  */
-export const creditNotes = pgTable(
+export const creditNotes = fieldSchema.table(
   "credit_notes",
   {
     /** `crn_` + ULID. */
@@ -1547,7 +1554,7 @@ export const creditNotes = pgTable(
   ],
 );
 
-export const creditNoteLines = pgTable(
+export const creditNoteLines = fieldSchema.table(
   "credit_note_lines",
   {
     /** `cnl_` + ULID. */
@@ -1597,7 +1604,7 @@ export const creditNoteLines = pgTable(
 );
 
 /** Money received against an invoice. Never deleted: a mistaken payment is voided. */
-export const payments = pgTable(
+export const payments = fieldSchema.table(
   "payments",
   {
     /** `pay_` + ULID. */
@@ -1646,7 +1653,7 @@ export const payments = pgTable(
 );
 
 /** A receipt, one per payment: today, for the payment that cleared its milestone. */
-export const receipts = pgTable(
+export const receipts = fieldSchema.table(
   "receipts",
   {
     /** `rct_` + ULID. */
@@ -1707,7 +1714,7 @@ export const receipts = pgTable(
  * `to_invoice_uid` of its latest allocation, else the invoice it was
  * recorded against.
  */
-export const paymentAllocations = pgTable(
+export const paymentAllocations = fieldSchema.table(
   "payment_allocations",
   {
     /** `pal_` + ULID. */
@@ -1773,7 +1780,7 @@ export type CreditNoteOnReissue = (typeof CREDIT_NOTE_ON_REISSUE)[number];
  * the business profile is still config (docs/PRICING_ENGINE.md "Business
  * settings").
  */
-export const businessSettings = pgTable(
+export const businessSettings = fieldSchema.table(
   "business_settings",
   {
     orgUid: orgUid().primaryKey(),
@@ -1821,7 +1828,7 @@ export type MilestoneCapKind = (typeof MILESTONE_CAP_KINDS)[number];
  * band apply to every invoice the job issues, whatever its schedule.
  * Nothing about a jurisdiction is in code: the operator enters these.
  */
-export const milestoneRules = pgTable(
+export const milestoneRules = fieldSchema.table(
   "milestone_rules",
   {
     /** `mrl_` + ULID. */
@@ -1858,7 +1865,7 @@ export const milestoneRules = pgTable(
 );
 
 /** A rule's default milestones, in order. None means Field's default schedule. */
-export const milestoneRuleMilestones = pgTable(
+export const milestoneRuleMilestones = fieldSchema.table(
   "milestone_rule_milestones",
   {
     /** `mrm_` + ULID. */
@@ -1894,7 +1901,7 @@ export const milestoneRuleMilestones = pgTable(
  * `max_percent` of the contract value and `max_amount`, measured on the
  * rule's value basis.
  */
-export const milestoneRuleCaps = pgTable(
+export const milestoneRuleCaps = fieldSchema.table(
   "milestone_rule_caps",
   {
     /** `mrc_` + ULID. */
@@ -1958,7 +1965,7 @@ export type XeroCreateMode = (typeof XERO_CREATE_MODES)[number];
 export const XERO_INVOICE_NUMBERING = ["field"] as const;
 export type XeroInvoiceNumbering = (typeof XERO_INVOICE_NUMBERING)[number];
 
-export const xeroConnections = pgTable(
+export const xeroConnections = fieldSchema.table(
   "xero_connections",
   {
     orgUid: orgUid().primaryKey(),
@@ -2044,7 +2051,7 @@ export type XeroConnection = typeof xeroConnections.$inferSelect;
 export const XERO_SYNC_STATES = ["pending", "created", "mismatch", "failed", "skipped", "held"] as const;
 export type XeroSyncState = (typeof XERO_SYNC_STATES)[number];
 
-export const xeroInvoiceSyncs = pgTable(
+export const xeroInvoiceSyncs = fieldSchema.table(
   "xero_invoice_syncs",
   {
     orgUid: orgUid(),
@@ -2106,7 +2113,7 @@ export type XeroInvoiceSync = typeof xeroInvoiceSyncs.$inferSelect;
  * to another organisation's id only once the earlier id is recorded here
  * (migration 0018's trigger), so the history is never lost.
  */
-export const xeroInvoiceLinks = pgTable(
+export const xeroInvoiceLinks = fieldSchema.table(
   "xero_invoice_links",
   {
     orgUid: orgUid(),
@@ -2135,7 +2142,7 @@ export const xeroInvoiceLinks = pgTable(
 // only that a field is set, when and by whom. Every change writes an
 // integration_audit_events row, which never holds a value.
 
-export const integrationCredentials = pgTable(
+export const integrationCredentials = fieldSchema.table(
   "integration_credentials",
   {
     orgUid: orgUid(),
@@ -2167,7 +2174,7 @@ export type IntegrationCredential = typeof integrationCredentials.$inferSelect;
  * reached, a key generated in the browser, pending credentials stored,
  * promoted or discarded). Append-only, and never a value.
  */
-export const integrationAuditEvents = pgTable(
+export const integrationAuditEvents = fieldSchema.table(
   "integration_audit_events",
   {
     uid: text("uid").primaryKey(),
@@ -2193,7 +2200,7 @@ export type IntegrationAuditEvent = typeof integrationAuditEvents.$inferSelect;
  * installation), and when (#133). Names the token or installation by id and
  * name, and whose it was; never a token value or hash. Append-only.
  */
-export const accessAuditEvents = pgTable(
+export const accessAuditEvents = fieldSchema.table(
   "access_audit_events",
   {
     uid: text("uid").primaryKey(),
@@ -2230,7 +2237,7 @@ export type AccessAuditEvent = typeof accessAuditEvents.$inferSelect;
  * has the key, Field reads them and moves them into integration_credentials
  * (server/secrets/setup.js), with an audit event.
  */
-export const integrationSetup = pgTable(
+export const integrationSetup = fieldSchema.table(
   "integration_setup",
   {
     orgUid: orgUid(),

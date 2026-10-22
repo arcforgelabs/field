@@ -45,7 +45,7 @@ export function openReadOnlySource(config) {
     connect_timeout: 15,
     prepare: !config.pooled,
     onnotice: () => {},
-    connection: { application_name: "field-data-migrations-dry-run", TimeZone: "UTC", default_transaction_read_only: "on" },
+    connection: { application_name: "field-data-migrations-dry-run", TimeZone: "UTC", default_transaction_read_only: "on", search_path: "field, public" },
   });
   return { db: drizzlePostgres(client, { schema }), close: () => client.end({ timeout: 5 }) };
 }
@@ -79,7 +79,13 @@ function migrationsUpTo(idx) {
 }
 
 async function existingTables(db) {
-  return new Set(rowsOf(await db.execute(sql`select table_name from information_schema.tables where table_schema = 'public'`)).map((row) => row.table_name));
+  // A source that has not applied 0025 still has its tables in public.
+  // After that migration they are in field. A name in both is read from field.
+  const rows = rowsOf(await db.execute(sql`
+    select table_schema, table_name from information_schema.tables
+    where table_schema in ('field', 'public') and table_type = 'BASE TABLE'`));
+  const inField = new Set(rows.filter((row) => row.table_schema === "field").map((row) => row.table_name));
+  return new Set(rows.filter((row) => row.table_schema === "field" || !inField.has(row.table_name)).map((row) => row.table_name));
 }
 
 function plainValue(value) {

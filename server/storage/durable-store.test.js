@@ -15,7 +15,7 @@ import Database from "better-sqlite3";
 import express from "express";
 import { sql } from "drizzle-orm";
 
-import { createTestDb, queryRows, resolveDbConfig } from "../db-runtime/index.js";
+import { FIELD_SEARCH_PATH, createTestDb, queryRows, resolveDbConfig } from "../db-runtime/index.js";
 import { startTestPostgres } from "../db-runtime/test-postgres.js";
 import * as fs from "./fs.js";
 import * as fsp from "./fs-promises.js";
@@ -517,7 +517,7 @@ async function migrated(url) {
   const { drizzle } = await import("drizzle-orm/postgres-js");
   const postgres = (await import("postgres")).default;
   const { migratePostgresDatabase } = await import("../db-runtime/index.js");
-  const client = postgres(url, { max: 1, onnotice: () => {} });
+  const client = postgres(url, { max: 1, onnotice: () => {}, connection: { search_path: FIELD_SEARCH_PATH } });
   try {
     await migratePostgresDatabase(drizzle(client));
   } finally {

@@ -27,7 +27,7 @@ import { after, before, describe, test } from "node:test";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { createTestDb, migratePostgresDatabase, queryRows, schema } from "../db-runtime/index.js";
+import { FIELD_SEARCH_PATH, createTestDb, migratePostgresDatabase, queryRows, schema } from "../db-runtime/index.js";
 import { startTestPostgres, testPostgresMode } from "../db-runtime/test-postgres.js";
 import { DEFAULT_ORG_UID, withOrg } from "../db-runtime/tenancy.js";
 import { createInvoiceRowService } from "../invoices/invoice-rows.js";
@@ -107,7 +107,7 @@ const backends = [
       const url = new URL(server.url);
       url.username = role;
       url.pathname = `/${database}`;
-      const client = postgres(url.toString(), { max: 3, onnotice: () => {}, connection: { TimeZone: "UTC" } });
+      const client = postgres(url.toString(), { max: 3, onnotice: () => {}, connection: { TimeZone: "UTC", search_path: FIELD_SEARCH_PATH } });
       const db = drizzle(client, { schema });
       await migratePostgresDatabase(db);
       return {

@@ -76,6 +76,148 @@ const PGLITE_OPTIONS = {
   postgresqlconf: ["timezone = 'UTC'", "shared_buffers = '16MB'"],
 };
 
+// PGlite starts Postgres with `-c search_path=public`, which beats postgresql.conf
+// and a database-level setting. Point that flag at field before any client opens.
+// A missing `field` schema is skipped, so migrations 0000-0024 still create tables
+// in public; 0025 creates `field` and moves them.
+export const FIELD_SEARCH_PATH = "field, public";
+
+// PGlite's startup flag is the string "search_path=public". Replace that one
+// entry. A rename in a future PGlite (the map matching nothing) used to leave
+// every session on public with no error; refuse to start instead.
+export function pinPgliteSearchPath(params) {
+  if (!Array.isArray(params)) {
+    throw new Error("PGlite.defaultStartParams is missing; Field cannot point its search_path at schema field");
+  }
+  let replaced = false;
+  const next = params.map((param) => {
+    if (param === "search_path=public") {
+      replaced = true;
+      return "search_path=field,public";
+    }
+    return param;
+  });
+  if (!replaced) {
+    throw new Error("PGlite.defaultStartParams has no search_path=public entry; Field cannot point its search_path at schema field");
+  }
+  return next;
+}
+
+PGlite.defaultStartParams = pinPgliteSearchPath(PGlite.defaultStartParams);
+
+// A pooler closes server sessions out from under a query (migration 0025
+// does this on purpose, so those sessions come back with the new
+// search_path). postgres.js rejects the query and does not run it again.
+const CLOSED_CONNECTION_CODES = new Set([
+  "57P01", // admin_shutdown: pg_terminate_backend
+  "57P02", // crash_shutdown
+  "57P03", // cannot_connect_now
+  "08000", // connection_exception
+  "08003", // connection_does_not_exist
+  "08006", // connection_failure
+  "08P01", // protocol_violation: a pooler reporting a dead server connection
+  "CONNECTION_CLOSED",
+  "CONNECTION_DESTROYED",
+  "ECONNRESET",
+  "EPIPE",
+]);
+
+export function isClosedConnectionError(error) {
+  const seen = new Set();
+  for (let current = error; current && typeof current === "object" && !seen.has(current); current = current.cause) {
+    seen.add(current);
+    if (CLOSED_CONNECTION_CODES.has(current.code)) return true;
+    if (typeof current.message === "string" && /connection terminated|terminating connection due to administrator command|administrator shutdown|server conn crashed|server closed the connection|CONNECTION_CLOSED|CONNECTION_DESTROYED/i.test(current.message)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// One retry, on a new query (postgres.js sends it on another connection).
+// The transaction client begin() hands in is left alone: retrying one
+// statement of a dead transaction would run it outside that transaction.
+// begin() is retried only when its callback has not started. An idle session
+// closed by migration 0025 fails on BEGIN, before the callback. Once the
+// callback has run, a retry would repeat it, including an external call such
+// as a token refresh.
+const QUERY_MODIFIERS = ["values", "raw", "simple", "execute", "describe"];
+
+function retryingQuery(create) {
+  const chain = [];
+  let pending = null;
+  const proxy = {};
+  for (const name of QUERY_MODIFIERS) {
+    proxy[name] = (...args) => {
+      chain.push([name, args]);
+      return proxy;
+    };
+  }
+  function build() {
+    let query = create();
+    for (const [name, args] of chain) query = query[name](...args);
+    return query;
+  }
+  function run() {
+    if (!pending) {
+      pending = (async () => {
+        try {
+          return await build();
+        } catch (error) {
+          if (!isClosedConnectionError(error)) throw error;
+          return build();
+        }
+      })();
+    }
+    return pending;
+  }
+  proxy.then = (onFulfilled, onRejected) => run().then(onFulfilled, onRejected);
+  proxy.catch = (onRejected) => run().catch(onRejected);
+  proxy.finally = (onFinally) => run().finally(onFinally);
+  return proxy;
+}
+
+export function retryClosedConnections(sql) {
+  function wrapped(strings, ...args) {
+    return retryingQuery(() => sql(strings, ...args));
+  }
+  return new Proxy(wrapped, {
+    get(_target, prop) {
+      if (prop === "unsafe") return (...args) => retryingQuery(() => sql.unsafe(...args));
+      if (prop === "begin") {
+        return async (options, fn) => {
+          const userFn = typeof options === "function" ? options : fn;
+          const invoke = () => {
+            let started = false;
+            const wrappedFn = (...args) => {
+              started = true;
+              return userFn(...args);
+            };
+            try {
+              const pending = typeof options === "function" ? sql.begin(wrappedFn) : sql.begin(options, wrappedFn);
+              return Promise.resolve(pending).then(
+                (value) => ({ ok: true, value }),
+                (error) => ({ ok: false, error, started }),
+              );
+            } catch (error) {
+              return { ok: false, error, started };
+            }
+          };
+          const first = await invoke();
+          if (first.ok) return first.value;
+          if (first.started || !isClosedConnectionError(first.error)) throw first.error;
+          const second = await invoke();
+          if (second.ok) return second.value;
+          throw second.error;
+        };
+      }
+      const value = sql[prop];
+      return typeof value === "function" ? value.bind(sql) : value;
+    },
+  });
+}
+
+
 const NO_DATABASE_HINT =
   "set DATABASE_URL or FIELD_DB_URL (for local development only: FIELD_PGLITE=1 or FIELD_PGLITE_DIR)";
 
@@ -278,7 +420,7 @@ function installExitHook() {
 
 function openPostgres(config, { max } = {}) {
   const configured = Number.parseInt(process.env.FIELD_DB_POOL_MAX || "", 10);
-  return postgres(config.url, {
+  const sql = postgres(config.url, {
     max: max ?? (Number.isInteger(configured) && configured > 0 ? configured : 5),
     idle_timeout: 60,
     connect_timeout: 15,
@@ -286,8 +428,11 @@ function openPostgres(config, { max } = {}) {
     // transactions (see isPooledUrl).
     prepare: !config.pooled,
     onnotice: () => {},
-    connection: { application_name: "field", TimeZone: "UTC" },
+    connection: { application_name: "field", TimeZone: "UTC", search_path: FIELD_SEARCH_PATH },
   });
+  // 0025 closes this role's other idle sessions. A query riding one of them
+  // fails once with 57P01; run it again on a connection the pool opens.
+  return retryClosedConnections(sql);
 }
 
 function open(config) {

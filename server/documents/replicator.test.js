@@ -12,6 +12,7 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { MIGRATIONS_FOLDER, createTestDb, queryRows, schema } from "../db-runtime/index.js";
+import { withTablesInField } from "../test-support/move-tables.js";
 import { DEFAULT_ORG_UID, withOrg } from "../db-runtime/tenancy.js";
 import { DocumentBytesError, createPostgresBlobStore, createReplicaFallbackBlobStore, sha256Hex } from "./blob-store.js";
 import { createIssuedDocumentService } from "./issued-documents.js";
@@ -402,19 +403,23 @@ describe("migration 0012 rollback", () => {
       const db = drizzle(client, { schema });
       await migrate(db, { migrationsFolder: upTo0012 });
       const service = createIssuedDocumentService({ db, orgUid: ORG_A });
-      const { document } = await service.recordIssuedDocument({
-        jobId: "job-rb", documentType: "quote", number: "EQ-RB v1", quoteVersion: 1, pdfBytes: pdf("rollback"),
-        issuedAt: "2026-10-12T00:00:00.000Z", source: "live",
-      });
       const store = memoryStore();
-      await createDocumentReplicator({ db, orgUid: ORG_A, store, logger: quiet(), paceMs: 0 }).tick();
+      // 0012 leaves the tables in public. Today's service and replicator write field.<table>.
+      const { document } = await withTablesInField(client, async () => {
+        const recorded = await service.recordIssuedDocument({
+          jobId: "job-rb", documentType: "quote", number: "EQ-RB v1", quoteVersion: 1, pdfBytes: pdf("rollback"),
+          issuedAt: "2026-10-12T00:00:00.000Z", source: "live",
+        });
+        await createDocumentReplicator({ db, orgUid: ORG_A, store, logger: quiet(), paceMs: 0 }).tick();
+        return recorded;
+      });
       await client.exec(`begin; ${readFileSync(join(MIGRATIONS_FOLDER, "..", "rollback", `${TAG}.down.sql`), "utf8")}; commit;`);
       await migrate(drizzle(reference, { schema }), { migrationsFolder: before0012 });
       assert.deepEqual(await schemaShape(db), await schemaShape(drizzle(reference, { schema })));
       // Applied again: the object is found in R2 and recorded, with no write.
       await migrate(db, { migrationsFolder: upTo0012 });
       store.calls.length = 0;
-      const [result] = await createDocumentReplicator({ db, orgUid: ORG_A, store, logger: quiet(), paceMs: 0 }).tick();
+      const [result] = await withTablesInField(client, () => createDocumentReplicator({ db, orgUid: ORG_A, store, logger: quiet(), paceMs: 0 }).tick());
       assert.equal(result.outcome, "already-present");
       assert.equal(result.sha256, document.pdfSha256);
       assert.ok(!store.calls.some((call) => call.startsWith("PUT")));

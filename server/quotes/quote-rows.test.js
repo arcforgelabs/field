@@ -13,6 +13,7 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { createTestDb, MIGRATIONS_FOLDER, queryRows, schema } from "../db-runtime/index.js";
+import { withTablesInField } from "../test-support/move-tables.js";
 import { DEFAULT_ORG_UID, withOrg } from "../db-runtime/tenancy.js";
 import { createIssuedDocumentService } from "../documents/issued-documents.js";
 import { mapQuoteArtifact } from "./from-artifact.js";
@@ -282,7 +283,8 @@ describe("migrations 0011 and 0010 roll back", () => {
       const db = drizzle(client, { schema });
       await migrate(db, { migrationsFolder: dir0011 });
       const service = createQuoteRowService({ db, orgUid: ORG_A });
-      await service.writeVersion({ jobId: "job-r", version: 1, mapped: mapQuoteArtifact({ quote: engineQuote(), meta: FIXTURE_META }), status: "sent", sentAt: "2026-10-01T00:00:00.000Z" });
+      // 0011 leaves the tables in public. The service writes field.<table>.
+      await withTablesInField(client, () => service.writeVersion({ jobId: "job-r", version: 1, mapped: mapQuoteArtifact({ quote: engineQuote(), meta: FIXTURE_META }), status: "sent", sentAt: "2026-10-01T00:00:00.000Z" }));
       // 0011 first: the display columns go, the rows and their money stay.
       await client.exec(readFileSync(ROLLBACK_0011, "utf8"));
       await migrate(drizzle(reference10, { schema }), { migrationsFolder: dir0010 });

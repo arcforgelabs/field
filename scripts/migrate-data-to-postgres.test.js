@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { sql } from "drizzle-orm";
 
-import { createTestDb, queryRows } from "../server/db-runtime/index.js";
+import { FIELD_SEARCH_PATH, createTestDb, queryRows } from "../server/db-runtime/index.js";
 import { startTestPostgres } from "../server/db-runtime/test-postgres.js";
 import { DurableStore, scanTree, treeHash } from "../server/storage/durable-store.js";
 import { setDataRoot, setWriteRecorder } from "../server/storage/write-recorder.js";
@@ -202,7 +202,7 @@ test("migration script (PostgreSQL CLI): a forced insert failure prints no plant
   // Create the tables first (the script migrates, then imports), then refuse blob inserts.
   const dry = spawnSync(process.execPath, [script, "--source", source, "--apply", "--skip-catalog"], { env, encoding: "utf8" });
   assert.equal(dry.status, 0, dry.stderr);
-  const client = postgres(pg.url, { max: 1, onnotice: () => {} });
+  const client = postgres(pg.url, { max: 1, onnotice: () => {}, connection: { search_path: FIELD_SEARCH_PATH } });
   try {
     await client.unsafe("delete from field_files; delete from field_blobs; delete from field_sqlite_images");
     await client.unsafe(`create function field_test_refuse_blob() returns trigger language plpgsql as $$ begin raise exception 'blob refused for test'; end $$`);

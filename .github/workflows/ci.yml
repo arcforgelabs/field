@@ -181,6 +181,14 @@ jobs:
       - name: Build data-layer ESM
         run: npm run db:build
 
+      # Transaction-mode pooler for the search_path test. The test skips
+      # when the binary is absent, so a machine without it still runs the rest.
+      - name: Install PgBouncer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pgbouncer
+          sudo systemctl disable --now pgbouncer || true
+
       # Every test file that opens a real PostgreSQL through the shared test
       # helpers, found by name so a new one joins this lane by itself.
       - name: Run PostgreSQL integration tests
