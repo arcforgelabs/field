@@ -10,6 +10,7 @@
 // move still search public; after the move a new one finds the tables by name.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -159,14 +160,29 @@ test("pooled sessions search schema field, and a closed connection is retried", 
   process.on("unhandledRejection", onCrash);
   const clients = [];
   let bouncer = null;
+  let admin = null;
+  let role = null;
+  let database = null;
   const open = (url, options) => {
     const client = postgres(url, { max: 1, onnotice: () => {}, ...options });
     clients.push(client);
     return client;
   };
   try {
-    bouncer = await startPgbouncer(server.url);
-    const url = server.url;
+    // A role only this test sets, so a sibling test's migration cannot
+    // already have pointed current_user at schema field.
+    admin = postgres(server.url, { max: 1, onnotice: () => {} });
+    const suffix = randomBytes(4).toString("hex");
+    role = `field_pooler_${suffix}`;
+    database = `field_pooler_${suffix}`;
+    await admin.unsafe(`create role ${role} login nosuperuser nobypassrls createrole`);
+    await admin.unsafe(`create database ${database} owner ${role}`);
+    const owned = new URL(server.url);
+    owned.username = role;
+    owned.password = "";
+    owned.pathname = `/${database}`;
+    const url = owned.toString();
+    bouncer = await startPgbouncer(url);
     let throughPooler = null;
     if (bouncer) {
       const pooledUrl = new URL(url);
@@ -311,14 +327,9 @@ test("pooled sessions search schema field, and a closed connection is retried", 
     process.off("unhandledRejection", onCrash);
     bouncer?.stop();
     for (const client of clients) await client.end({ timeout: 5 }).catch(() => {});
-    if (server) {
-      const reset = postgres(server.url, { max: 1, onnotice: () => {} });
-      try {
-        await reset.unsafe("alter role current_user reset search_path");
-      } finally {
-        await reset.end({ timeout: 5 }).catch(() => {});
-        await server.stop();
-      }
-    }
+    if (admin && database) await admin.unsafe(`drop database if exists ${database} with (force)`).catch(() => {});
+    if (admin && role) await admin.unsafe(`drop role if exists ${role}`).catch(() => {});
+    await admin?.end({ timeout: 5 }).catch(() => {});
+    await server?.stop();
   }
 });
