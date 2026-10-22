@@ -137,7 +137,10 @@ export function isClosedConnectionError(error) {
 // One retry, on a new query (postgres.js sends it on another connection).
 // The transaction client begin() hands in is left alone: retrying one
 // statement of a dead transaction would run it outside that transaction.
-// begin() itself is retried once, which runs its callback again.
+// begin() is retried only when its callback has not started. An idle session
+// closed by migration 0025 fails on BEGIN, before the callback. Once the
+// callback has run, a retry would repeat it, including an external call such
+// as a token refresh.
 const QUERY_MODIFIERS = ["values", "raw", "simple", "execute", "describe"];
 
 function retryingQuery(create) {
@@ -183,12 +186,29 @@ export function retryClosedConnections(sql) {
       if (prop === "unsafe") return (...args) => retryingQuery(() => sql.unsafe(...args));
       if (prop === "begin") {
         return async (options, fn) => {
-          try {
-            return await sql.begin(options, fn);
-          } catch (error) {
-            if (!isClosedConnectionError(error)) throw error;
-            return sql.begin(options, fn);
-          }
+          const userFn = typeof options === "function" ? options : fn;
+          const invoke = () => {
+            let started = false;
+            const wrappedFn = (...args) => {
+              started = true;
+              return userFn(...args);
+            };
+            try {
+              const pending = typeof options === "function" ? sql.begin(wrappedFn) : sql.begin(options, wrappedFn);
+              return Promise.resolve(pending).then(
+                (value) => ({ ok: true, value }),
+                (error) => ({ ok: false, error, started }),
+              );
+            } catch (error) {
+              return { ok: false, error, started };
+            }
+          };
+          const first = await invoke();
+          if (first.ok) return first.value;
+          if (first.started || !isClosedConnectionError(first.error)) throw first.error;
+          const second = await invoke();
+          if (second.ok) return second.value;
+          throw second.error;
         };
       }
       const value = sql[prop];

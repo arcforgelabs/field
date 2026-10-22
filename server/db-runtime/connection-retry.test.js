@@ -79,6 +79,52 @@ test("a closed connection is recognised from the SQLSTATE and from the message",
   assert.equal(isClosedConnectionError(wrapped), true);
 });
 
+test("begin retries a closed connection only before its callback starts", async () => {
+  const closed = adminShutdown();
+
+  let earlyBegins = 0;
+  let earlyRuns = 0;
+  const earlyOptions = [];
+  const early = retryClosedConnections({
+    begin(options, fn) {
+      earlyBegins += 1;
+      if (typeof options === "function") {
+        fn = options;
+        options = "";
+      }
+      earlyOptions.push(options);
+      if (earlyBegins === 1) throw closed;
+      return fn({ from: "begin" });
+    },
+  });
+  assert.deepEqual(
+    await early.begin("isolation level read committed", async (client) => {
+      earlyRuns += 1;
+      return client;
+    }),
+    { from: "begin" },
+  );
+  assert.equal(earlyBegins, 2);
+  assert.equal(earlyRuns, 1);
+  assert.deepEqual(earlyOptions, ["isolation level read committed", "isolation level read committed"]);
+
+  let lateBegins = 0;
+  let lateRuns = 0;
+  const late = retryClosedConnections({
+    async begin(options, fn) {
+      lateBegins += 1;
+      if (typeof options === "function") fn = options;
+      await fn({ from: "begin" });
+      throw closed;
+    },
+  });
+  await assert.rejects(late.begin(async () => {
+    lateRuns += 1;
+  }), { code: "57P01" });
+  assert.equal(lateBegins, 1);
+  assert.equal(lateRuns, 1);
+});
+
 test("a query closed by the server runs once more, and only once", async () => {
   const crashes = [];
   const onRejection = (error) => crashes.push(error);
