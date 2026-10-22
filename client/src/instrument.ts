@@ -7,7 +7,7 @@ import {
   useNavigationType,
 } from "react-router-dom";
 import { createEventThrottle, scrubBreadcrumb, scrubEvent, scrubText } from "../../shared/sentry-scrub.js";
-import { tagNotify } from "./lib/sentry-feedback";
+import { FEEDBACK_HOST_ID, feedbackRoot, responseRequested, tagNotify } from "./lib/sentry-feedback";
 
 interface FieldSentryConfig {
   dsn?: string;
@@ -128,14 +128,16 @@ if (dsn) {
       ...(runtime.feedback === false
         ? []
         : [
-          // A small "report a problem" button. It asks for no name; a
-          // screenshot is optional and can be cropped or blacked out first.
-          // The email field keeps Sentry's defaults (shown, optional, Sentry's
-          // own words) and is the "tell me when it is fixed" opt-in, so it is
-          // never filled from the signed-in person: useSentryUser points at a
-          // key setUser never sets.
+          // A small "report a problem" button, for signed-in people only:
+          // it is not put on the page here, ReportProblem adds it after
+          // sign-in. It asks for no name; a screenshot is optional and can be
+          // cropped or blacked out first. The email field keeps Sentry's
+          // defaults (shown, optional, Sentry's own words) and is never filled
+          // from the signed-in person: useSentryUser points at a key setUser
+          // never sets. "Request a response" goes under it (sentry-feedback.ts).
           Sentry.feedbackIntegration({
-            autoInject: true,
+            id: FEEDBACK_HOST_ID,
+            autoInject: false,
             colorScheme: "system",
             showBranding: false,
             showName: false,
@@ -158,6 +160,7 @@ if (dsn) {
     replaysSessionSampleRate: rate(runtime.replaysSessionSampleRate, 0.05),
     replaysOnErrorSampleRate: rate(runtime.replaysOnErrorSampleRate, 1),
   });
-  // Feedback events skip beforeSend; this hook sees each one before it is sent.
-  Sentry.getClient()?.on("beforeSendFeedback", tagNotify);
+  // Feedback events skip beforeSend; this hook sees each one before it is
+  // sent, while its form (and tick box) is still open.
+  Sentry.getClient()?.on("beforeSendFeedback", (event) => tagNotify(event, responseRequested(feedbackRoot())));
 }

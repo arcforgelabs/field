@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useAuth } from "@/contexts/auth-context";
 import { LoginPage } from "@/features/login/login-page";
 import { AppShell } from "@/components/shell/app-shell";
+import { ReportProblem } from "@/components/report-problem";
 
 // Lazy-load every protected route so each feature becomes its own chunk.
 // Login stays eager because it is the first paint after boot and keeping
@@ -83,6 +84,7 @@ export function App() {
         fontFamily: "var(--t-body)",
       }}
     >
+      {authenticated && <ReportProblem />}
       <Routes>
         <Route path="/" element={<LoginPage />} />
         <Route
