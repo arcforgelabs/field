@@ -7,6 +7,34 @@
 -- Moves every Field object back to public and drops schema field. Rows stay.
 
 SET LOCAL lock_timeout = '10s';
+
+-- 0025 pins search_path on this role and, when it owns the database, on the
+-- database. Put those back. A missing privilege must not stop the rollback.
+DO $$
+BEGIN
+  BEGIN
+    EXECUTE format('ALTER ROLE %I RESET search_path', current_user);
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'field: could not reset this role''s search_path';
+  END;
+  BEGIN
+    EXECUTE format('ALTER ROLE %I IN DATABASE %I RESET search_path', current_user, current_database());
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'field: could not reset this role''s search_path for this database';
+  END;
+  IF EXISTS (
+    SELECT 1 FROM pg_database d
+    JOIN pg_roles r ON r.oid = d.datdba
+    WHERE d.datname = current_database() AND r.rolname = current_user
+  ) THEN
+    BEGIN
+      EXECUTE format('ALTER DATABASE %I RESET search_path', current_database());
+    EXCEPTION WHEN insufficient_privilege THEN
+      RAISE NOTICE 'field: could not reset the database search_path';
+    END;
+  END IF;
+END
+$$;
 ALTER FUNCTION field.field_org_uid() RESET search_path;
 ALTER FUNCTION field.field_org_uid() SET SCHEMA public;
 ALTER FUNCTION field.field_item_code_alias() RESET search_path;

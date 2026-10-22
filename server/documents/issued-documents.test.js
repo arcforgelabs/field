@@ -10,7 +10,7 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { createTestDb, MIGRATIONS_FOLDER, queryRows, schema } from "../db-runtime/index.js";
-import { withTablesInField } from "../db-runtime/move-tables.js";
+import { withTablesInField } from "../test-support/move-tables.js";
 import { DEFAULT_ORG_UID, withOrg } from "../db-runtime/tenancy.js";
 import { createPostgresBlobStore, sha256Hex } from "./blob-store.js";
 import { IssuedDocumentConflictError, createIssuedDocumentService } from "./issued-documents.js";

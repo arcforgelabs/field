@@ -6,6 +6,11 @@
 -- 0000-0024 stay as they are: on a fresh database they still create objects
 -- in public, and this migration moves them.
 --
+-- A transaction-mode pooler drops search_path from the startup packet and
+-- does not keep a session SET, so the role and the database carry the
+-- default. Sessions the pooler opened before the move still search public;
+-- their idle backends are closed so the pooler opens new ones.
+--
 -- drizzle-kit sees the schema change as new tables. This file is hand-written
 -- so an existing install is moved, not emptied and recreated.
 SET LOCAL lock_timeout = '10s';
@@ -248,4 +253,44 @@ BEGIN
 END
 $$;
 --> statement-breakpoint
-SET search_path TO field, public;
+-- New sessions search field first, including ones a pooler opens. Each
+-- change is skipped when this role cannot make it, so the move still commits.
+DO $$
+BEGIN
+  BEGIN
+    EXECUTE format('ALTER ROLE %I SET search_path = field, public', current_user);
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'field: this role cannot set its own search_path; Field sets its own on each connection';
+  END;
+  BEGIN
+    EXECUTE format('ALTER ROLE %I IN DATABASE %I SET search_path = field, public', current_user, current_database());
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'field: this role cannot set its search_path for this database; Field sets its own on each connection';
+  END;
+  IF EXISTS (
+    SELECT 1 FROM pg_database d
+    JOIN pg_roles r ON r.oid = d.datdba
+    WHERE d.datname = current_database() AND r.rolname = current_user
+  ) THEN
+    BEGIN
+      EXECUTE format('ALTER DATABASE %I SET search_path = field, public', current_database());
+    EXCEPTION WHEN insufficient_privilege THEN
+      RAISE NOTICE 'field: not the database owner, so its default search_path stays; Field sets its own on each connection';
+    END;
+  END IF;
+  -- Idle client backends of this role, not this migration and not a
+  -- background worker. A pooler keeps those and would hand them out still
+  -- searching public. A missing privilege must not fail the move.
+  BEGIN
+    PERFORM pg_terminate_backend(a.pid)
+    FROM pg_stat_activity a
+    WHERE a.usename = current_user
+      AND a.datname = current_database()
+      AND a.pid <> pg_backend_pid()
+      AND a.state = 'idle'
+      AND a.backend_type = 'client backend';
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'field: could not close idle sessions; a pooler''s open sessions keep the old search_path until they close';
+  END;
+END
+$$;

@@ -12,7 +12,7 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { MIGRATIONS_FOLDER, createTestDb, queryRows, schema } from "../db-runtime/index.js";
-import { withTablesInField } from "../db-runtime/move-tables.js";
+import { withTablesInField } from "../test-support/move-tables.js";
 import { DEFAULT_ORG_UID, withOrg } from "../db-runtime/tenancy.js";
 import { DocumentBytesError, createPostgresBlobStore, createReplicaFallbackBlobStore, sha256Hex } from "./blob-store.js";
 import { createIssuedDocumentService } from "./issued-documents.js";
