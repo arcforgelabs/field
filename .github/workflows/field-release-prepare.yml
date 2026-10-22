@@ -1,23 +1,30 @@
 name: Field Release Prepare
-run-name: Prepare a ${{ inputs.channel }} release
+run-name: Prepare a ${{ inputs.channel }} release from ${{ inputs.branch }}
 
-# Starts a release (docs/RELEASING.md). It takes a commit on main whose
-# required checks passed, tags it with the next calendar version for the
-# channel (package.json's version, plus -beta.N for a beta), and starts
-# Field Release Publish (field-release-publish.yml) for that tag. It
-# publishes nothing itself.
+# Starts a release (docs/RELEASING.md). It takes a commit on a release branch
+# (release/YYYY.M.N, field-release-branch.yml) that Field Full Release
+# Validation proved, tags it with the next version for the channel (the
+# branch's version, plus -beta.N for a beta or -C for a correction) as an
+# annotated tag signed with the release tag key, and starts Field Release
+# Publish (field-release-publish.yml) for that tag. It publishes nothing
+# itself. The workflow runs from main, so the release tooling is main's, as
+# openclaw/openclaw pins its tooling apart from the candidate.
 
 on:
   workflow_dispatch:
     inputs:
       channel:
-        description: beta (a pre-release, vYYYY.M.N-beta.B) or stable (vYYYY.M.N)
+        description: beta (vYYYY.M.N-beta.B), stable (vYYYY.M.N) or correction (vYYYY.M.N-C, a fix of a published stable release)
         required: true
         type: choice
         default: beta
-        options: [beta, stable]
+        options: [beta, stable, correction]
+      branch:
+        description: Release branch, release/YYYY.M.N
+        required: true
+        type: string
       commit:
-        description: Commit on main to release (default the head of main)
+        description: Commit on the release branch to release (default its head)
         required: false
         type: string
 
@@ -36,7 +43,6 @@ jobs:
     permissions:
       contents: write
       actions: write
-      checks: read
     steps:
       - name: Require the workflow from main
         if: github.ref != 'refs/heads/main'
@@ -59,52 +65,114 @@ jobs:
       - name: Resolve the commit
         id: commit
         env:
+          BRANCH: ${{ inputs.branch }}
           REQUESTED: ${{ inputs.commit }}
         run: |
           set -euo pipefail
-          commit="$(git rev-parse --verify "${REQUESTED:-HEAD}^{commit}")"
-          if ! git merge-base --is-ancestor "$commit" HEAD; then
-            echo "::error::${commit} is not on main. Only reviewed main commits are released." >&2
+          node scripts/release/release.mjs branch --version "${BRANCH#release/}" > /dev/null
+          if ! git fetch --quiet --no-tags origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"; then
+            echo "::error::${BRANCH} does not exist. Cut it with Field Release Branch." >&2
+            exit 1
+          fi
+          commit="$(git rev-parse --verify "${REQUESTED:-refs/remotes/origin/${BRANCH}}^{commit}")"
+          if ! git merge-base --is-ancestor "$commit" "refs/remotes/origin/${BRANCH}"; then
+            echo "::error::${commit} is not on ${BRANCH}. Only commits on a release branch are released." >&2
             exit 1
           fi
           echo "commit=${commit}" >> "$GITHUB_OUTPUT"
 
-      # The same rule as a Replit publish (scripts/deploy-checks.js): every
-      # required check ran from GitHub Actions on this commit and passed.
-      - name: Require passing checks on the commit
+      # openclaw/openclaw publishes only from a passing Full Release Validation
+      # of the exact release commit. main's CI health does not gate a release.
+      - name: Require Field Full Release Validation on the commit
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ inputs.branch }}
           COMMIT: ${{ steps.commit.outputs.commit }}
         run: |
           set -euo pipefail
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${COMMIT}/check-runs?per_page=100" --jq '.check_runs[]' \
-            | jq -s '.' > "$RUNNER_TEMP/check-runs.json"
-          node scripts/release/require-checks.mjs "$RUNNER_TEMP/check-runs.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/field-full-release-validation.yml/runs?head_sha=${COMMIT}&per_page=100" \
+            --jq '.workflow_runs' > "$RUNNER_TEMP/runs.json"
+          node scripts/release/require-validation.mjs "$RUNNER_TEMP/runs.json" "$COMMIT" "$BRANCH"
 
       - name: Plan the tag
         id: plan
         env:
+          BRANCH: ${{ inputs.branch }}
           COMMIT: ${{ steps.commit.outputs.commit }}
           CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
           git checkout --quiet --detach "$COMMIT"
+          package="$(jq -r .version package.json)"
+          if [[ "$package" != "${BRANCH#release/}" ]]; then
+            echo "::error::${COMMIT} holds package.json version ${package}, not ${BRANCH#release/}." >&2
+            exit 1
+          fi
           node scripts/release/release.mjs plan --channel "$CHANNEL" > "$RUNNER_TEMP/plan.json"
           jq . "$RUNNER_TEMP/plan.json"
           echo "tag=$(jq -r .tag "$RUNNER_TEMP/plan.json")" >> "$GITHUB_OUTPUT"
           echo "version=$(jq -r .version "$RUNNER_TEMP/plan.json")" >> "$GITHUB_OUTPUT"
 
-      - name: Create the tag
+      # Every release's notes are its changelog file, and its record must list
+      # every pull request in its range with GitHub's credit: a stable release
+      # since the previous stable release, a beta since the release npm's beta
+      # tag selects (.agents/skills/field-changelog-update).
+      - name: Require the changelog
         env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          COMMIT: ${{ steps.commit.outputs.commit }}
+        run: |
+          set -euo pipefail
+          node scripts/release/changelog.mjs verify --version "$VERSION" --target "$COMMIT"
+
+      # openclaw/openclaw's release tags are annotated and signed, and its
+      # publish refuses any other. The key is an SSH signing key whose public
+      # half is a signing key of the tagger's GitHub account, so GitHub shows
+      # the tag as verified (docs/RELEASING.md, One-time setup).
+      # Signing is off until the maintainer turns it on (docs/RELEASING.md,
+      # One-time setup): with no key the tag is annotated and unsigned, so a
+      # release never stops on it. RELEASE_REQUIRE_SIGNED_TAGS=true makes a
+      # missing key stop the release.
+      - name: Create the release tag
+        id: tag
+        env:
+          SIGNING_KEY: ${{ secrets.RELEASE_TAG_SIGNING_KEY }}
+          REQUIRE_SIGNED: ${{ vars.RELEASE_REQUIRE_SIGNED_TAGS }}
+          TAGGER: ${{ vars.RELEASE_TAGGER }}
           TAG: ${{ steps.plan.outputs.tag }}
           VERSION: ${{ steps.plan.outputs.version }}
           COMMIT: ${{ steps.commit.outputs.commit }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag --annotate "$TAG" --message "Field ${VERSION}" "$COMMIT"
+          if [[ -z "$SIGNING_KEY" && "$REQUIRE_SIGNED" == "true" ]]; then
+            echo "::error::RELEASE_REQUIRE_SIGNED_TAGS is true, and the secret RELEASE_TAG_SIGNING_KEY is not set (docs/RELEASING.md, One-time setup)." >&2
+            exit 1
+          fi
+          tagger="${TAGGER:-IAMSamuelRodda <7961255+IAMSamuelRodda@users.noreply.github.com>}"
+          name="${tagger% <*}"
+          email="${tagger##*<}"
+          email="${email%>}"
+          git config user.name "$name"
+          git config user.email "$email"
+          if [[ -z "$SIGNING_KEY" ]]; then
+            git tag --annotate "$TAG" --message "Field ${VERSION}" "$COMMIT"
+            git push origin "refs/tags/${TAG}"
+            echo "signed=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          key="$RUNNER_TEMP/release-tag-key"
+          trap 'rm -f "$key" "$key.pub"' EXIT
+          (umask 077 && printf '%s\n' "$SIGNING_KEY" > "$key")
+          ssh-keygen -y -f "$key" > "$key.pub"
+          printf '%s namespaces="git" %s\n' "$email" "$(cat "$key.pub")" > "$RUNNER_TEMP/allowed-signers"
+          git config gpg.format ssh
+          git config user.signingkey "$key"
+          git config gpg.ssh.allowedSignersFile "$RUNNER_TEMP/allowed-signers"
+          git tag --sign "$TAG" --message "Field ${VERSION}" "$COMMIT"
+          git tag --verify "$TAG"
           git push origin "refs/tags/${TAG}"
+          echo "signed=yes" >> "$GITHUB_OUTPUT"
 
       # A tag pushed with GITHUB_TOKEN starts no workflow, so start the
       # publish run explicitly.
@@ -113,13 +181,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.plan.outputs.tag }}
           COMMIT: ${{ steps.commit.outputs.commit }}
+          SIGNED: ${{ steps.tag.outputs.signed }}
         run: |
           set -euo pipefail
           gh workflow run field-release-publish.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$TAG"
           {
             echo "## ${TAG}"
             echo
-            echo "Tagged ${COMMIT} and started Field Release Publish."
-            echo "Approve its release environment when its checks pass, then npm-release in Field NPM Release:"
+            echo "Tagged ${COMMIT} (signed: ${SIGNED}) and started Field Release Publish:"
             echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/field-release-publish.yml"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,16 @@
+{
+  "name": "Protect Field release branches",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/release/20*"],
+      "exclude": ["refs/heads/release/*-main-closeout"]
+    }
+  },
+  "bypass_actors": [],
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" }
+  ]
+}

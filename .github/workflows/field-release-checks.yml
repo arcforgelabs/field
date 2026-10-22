@@ -1,10 +1,12 @@
 name: Field Release Checks
 
 # Proves a release tag before anything is published (docs/RELEASING.md):
-# the tag is a calendar version that matches package.json, it sits on main,
-# every CI lane passes on its exact commit, and the npm tarball installs and
-# starts. Field Release Publish calls this first; run it on its own to rehearse
-# a release. It never publishes.
+# the tag is annotated and signed, and GitHub verifies its signature; it is a
+# calendar version that matches package.json; it sits on its release branch
+# (release/YYYY.M.N); every CI lane passes on its exact commit
+# (.github/workflows/ci.yml, which also writes the SBOMs); and the npm
+# tarball installs and starts. Field Release Publish calls this first; run it on its own to
+# rehearse a release. It never publishes.
 
 on:
   workflow_call:
@@ -14,6 +16,8 @@ on:
         required: true
         type: string
     outputs:
+      branch:
+        value: ${{ jobs.resolve.outputs.branch }}
       commit:
         value: ${{ jobs.resolve.outputs.commit }}
       version:
@@ -46,10 +50,43 @@ jobs:
     timeout-minutes: 5
     outputs:
       commit: ${{ steps.tag.outputs.commit }}
+      branch: ${{ steps.tag.outputs.branch }}
       version: ${{ steps.tag.outputs.version }}
       channel: ${{ steps.tag.outputs.channel }}
       npm_dist_tag: ${{ steps.tag.outputs.npm_dist_tag }}
     steps:
+      # openclaw/openclaw verifies the tag's signature before it checks out
+      # anything: an annotated tag that GitHub reports as verified. Field
+      # requires the signature only when RELEASE_REQUIRE_SIGNED_TAGS is true
+      # (docs/RELEASING.md, One-time setup); until then an annotated tag is
+      # enough, so a release never stops on signing. A lightweight tag is
+      # never published.
+      - name: Require an annotated release tag
+        id: signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRE_SIGNED: ${{ vars.RELEASE_REQUIRE_SIGNED_TAGS }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}")"
+          if [[ "$(jq -r .object.type <<< "$ref")" != "tag" ]]; then
+            echo "::error::${TAG} must be an annotated tag; a lightweight tag cannot be published." >&2
+            exit 1
+          fi
+          object="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/$(jq -r .object.sha <<< "$ref")")"
+          verified="$(jq -r '.verification.verified // false' <<< "$object")"
+          if [[ "$verified" != "true" && "$REQUIRE_SIGNED" == "true" ]]; then
+            echo "::error::${TAG} must have a signature GitHub verifies (reason: $(jq -r '.verification.reason // "missing"' <<< "$object"))." >&2
+            exit 1
+          fi
+          if [[ "$(jq -r .object.type <<< "$object")" != "commit" ]]; then
+            echo "::error::${TAG} does not name a commit." >&2
+            exit 1
+          fi
+          echo "commit=$(jq -r .object.sha <<< "$object")" >> "$GITHUB_OUTPUT"
+          echo "${TAG}: annotated by $(jq -r .tagger.name <<< "$object"); signature verified by GitHub: ${verified}" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Check out the tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,21 +99,28 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Require a reviewed commit and a matching version
+      - name: Require the release branch and a matching version
         id: tag
         env:
           TAG: ${{ inputs.tag }}
+          SIGNED: ${{ steps.signed.outputs.commit }}
         run: |
           set -euo pipefail
           commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
-          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
-            echo "::error::${TAG} (${commit}) is not on main. Only reviewed main commits are released." >&2
+          if [[ "$commit" != "$SIGNED" ]]; then
+            echo "::error::${TAG} changed after its signature was verified: expected ${SIGNED}, found ${commit}." >&2
             exit 1
           fi
           node scripts/release/release.mjs check --tag "$TAG" > "$RUNNER_TEMP/release.json"
+          branch="$(jq -r .branch "$RUNNER_TEMP/release.json")"
+          if ! git fetch --no-tags origin "+refs/heads/${branch}:refs/remotes/origin/${branch}" \
+            || ! git merge-base --is-ancestor "$commit" "refs/remotes/origin/${branch}"; then
+            echo "::error::${TAG} (${commit}) is not on ${branch}. Only release-branch commits are released." >&2
+            exit 1
+          fi
           {
             echo "commit=${commit}"
+            echo "branch=${branch}"
             echo "version=$(jq -r .version "$RUNNER_TEMP/release.json")"
             echo "channel=$(jq -r .channel "$RUNNER_TEMP/release.json")"
             echo "npm_dist_tag=$(jq -r .npmDistTag "$RUNNER_TEMP/release.json")"
@@ -100,7 +144,7 @@ jobs:
       tarball_sha256: ${{ steps.pack.outputs.sha256 }}
     steps:
       # The tag, not a commit passed between jobs: the build runs only what
-      # resolve proved is on main. A tag moved since then fails here.
+      # resolve proved is on its release branch. A tag moved since then fails here.
       - name: Check out the release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -114,7 +158,7 @@ jobs:
           set -euo pipefail
           head="$(git rev-parse HEAD)"
           if [ "$head" != "$RESOLVED" ]; then
-            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that resolve proved is on main. Run the release again." >&2
+            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that resolve proved is on its release branch. Run the release again." >&2
             exit 1
           fi
 
@@ -134,7 +178,8 @@ jobs:
           npm --prefix client ci
           npm --prefix client run build
 
-      # A beta's version is package.json's version with -beta.N; npm version
+      # A beta's version is package.json's version with -beta.N, and a
+      # correction's with -C; npm version
       # writes it to package.json and package-lock.json in this job only.
       # The shrinkwrap pins every installed dependency to what CI tested.
       - name: Pack the npm tarball

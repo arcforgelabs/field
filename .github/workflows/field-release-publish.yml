@@ -6,21 +6,23 @@ run-name: field ${{ inputs.tag }}
 # existing tag, which re-runs the checks and skips what is already published.
 #
 #   checks          field-release-checks.yml: tag, every CI lane, npm tarball
-#   approve         the gate of a stable release: environment release,
-#                   alongside the checks (no reviewer at present). A beta
-#                   uses release-beta, which has no reviewer.
+#   approve         the one approval of a stable release: environment
+#                   release (Samuel), alongside the checks. A beta uses
+#                   release-beta, which has no reviewer.
 #   image           after both: GHCR by digest,
 #                   build attestation and SBOM, smoke of the pushed digest,
 #                   then the channel's tags
-#   github-release  GitHub Release "field <version>" with notes, manifest and
-#                   .sha256 files
+#   github-release  GitHub Release "field <version>" with the changelog notes, manifest and
+#                   .sha256 files, as a draft: Field NPM Release makes it public
+#                   once npm serves the version (openclaw/openclaw's policy)
 #   npm             starts Field NPM Release (field-npm-release.yml) for the
 #                   tarball this run proved; it publishes on this run's
 #                   approval, without a second one
 #
 # Channels follow openclaw/openclaw: a beta (vYYYY.M.N-beta.B) goes to npm and
-# GHCR `beta` and a GitHub pre-release; a stable release (vYYYY.M.N) goes to
-# npm `latest`, GHCR `stable` and `latest`, and GitHub's latest release.
+# GHCR `beta` and a GitHub pre-release; a stable release (vYYYY.M.N) and a
+# correction (vYYYY.M.N-C) go to npm `latest`, GHCR `stable` and `latest`,
+# and GitHub's latest release.
 
 on:
   workflow_dispatch:
@@ -56,9 +58,10 @@ jobs:
           echo "::error::Run Field Release Publish from main, not ${GITHUB_REF}." >&2
           exit 1
 
-      # Only a release tag: vYYYY.M.N (stable) or vYYYY.M.N-beta.B (beta).
-      # Field Release Checks also requires it to be on main and to match
-      # package.json, and runs every CI lane on its commit.
+      # Only a release tag: vYYYY.M.N or vYYYY.M.N-C (stable) or
+      # vYYYY.M.N-beta.B (beta). Field Release Checks also requires it to be
+      # signed, on its release branch and to match package.json, and runs
+      # every CI lane on its commit.
       - name: Read the channel from the tag
         id: tag
         env:
@@ -67,17 +70,17 @@ jobs:
           set -euo pipefail
           if [[ "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]*-beta\.[1-9][0-9]*$ ]]; then
             echo "channel=beta" >> "$GITHUB_OUTPUT"
-          elif [[ "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]*$ ]]; then
+          elif [[ "$TAG" =~ ^v20[0-9]{2}\.[1-9][0-9]?\.[1-9][0-9]*(-[1-9][0-9]*)?$ ]]; then
             echo "channel=stable" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::${TAG} is not a release tag (vYYYY.M.N or vYYYY.M.N-beta.B)." >&2
+            echo "::error::${TAG} is not a release tag (vYYYY.M.N, vYYYY.M.N-beta.B or vYYYY.M.N-C)." >&2
             exit 1
           fi
 
-  # The gate of a stable release: environment release, while the checks
-  # run. It has no reviewer at present (docs/RELEASING.md); with one, Field
-  # NPM Release accepts its approval and does not ask again. A beta runs in
-  # release-beta, which has no reviewer, so nothing waits.
+  # The one human gate of a stable release: Samuel approves environment
+  # release here, while the checks run. Field NPM Release accepts this
+  # approval and does not ask again. A beta runs in release-beta, which has
+  # no reviewer, so nothing waits.
   approve:
     name: Approve ${{ inputs.tag }}
     needs: guard
@@ -127,7 +130,7 @@ jobs:
           set -euo pipefail
           head="$(git rev-parse HEAD)"
           if [ "$head" != "$RESOLVED" ]; then
-            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that the checks proved is on main. Run the release again." >&2
+            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that the checks proved is on its release branch. Run the release again." >&2
             exit 1
           fi
 
@@ -267,7 +270,7 @@ jobs:
           set -euo pipefail
           head="$(git rev-parse HEAD)"
           if [ "$head" != "$RESOLVED" ]; then
-            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that the checks proved is on main. Run the release again." >&2
+            echo "::error::The tag now points at ${head}, not the ${RESOLVED} that the checks proved is on its release branch. Run the release again." >&2
             exit 1
           fi
 
@@ -322,6 +325,25 @@ jobs:
             --output "$RUNNER_TEMP/assets/release-manifest.json"
           jq . "$RUNNER_TEMP/assets/release-manifest.json"
 
+      # Field NPM Release reads the manifest from this run: the GitHub Release
+      # is a draft until npm is verified, and a draft is hidden from its
+      # read-only token.
+      - name: Keep the release manifest for Field NPM Release
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/manifest"
+          cp "$RUNNER_TEMP/assets/release-manifest.json" "$RUNNER_TEMP/manifest/"
+          cd "$RUNNER_TEMP/manifest"
+          sha256sum release-manifest.json > release-manifest.json.sha256
+
+      - name: Upload the release manifest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-manifest
+          path: ${{ runner.temp }}/manifest
+          retention-days: 30
+          if-no-files-found: error
+
       - name: Create the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -331,13 +353,21 @@ jobs:
           TARBALL: ${{ needs.checks.outputs.tarball }}
         run: |
           set -euo pipefail
+          # The notes are the release's changelog file (CHANGELOG/<version>.md,
+          # CONTRIBUTING.md). A release tagged before the changelog gets
+          # GitHub's generated notes.
+          notes=(--generate-notes)
+          if [[ -f "CHANGELOG/${VERSION}.md" ]]; then
+            node scripts/release/changelog.mjs notes --version "$VERSION" > "$RUNNER_TEMP/notes.md"
+            notes=(--notes-file "$RUNNER_TEMP/notes.md")
+          fi
           cd "$RUNNER_TEMP/assets"
           cp "$RUNNER_TEMP/artifacts/npm-package/$TARBALL" .
           cp "$RUNNER_TEMP/artifacts/image-sbom/"*.spdx.json .
           cp "$RUNNER_TEMP/artifacts/sbom/field-server.cdx.json" "field-server-${VERSION}.cdx.json"
           cp "$RUNNER_TEMP/artifacts/sbom/field-client.cdx.json" "field-client-${VERSION}.cdx.json"
           for file in *; do sha256sum "$file" > "$file.sha256"; done
-          flags=(--verify-tag --title "field ${VERSION}" --generate-notes)
+          flags=(--verify-tag --draft --title "field ${VERSION}" "${notes[@]}")
           if [[ "$CHANNEL" == "beta" ]]; then
             flags+=(--prerelease --latest=false)
           else
@@ -345,10 +375,27 @@ jobs:
           fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber ./*
+            if [[ -f "$RUNNER_TEMP/notes.md" ]]; then
+              gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+            fi
           else
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${flags[@]}" ./*
           fi
           echo "Released ${TAG}: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
+
+      # OpenClaw's --check-github: the release body must be the notes. The
+      # release is still a draft, which GitHub serves only to this token.
+      - name: Check the GitHub Release body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ needs.checks.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ -f "CHANGELOG/${VERSION}.md" ]]; then
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/body.md"
+            node scripts/release/changelog.mjs verify --version "$VERSION" --check-github --release-tag "$TAG" --body-file "$RUNNER_TEMP/body.md"
+          fi
 
   # npm trusted publishing names one workflow file, and checks the top-level
   # workflow of a run, so the npm publish is its own workflow

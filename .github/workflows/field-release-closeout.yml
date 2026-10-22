@@ -1,0 +1,181 @@
+name: Field Release Closeout
+run-name: Close out ${{ inputs.tag }} on main
+
+# openclaw/openclaw's stable main closeout (docs/RELEASING.md): a stable
+# release is not done until main carries what shipped. Field NPM Release
+# starts this after it verifies a published stable release or correction;
+# it can also be started by hand. It
+#
+#   1. requires every commit of the release branch that main lacks to be the
+#      release commit, a changelog commit, or a `-x` cherry-pick of a main
+#      commit; anything else is a fix main does not have yet, and a person
+#      forward-ports it first;
+#   2. on branch release/<version>-main-closeout from main, copies the
+#      release's changelog files (its betas, the release and its
+#      corrections), writes the index and the docs pages
+#      (docs/releases/<version>.md) again, and sets package.json to the
+#      shipped version unless main is already newer;
+#   3. opens the pull request `chore(release): close out <version> on main`
+#      and starts CI and the secret scan on it, so its required checks run.
+#
+# Nothing here merges. A second run for the same tag changes nothing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable release or correction tag, for example v2026.10.34 or v2026.10.34-1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: field-release-closeout-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  closeout:
+    name: closeout
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Require the workflow from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run Field Release Closeout from main, not ${GITHUB_REF}." >&2
+          exit 1
+
+      - name: Check out main with its tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Require a published stable release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          node scripts/release/release.mjs parse --tag "$TAG" > "$RUNNER_TEMP/release.json"
+          if [[ "$(jq -r .channel "$RUNNER_TEMP/release.json")" != "stable" ]]; then
+            echo "::error::${TAG} is a beta; only a stable release or a correction is closed out on main." >&2
+            exit 1
+          fi
+          if [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease,isDraft --jq '.isPrerelease or .isDraft')" != "false" ]]; then
+            echo "::error::${TAG} has no published GitHub Release." >&2
+            exit 1
+          fi
+          {
+            echo "version=$(jq -r .version "$RUNNER_TEMP/release.json")"
+            echo "base=$(jq -r .base "$RUNNER_TEMP/release.json")"
+            echo "commit=$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Require main to have every fix the release has
+        env:
+          TAG: ${{ inputs.tag }}
+          BASE: ${{ steps.release.outputs.base }}
+        run: |
+          set -euo pipefail
+          missing=()
+          while IFS=$'\x1f' read -r -d $'\x1e' sha subject body; do
+            sha="${sha#$'\n'}"
+            [[ -z "$sha" ]] && continue
+            [[ "$subject" == "chore(release): ${BASE}" || "$subject" == "docs(changelog): "* ]] && continue
+            origin="$(grep -oE '\(cherry picked from commit [0-9a-f]{40}\)' <<< "$body" | tail -n1 | grep -oE '[0-9a-f]{40}' || true)"
+            if [[ -n "$origin" ]] && git merge-base --is-ancestor "$origin" HEAD; then continue; fi
+            missing+=("${sha} ${subject}")
+          done < <(git log --format='%H%x1f%s%x1f%b%x1e' "HEAD..refs/tags/${TAG}")
+          if (( ${#missing[@]} )); then
+            printf '::error::%s is on the release branch but not on main. Forward-port it to main first.\n' "${missing[@]}" >&2
+            exit 1
+          fi
+
+      - name: Write the closeout commit
+        id: commit
+        env:
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          BASE: ${{ steps.release.outputs.base }}
+        run: |
+          set -euo pipefail
+          branch="release/${VERSION}-main-closeout"
+          git switch --quiet -c "$branch"
+          mapfile -t files < <(git ls-tree -r --name-only "refs/tags/${TAG}" -- CHANGELOG/ \
+            | grep -E "^CHANGELOG/(records/)?${BASE//./\\.}(-beta\.[1-9][0-9]*|-[1-9][0-9]*)?\.md$" || true)
+          (( ${#files[@]} )) && git checkout "refs/tags/${TAG}" -- "${files[@]}"
+          node scripts/release/changelog.mjs index > /dev/null
+          npm run --silent changelog:check
+          main_version="$(jq -r .version package.json)"
+          if node --input-type=module -e "import { compareBase } from './scripts/release/release.mjs'; process.exit(compareBase(process.argv[1], process.argv[2]) < 0 ? 0 : 1)" "$main_version" "$BASE"; then
+            npm version "$BASE" --no-git-tag-version > /dev/null
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A package.json package-lock.json CHANGELOG.md CHANGELOG docs/releases
+          if git diff --cached --quiet; then
+            echo "main already carries ${TAG}." >> "$GITHUB_STEP_SUMMARY"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit --quiet -m "chore(release): close out ${VERSION} on main"
+          git push --force-with-lease origin "HEAD:refs/heads/${branch}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+
+      # Arc Forge's enterprise policy stops GITHUB_TOKEN from opening pull
+      # requests, so the Barnacle App opens it, as openclaw/openclaw's
+      # workflows use an App token. Its pull request also starts CI.
+      - name: Create pull request token
+        id: app-token
+        if: steps.commit.outputs.changed == 'true' && vars.BARNACLE_APP_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ vars.BARNACLE_APP_ID }}
+          private-key: ${{ secrets.BARNACLE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+
+      - name: Open the closeout pull request
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+        run: |
+          set -euo pipefail
+          title="chore(release): close out ${VERSION} on main"
+          url="$(GH_TOKEN="$PR_TOKEN" gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json url --jq '.[0].url // ""')"
+          if [[ -z "$url" ]]; then
+            body="$(printf '%s\n\n%s\n\n%s\n' \
+              "Before: main does not carry what ${TAG} shipped." \
+              "After: main has the ${VERSION} changelog files, its docs page and the shipped version, as the release branch has them." \
+              "Opened by Field Release Closeout (docs/RELEASING.md, Close out on main).")"
+            if ! url="$(GH_TOKEN="$PR_TOKEN" gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$title" --body "$body")"; then
+              echo "::warning::Neither the Barnacle App nor GitHub Actions could open the pull request; open ${BRANCH} into main by hand (release:stable does)."
+              url=""
+            fi
+          fi
+          # A push with GITHUB_TOKEN starts no workflow, so start the checks
+          # the main ruleset requires on the branch.
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          gh workflow run secret-scan.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          echo "Closeout: ${url:-branch ${BRANCH}}" >> "$GITHUB_STEP_SUMMARY"
