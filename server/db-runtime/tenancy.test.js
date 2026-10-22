@@ -243,7 +243,7 @@ describe("two organisations, one database", () => {
              pg_get_expr(d.adbin, d.adrelid) as org_default
       from pg_attribute a
       join pg_class c on c.oid = a.attrelid and c.relkind = 'r'
-      join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+      join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'field'
       left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
       where a.attname = 'org_uid' and not a.attisdropped
       order by c.relname`, t.db);
@@ -269,6 +269,7 @@ describe("FORCE ROW LEVEL SECURITY without field_app", () => {
       await seedOrg(t.db, ORG_A);
       const itemB = await seedOrg(t.db, ORG_B);
       await t.db.execute(sql`create role owner_sim nologin nobypassrls`);
+      await t.db.execute(sql`grant usage on schema field to owner_sim`);
       await t.db.execute(sql`alter table items owner to owner_sim`);
       const rows = await t.db.transaction(async (tx) => {
         await tx.execute(sql`set local role owner_sim`);

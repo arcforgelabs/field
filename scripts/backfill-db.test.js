@@ -196,7 +196,7 @@ test("backfill-db SQL refuses a database with Field's Drizzle migrations and wri
   try {
     const columns = async () => {
       const { rows } = await testDb.client.query(
-        "select column_name from information_schema.columns where table_schema = 'public' and table_name = 'quotes' order by ordinal_position",
+        "select column_name from information_schema.columns where table_schema = 'field' and table_name = 'quotes' order by ordinal_position",
       );
       return rows.map((row) => row.column_name);
     };

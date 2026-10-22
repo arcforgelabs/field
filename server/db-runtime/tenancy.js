@@ -77,10 +77,10 @@ export async function inspectRowSecurity(db) {
     select c.relname as "table"
     from pg_attribute a
     join pg_class c on c.oid = a.attrelid and c.relkind = 'r'
-    join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+    join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'field'
     where a.attname = 'org_uid' and not a.attisdropped
       and not (c.relrowsecurity and c.relforcerowsecurity
-               and exists (select 1 from pg_policies p where p.schemaname = 'public' and p.tablename = c.relname
+               and exists (select 1 from pg_policies p where p.schemaname = 'field' and p.tablename = c.relname
                                                          and p.policyname = c.relname || '_tenant_isolation'))
     order by 1`, db);
   return {

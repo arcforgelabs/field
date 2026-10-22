@@ -1097,7 +1097,7 @@ export function openStorageSession(config, { onClose } = {}) {
     connect_timeout: 15,
     onnotice: () => {},
     onclose: () => onClose?.(),
-    connection: { application_name: "field-storage", TimeZone: "UTC" },
+    connection: { application_name: "field-storage", TimeZone: "UTC", search_path: "field, public" },
   });
   return { client, db: drizzlePostgres(client, { schema }), close: () => client.end({ timeout: 5 }) };
 }

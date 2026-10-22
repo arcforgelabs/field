@@ -444,6 +444,14 @@ Settings (`server/update-check.js`). Run
 
 ### Adding tables
 
+Define every table with `fieldSchema.table` (and any enum with
+`fieldSchema.enum`) on `export const fieldSchema = pgSchema("field")`. Do
+not import `pgTable`, and do not create a table in `public`: Replit's
+publish check compares only that schema, and a table left there can be
+offered as a change against a live database. `server/db-runtime/field-schema.test.js`
+fails when `schema.ts` imports `pgTable` or when `public` holds a table,
+view, sequence or function that is not part of an extension.
+
 A tenant table gets `orgUid: orgUid()` and `tenantIsolation("<table>")` in
 `src/schema.ts`, and `(org_uid, key)` foreign keys to its parents. Its
 migration adds what drizzle-kit does not emit: `FORCE ROW LEVEL SECURITY`
@@ -451,7 +459,7 @@ and `GRANT ... TO field_app` (guarded by `IF EXISTS (SELECT 1 FROM pg_roles
 WHERE rolname = 'field_app')`). Boot and `server/db-runtime/tenancy.test.js`
 both fail for a table with `org_uid` that lacks RLS, FORCE or its policy.
 
-1. Edit `src/schema.ts` and run `npm run db:build`.
+1. Edit `src/schema.ts` (`fieldSchema.table`) and run `npm run db:build`.
 2. Generate the migration: `npx drizzle-kit generate --dialect=postgresql
    --schema=server/db/src/schema.ts --out=server/db/drizzle --prefix=index
    --name=<what_it_adds>` (`npm run db:generate` uses the fixed name

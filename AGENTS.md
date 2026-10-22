@@ -37,7 +37,9 @@ Rules for an installation:
 - An update needs only Republish. Production migrates its own database when
   it starts. Do not ask the owner to run a script for a release.
 - When Replit shows "Development database changes detected", always press
-  Cancel. Field migrates production itself when it starts.
+  Cancel. Field migrates production itself when it starts. Field's tables
+  live in the PostgreSQL schema `field`, so that prompt should not appear;
+  press Cancel if it does.
 - The workspace's database follows production by itself when the Secret
   `FIELD_PRODUCTION_URL` holds the published app's address
   (`docs/REPLIT.md`, "The workspace database"). To do it by hand:
@@ -50,6 +52,10 @@ Rules for an installation:
 
 Work on a branch and open a pull request (`CONTRIBUTING.md`). GitHub steps:
 `.agents/skills/github-sync/SKILL.md`.
+
+Never create a table in `public`. Define every table with `fieldSchema.table`
+in `server/db/src/schema.ts` (schema `field`). Replit's publish check
+compares only `public`.
 
 ## Publishing an installation from an agent
 

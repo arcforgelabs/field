@@ -76,6 +76,18 @@ const PGLITE_OPTIONS = {
   postgresqlconf: ["timezone = 'UTC'", "shared_buffers = '16MB'"],
 };
 
+// PGlite starts Postgres with `-c search_path=public`, which beats postgresql.conf
+// and a database-level setting. Point that flag at field before any client opens.
+// A missing `field` schema is skipped, so migrations 0000-0024 still create tables
+// in public; 0025 creates `field` and moves them.
+export const FIELD_SEARCH_PATH = "field, public";
+if (Array.isArray(PGlite.defaultStartParams)) {
+  PGlite.defaultStartParams = PGlite.defaultStartParams.map((param) =>
+    param === "search_path=public" ? "search_path=field,public" : param,
+  );
+}
+
+
 const NO_DATABASE_HINT =
   "set DATABASE_URL or FIELD_DB_URL (for local development only: FIELD_PGLITE=1 or FIELD_PGLITE_DIR)";
 
@@ -286,7 +298,7 @@ function openPostgres(config, { max } = {}) {
     // transactions (see isPooledUrl).
     prepare: !config.pooled,
     onnotice: () => {},
-    connection: { application_name: "field", TimeZone: "UTC" },
+    connection: { application_name: "field", TimeZone: "UTC", search_path: FIELD_SEARCH_PATH },
   });
 }
 

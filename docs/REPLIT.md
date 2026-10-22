@@ -197,8 +197,28 @@ at the prompt.
 an installation's workspace: it applies the checkout's migrations, not
 production's.
 
+Field keeps its tables, sequences and functions in the PostgreSQL schema
+`field`, not in `public`. Replit's publish check compares only `public`.
+Once both the workspace and production have run migration `0025_field_schema`,
+both `public` schemas are empty (extensions may remain; `drizzle.__drizzle_migrations`
+stays in schema `drizzle`, which Replit already ignores), so the check has
+nothing to differ on. The Database pane may list only `public`. The tables
+are still there: in the SQL runner, name them `field.<table>` (for example
+`select * from field.organizations`).
+
 If Replit still shows "Development database changes detected", press Cancel.
 Never pick an option there.
+
+The release that adds `0025_field_schema` is the move out of `public`. Back
+up the production database first (Database > production > Settings >
+Advanced > backups). That release publishes while the workspace is level
+with production, so both `public` schemas still hold the same tables and
+Replit shows no prompt. Production then runs `0025` at start and its
+`public` schema becomes empty. If the workspace sleeps until the next
+publish, its `public` still has the tables and production's does not.
+Replit then offers to create those tables in production's `public`. Press
+Cancel. Opening the workspace runs the boot sync, which applies `0025`
+there too. After that, both `public` schemas stay empty.
 
 ## Data migrations
 
@@ -863,6 +883,11 @@ issues automatically; see issue #46 for how maintainers triage Sentry issues.
 
 Publish as a Reserved VM (Field sends scheduled emails in-process, so it must
 stay up), with sharing set to Public (Field does its own sign-in).
+
+Field's tables are in schema `field`, so Replit's comparison of `public`
+should find nothing to change ("The workspace database", including the
+one-time move). If a publish still stops at "Development database changes
+detected", press Cancel.
 
 A publish deploys GitHub, not the workspace's files. Replit publishes a
 snapshot of the workspace, so the deployment's build command
