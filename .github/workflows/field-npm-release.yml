@@ -50,7 +50,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NODE_VERSION: "24"
+  NODE_VERSION: "24.22.1"
   # The first npm CLI that can also move dist-tags through trusted publishing.
   NPM_VERSION: "11.21.0"
   PACKAGE: "@arcforgelabs/field"
