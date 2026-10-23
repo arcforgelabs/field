@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS client-build
+FROM node:24.22.1-bookworm-slim AS client-build
 WORKDIR /app/client
 COPY client/package.json client/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -6,11 +6,11 @@ COPY shared /app/shared
 COPY client/ ./
 RUN npm run build
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:24.22.1-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-FROM node:24-bookworm-slim AS server-deps
+FROM node:24.22.1-bookworm-slim AS server-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN apt-get update \
