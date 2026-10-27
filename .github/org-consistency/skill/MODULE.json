@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "name": "arcforge-pr-maintainer",
+  "path": "components/skills/arcforge-pr-maintainer",
+  "category": "component",
+  "component_type": "skill",
+  "status": "internal",
+  "source_state": "active-source",
+  "summary": "Org issue and pull request procedure for Arc Forge maintainers, in upstream OpenClaw's shape.",
+  "entrypoints": {
+    "skill": "SKILL.md"
+  },
+  "dependencies": [],
+  "inputs": ["issue body", "pull request body", "repo AGENTS.md"],
+  "outputs": ["maintainer procedure"],
+  "harness_targets": ["OpenClaw", "Claude Code", "Codex", "Grok"],
+  "data_boundary": "Do not put tokens, customer data, or private logs into issue or pull request evidence."
+}

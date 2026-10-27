@@ -1,3 +1,4 @@
+# arc-forge-org-consistency: managed by arc-forge-tools components/org-consistency
 name: PR context
 
 on:
@@ -13,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}
     steps:
-      # Pinned to a full commit SHA rather than a floating tag such as @v4.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Full commit SHA. This org rejects a floating tag such as @v4.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Read pull request body
         env:
@@ -24,4 +25,4 @@ jobs:
         run: gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq .body > "$RUNNER_TEMP/pr-body.md"
 
       - name: Require problem, impact, why, and evidence
-        run: python3 .github/scripts/pr-context-check.py "$RUNNER_TEMP/pr-body.md"
+        run: python3 .github/org-consistency/pr-context-check.py "$RUNNER_TEMP/pr-body.md"

@@ -29,3 +29,4 @@ attached_assets/
 
 # The migrations of the release production runs (scripts/replit-workspace-db.js)
 .field-workspace-db/
+.crabbox/
