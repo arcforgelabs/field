@@ -66,7 +66,9 @@ stable release gets a new, cumulative file, and a correction
    direct commits. They are editorial input; they get no row.
 
 3. Read the manifest, then edit the prose, not the record:
-   - Highlights: 5 to 8 bullets for a stable release, 0 to 8 for a beta.
+   - Highlights: aim for 5 to 8 bullets for a stable release (at most 8;
+     fewer is fine for a small patch release, and `verify` only warns), 0 to
+     8 for a beta; never invent highlights.
      One user story per bullet, in one sentence, with every pull request
      that tells it: `- Text. (#N, #M) Thanks @a.` Leave out tests, CI,
      refactors and docs unless the outcome is a material install, update or

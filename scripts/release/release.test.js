@@ -13,7 +13,7 @@ test("package.json holds a stable calendar version", () => {
   assert.equal(parseTag(`v${packageVersion}`).channel, "stable");
 });
 
-test("release tags are vYYYY.M.D or vYYYY.M.D-beta.N, without leading zeros", () => {
+test("release tags are vYYYY.M.N, vYYYY.M.N-beta.B or vYYYY.M.N-C, without leading zeros", () => {
   assert.deepEqual(parseTag("v2026.10.14"), {
     tag: "v2026.10.14", version: "2026.10.14", base: "2026.10.14", channel: "stable", beta: null, correction: null, branch: "release/2026.10.14", npmDistTag: "latest", prerelease: false,
   });
