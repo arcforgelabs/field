@@ -12,6 +12,7 @@ import {
   compareVersions,
   creditFor,
   highlightCountError,
+  highlightCountWarning,
   isEligibleHandle,
   main,
   parseSubject,
@@ -151,10 +152,14 @@ test("the check refuses a section that breaks the format rules", () => {
   assert.throws(() => checkSection("Unreleased.md", section("Unreleased", ok)), /Unreleased has no record/);
 });
 
-test("the highlight budget is 5-8 for a stable release and 0-8 for a beta", () => {
+test("a stable release aims for 5-8 highlights but ships with fewer; never more than 8", () => {
   const five = Array.from({ length: 5 }, (_, i) => `- Story ${i}. (#10)`);
   assert.equal(highlightCountError("2026.10.40", section("2026.10.40", { highlights: five })), null);
-  assert.match(highlightCountError("2026.10.40", section("2026.10.40", { highlights: five.slice(1) })), /5-8 top-level bullets; found 4/);
+  assert.equal(highlightCountWarning("2026.10.40", section("2026.10.40", { highlights: five })), null);
+  // A small patch release: allowed, with a warning.
+  assert.equal(highlightCountError("2026.10.40", section("2026.10.40", { highlights: five.slice(2) })), null);
+  assert.match(highlightCountWarning("2026.10.40", section("2026.10.40", { highlights: five.slice(2) })), /has 3 bullets; a stable release aims for 5-8/);
+  assert.match(highlightCountError("2026.10.40", section("2026.10.40", { highlights: [] })), /1-8 top-level bullets; found 0/);
   assert.match(highlightCountError("2026.10.40", section("2026.10.40", { highlights: [...five, ...five] })), /found 10/);
   assert.equal(highlightCountError("2026.10.40-beta.1", section("2026.10.40-beta.1")), null);
 });
@@ -221,7 +226,8 @@ test("draft, write and verify work from a git history and GitHub", () => {
   save(edited.replace("- Sign-in loop. (#3)\n", "- Release tooling. (#4)\n"));
   assert.throws(() => main(["verify", "--version", "2026.10.2"], dir, { request }), /PR #4 \(chore\) belongs only in the record/);
   save(edited.replace("- Sign-in loop. (#3)\n", ""));
-  assert.throws(() => main(["verify", "--version", "2026.10.2"], dir, { request }), /5-8 top-level bullets; found 4/);
+  // Four highlights: a small patch release still ships (verify only warns).
+  assert.doesNotThrow(() => main(["verify", "--version", "2026.10.2"], dir, { request }));
   save(edited);
 
   const notes = main(["notes", "--version", "2026.10.2"], dir);

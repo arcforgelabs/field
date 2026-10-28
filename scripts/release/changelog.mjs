@@ -60,7 +60,7 @@
 // shipped record. Only `feat`, `improve` and `fix`
 // pull requests (and any type marked breaking with `!`) appear in the prose;
 // `docs`, `chore`, `refactor`, `test`, `ci`, `build` and `style` appear only in
-// the record. A stable release has 5-8 highlights, a beta 0-8. Thanks never go
+// the record. A stable release aims for 5-8 highlights, a beta 0-8. Thanks never go
 // to bots, to Claude or Codex, to the organization or to the maintainer.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -294,11 +294,19 @@ export function checkSection(name, text) {
   return parsed;
 }
 
-// OpenClaw's highlight budget: 5-8 for a stable release, 0-8 for a beta.
+// OpenClaw's highlight budget: 0-8 bullets. A stable release aims for 5-8,
+// but that is a guideline for the writing, not a gate on the release: a small
+// patch release ships with the stories it has (highlightCountWarning).
 export function highlightCountError(version, text) {
   const found = bullets(parseSection(text).blocks.find((block) => block.heading === "Highlights")).length;
-  const minimum = parseVersion(version).channel === "beta" ? 0 : 5;
+  const minimum = parseVersion(version).channel === "beta" ? 0 : 1;
   return found >= minimum && found <= 8 ? null : `### Highlights must contain ${minimum}-8 top-level bullets; found ${found}`;
+}
+
+export function highlightCountWarning(version, text) {
+  if (parseVersion(version).channel === "beta") return null;
+  const found = bullets(parseSection(text).blocks.find((block) => block.heading === "Highlights")).length;
+  return found >= 1 && found < 5 ? `### Highlights has ${found} bullets; a stable release aims for 5-8. Fine for a small patch release; never invent highlights` : null;
 }
 
 // The docs-site page of a stable release or correction, OpenClaw's
@@ -761,6 +769,8 @@ export function verifySection(root, { version, target, github }) {
   const errors = [];
   const highlight = highlightCountError(version, text);
   if (highlight) errors.push(highlight);
+  const fewer = highlightCountWarning(version, text);
+  if (fewer) console.warn(`CHANGELOG/${name}: ${fewer}`);
   const { blocks } = parseSection(text);
   for (const heading of PROSE) if (!blocks.some((block) => block.heading === heading)) errors.push(`missing ### ${heading}`);
   const tags = releaseTags(root);

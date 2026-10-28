@@ -37,9 +37,13 @@ The notes are the release's changelog file, `CHANGELOG/<version>.md`
 (`CONTRIBUTING.md`, `.agents/skills/field-changelog-update/SKILL.md`). Every
 release needs one: Field Release Prepare refuses to tag a release unless the
 file's record lists every pull request in its range with GitHub's credit,
-and a stable release has 5 to 8 highlights. After the GitHub Release is
-published, Publish checks that its body is the file. A release tagged before
-the changelog existed keeps GitHub's generated notes.
+and its Highlights list has 1 to 8 bullets. A stable release aims for 5 to 8
+highlights, as OpenClaw's do, but that is a guideline for the writing, not a
+gate on the release: like OpenClaw's patch releases (2026.10.6, 2026.10.7), a
+small stable release ships with the user stories it has, and `verify` only
+warns. Never invent highlights. After the GitHub Release is published,
+Publish checks that its body is the file. A release tagged before the
+changelog existed keeps GitHub's generated notes.
 
 Each stable release and correction also gets a docs page,
 `docs/releases/<version>.md`, which `changelog.mjs write` writes from the
@@ -150,7 +154,7 @@ closeout).
 1. **cut.** The command picks the newest `main` commit that Field Full Release
    Validation proved (or `--cut-sha`), and refuses until the version's notes
    exist (and, with `--hold`, until that commit is confirmed). Write them at the cut
-   (`.agents/skills/field-changelog-update/SKILL.md`), with 5 to 8 highlights:
+   (`.agents/skills/field-changelog-update/SKILL.md`), with up to 8 highlights:
 
    ```bash
    node scripts/release/changelog.mjs draft --version 2026.10.34 --target <cut> --output /tmp/section.md --manifest /tmp/manifest.json
@@ -227,7 +231,7 @@ same way.
 When a published stable release needs a fix and its version cannot be
 published again, cherry-pick the fix onto its branch, write
 `CHANGELOG/<version>-<n>.md` (the same range as the stable release's notes,
-plus the fix, with 5 to 8 highlights), put it on the branch, and prepare a
+plus the fix, with up to 8 highlights), put it on the branch, and prepare a
 correction:
 
 ```bash
