@@ -43,7 +43,23 @@ test("an operator prices, sends and invoices a new quote", async ({ page }, test
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Quantity", exact: true })).toHaveValue("2");
   await expect(rate).toHaveValue("$150.00");
-  await expect(page.getByRole("button", { name: "Send quote", exact: true })).toBeEnabled();
+  const sendQuote = page.getByRole("button", { name: "Send quote", exact: true });
+  await expect(sendQuote).toBeDisabled();
+  const review = page.getByRole("region", { name: "Quote review" });
+  await expect(review).toBeVisible();
+  await testInfo.attach("quote-review-" + testInfo.project.name, { body: await review.screenshot(), contentType: "image/png" });
+  for (const [field, answer] of [
+    ["manual scope review", "Two hours of tip-truck haulage at the explicitly entered rate."],
+    ["site access constraints", "Site access checked: clear truck access, no additional handling constraints."],
+  ]) {
+    const form = page.getByRole("form", { name: field });
+    await form.getByRole("textbox").fill(answer);
+    await form.getByRole("button", { name: "Confirm review" }).click();
+    await expect(form).toHaveCount(0);
+  }
+  await page.reload();
+  await expect(review).toHaveCount(0);
+  await expect(sendQuote).toBeEnabled();
   await page.getByRole("button", { name: "Send quote", exact: true }).click();
   await expect(page).toHaveURL(/email-editor/);
   await page.getByRole("button", { name: "Send", exact: true }).filter({ visible: true }).click();

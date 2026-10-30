@@ -3,7 +3,7 @@
 // quote's versions once it has been revised.
 import { useRef, useState } from "react";
 import { Check, Upload } from "lucide-react";
-import type { RecordingDetail, SoilDump } from "@/lib/types";
+import type { GapItem, RecordingDetail, SoilDump } from "@/lib/types";
 import { api } from "@/lib/api";
 import { forwardGeocode } from "@/lib/geo";
 import { money } from "@/lib/job-status";
@@ -13,12 +13,13 @@ import { DEFAULT_SOIL_DUMPS, estimateDrivingDistanceKm, haversineDistanceKm } fr
 
 const SOIL_DUMPS = DEFAULT_SOIL_DUMPS as SoilDump[];
 
-export function JobRail({ detail, totals, paid, landed, selectedVersion, onPickVersion, onDetailSaved }: {
+export function JobRail({ detail, totals, paid, landed, selectedVersion, canReview, onPickVersion, onDetailSaved }: {
   detail: RecordingDetail;
   totals: QuoteTotals | null;
   paid: number;
   landed: boolean;
   selectedVersion: number | null;
+  canReview: boolean;
   onPickVersion: (version: number) => void;
   onDetailSaved: (detail: RecordingDetail) => void;
 }) {
@@ -69,6 +70,16 @@ export function JobRail({ detail, totals, paid, landed, selectedVersion, onPickV
           )}
         </div>
       </section>
+
+      {Boolean(detail.review?.openGaps.length) && (
+        <section aria-label="Quote review">
+          <h2 className="fx-rail__h">Quote review</h2>
+          <p className="fx-mute">Confirm the missing information before sending. Each answer is recorded on the job.</p>
+          {detail.review?.openGaps.map((gap) => (
+            <GapReview key={gap.id} jobId={meta.id} gap={gap} disabled={!canReview} onSaved={onDetailSaved} />
+          ))}
+        </section>
+      )}
 
       <section>
         <h2 className="fx-rail__h">Customer</h2>
@@ -194,5 +205,42 @@ function Measurements({ detail, onSaved }: { detail: RecordingDetail; onSaved: (
       </div>
       {error && <span style={{ gridColumn: "1 / -1", color: "var(--t-danger)", fontSize: 12 }}>{error}</span>}
     </div>
+  );
+}
+
+/** Explicit review uses the server's existing confirmation and audit path. */
+function GapReview({ jobId, gap, disabled, onSaved }: {
+  jobId: string;
+  gap: GapItem;
+  disabled: boolean;
+  onSaved: (detail: RecordingDetail) => void;
+}) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <form aria-label={gap.field} onSubmit={async (event) => {
+      event.preventDefault();
+      if (disabled || busy || !note.trim()) return;
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await api.gapAction(jobId, gap.id, { mode: "confirm", note: note.trim() });
+        if (!result.detail) throw new Error("The review could not be loaded. Refresh the job before continuing.");
+        onSaved(result.detail);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Review not saved. Try again.");
+      } finally {
+        setBusy(false);
+      }
+    }}>
+      <label className="fx-label">
+        {gap.field}
+        <textarea className="fx-input" rows={3} required readOnly={disabled || busy} value={note} onChange={(event) => setNote(event.target.value)} />
+      </label>
+      <p className="fx-mute">{gap.description || gap.reason}</p>
+      {error && <p role="alert">{error}</p>}
+      <button type="submit" className="fx-btn fx-btn--sm" disabled={disabled || busy || !note.trim()}>{busy ? "Saving…" : "Confirm review"}</button>
+    </form>
   );
 }
