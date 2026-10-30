@@ -2,7 +2,18 @@
 // offline; no API stubs supply the behavior asserted here.
 import { expect, test } from "@playwright/test";
 
+// Send now has a real ten-second Undo hold. Refresh the email history until
+// delivery is recorded, rather than treating queue acceptance as delivery.
+async function waitForSent(page, count) {
+  await expect(async () => {
+    await page.reload();
+    const history = page.getByRole("list", { name: "Email on this job" });
+    await expect(history.getByText("Sent", { exact: true })).toHaveCount(count);
+  }).toPass({ timeout: 30_000, intervals: [1000, 2000] });
+}
+
 test("an operator prices, sends and invoices a new quote", async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
   const address = "12 Browser Proof Street, Sampleton " + testInfo.project.name;
   await page.goto("/");
   await page.getByLabel("Email address").fill("smoke.operator@example.invalid");
@@ -34,9 +45,10 @@ test("an operator prices, sends and invoices a new quote", async ({ page }, test
   await page.getByRole("button", { name: "Send quote", exact: true }).click();
   await expect(page).toHaveURL(/email-editor/);
   await page.getByRole("button", { name: "Send", exact: true }).filter({ visible: true }).click();
-  await expect(page).toHaveURL(jobUrl);
+  await expect(page).toHaveURL(jobUrl + "?tab=email");
+  await waitForSent(page, 1);
+  await page.goto(jobUrl);
   await expect(page.getByRole("button", { name: "Mark accepted", exact: true })).toBeVisible();
-  await page.reload();
   await page.getByRole("button", { name: "Mark accepted", exact: true }).click();
   await page.getByRole("alertdialog", { name: "Mark as accepted?" }).getByRole("button", { name: "Mark accepted", exact: true }).click();
 
@@ -45,8 +57,9 @@ test("an operator prices, sends and invoices a new quote", async ({ page }, test
   await sendInvoice.click();
   await expect(page).toHaveURL(/email-editor.*documentType=invoice/);
   await page.getByRole("button", { name: "Send", exact: true }).filter({ visible: true }).click();
-  await expect(page).toHaveURL(jobUrl);
-  await page.reload();
+  await expect(page).toHaveURL(jobUrl + "?tab=email");
+  await waitForSent(page, 2);
+  await page.goto(jobUrl);
   // A recorded payment is offered only after the invoice is actually issued.
   await expect(page.getByRole("button", { name: "Record payment", exact: true }).first()).toBeVisible();
   await page.getByRole("tab", { name: "Email", exact: true }).click();

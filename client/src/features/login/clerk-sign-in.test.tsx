@@ -206,8 +206,11 @@ describe("no stale Field token in Clerk mode", () => {
     localStorage.setItem("fr_user", JSON.stringify({ id: "old" }));
     renderApp();
     expect(await screen.findByTestId("clerk-sign-in")).toBeTruthy();
-    expect(localStorage.getItem("fr_token")).toBeNull();
-    expect(localStorage.getItem("fr_user")).toBeNull();
+    // The lazy provider clears storage in a passive effect, after rendering.
+    await waitFor(() => {
+      expect(localStorage.getItem("fr_token")).toBeNull();
+      expect(localStorage.getItem("fr_user")).toBeNull();
+    });
   });
 
   it("puts no token in PDF or wall-render URLs while a Clerk session provides tokens", () => {
