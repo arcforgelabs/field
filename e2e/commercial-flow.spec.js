@@ -62,6 +62,7 @@ test("an operator prices, sends and invoices a new quote", async ({ page }, test
   await expect(sendQuote).toBeEnabled();
   await page.getByRole("button", { name: "Send quote", exact: true }).click();
   await expect(page).toHaveURL(/email-editor/);
+  await expect(page.getByRole("region", { name: "Message", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Send", exact: true }).filter({ visible: true }).click();
   await expect(page).toHaveURL(jobUrl + "?tab=email");
   await waitForSent(page, 1);
@@ -74,6 +75,7 @@ test("an operator prices, sends and invoices a new quote", async ({ page }, test
   await expect(sendInvoice).toBeEnabled();
   await sendInvoice.click();
   await expect(page).toHaveURL(/email-editor.*documentType=invoice/);
+  await expect(page.getByRole("region", { name: "Message", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Send", exact: true }).filter({ visible: true }).click();
   await expect(page).toHaveURL(jobUrl + "?tab=email");
   await waitForSent(page, 2);
