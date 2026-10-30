@@ -9,6 +9,7 @@ import {
   sanitizeQuoteDocumentSurfaces,
   sanitizeQuoteForPricingDisplay,
 } from "./quote-pricing-visibility.js";
+import { projectQuoteForReviewState } from "./quote-review-projection.js";
 import { applyPresentationToQuote } from "./quote-presentation.js";
 import {
   assertQuoteLineItemCostsComplete,
@@ -376,6 +377,36 @@ test("verified pricing attestation is bound to the canonical monetary output", (
     },
   };
   assert.equal(isQuotePricingDisplayable(legacyDigestlessV2, { current: true }), false);
+});
+
+test("confirmed review preserves verified money without certifying tampered prices", () => {
+  const quote = attachQuotePricingAttestation({
+    quote: {
+      lineItems: [{ code: "scope", quantity: 1, unitPrice: 100, totalPrice: 100 }],
+      totals: { subtotal: 100, gst: 10, total: 110, currency: "AUD" },
+      missingInputs: ["site access constraints"],
+      assumptionInputs: [],
+      pricing: { issues: [], ready: true },
+    },
+    attestation: buildQuotePricingAttestation({
+      authorityStatus: { provider: "price_catalog", catalogRevision: "r1", snapshotDigest: "s1" },
+      livePricingAvailable: true,
+      requestNonce: "review-test",
+    }),
+  });
+  const gaps = [{ field: "site access constraints", status: "confirmed", resolution: { note: "Truck access confirmed." } }];
+  assert.equal(isQuotePricingSendable(quote), true);
+  const reviewed = projectQuoteForReviewState({ quote, gaps });
+  assert.deepEqual(reviewed.missingInputs, []);
+  assert.deepEqual(reviewed.totals, { subtotal: 100, gst: 10, total: 110, currency: "AUD" });
+  assert.equal(isQuotePricingSendable(reviewed), true);
+  assert.equal(quote.missingInputs.length, 1);
+
+  const tampered = { ...quote, totals: { ...quote.totals, total: 999 } };
+  assert.equal(isQuotePricingSendable(tampered), false);
+  assert.equal(isQuotePricingSendable(projectQuoteForReviewState({ quote: tampered, gaps })), false);
+  reviewed.totals.total = 999;
+  assert.equal(isQuotePricingSendable(reviewed), false);
 });
 
 test("job summaries carry the quote's customer-facing total, not the engine's $0 for an editor-built quote", () => {

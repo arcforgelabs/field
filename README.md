@@ -218,6 +218,12 @@ The price catalogue is PostgreSQL (`server/catalog/README.md`). The target
 model for the catalogue, quotes and invoices, and the plan to get there, is
 `docs/PRICING_ENGINE.md`.
 
+Before sending a quote, complete any **Quote review** fields in the job
+summary. Record the confirmed scope and site information, then select
+**Confirm review** for each field. These answers are kept on the job. Send
+stays disabled while the server reports an unresolved review requirement;
+adding priced items does not clear those requirements.
+
 ## Operator CLI
 
 `npm run install:cli` installs the repo-local `field` command. The operator,

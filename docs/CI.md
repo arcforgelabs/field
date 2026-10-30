@@ -26,7 +26,7 @@ the Replit publish check look for those names.
 | `quote-invoice-proof` | The quote and invoice proof (`README.md`, "Development") gives the same 25 PDFs, emails and API responses on two PGlite runs and on a run with PostgreSQL storage | See below |
 | `client-build` | The client bundle builds | `npm --prefix client run build` |
 | `docker-build` | The image builds | `docker build .` |
-| `smoke` | Playwright signs a synthetic operator in to the built image, on desktop and phone viewports, and opens the jobs board and the catalogue. `/health` must name the commit the image was built from. | `e2e/run-image-smoke.sh <image> [commit]` |
+| `smoke` | Playwright signs a synthetic operator in to the built image on desktop and phone viewports, opens the jobs board and catalogue, and creates, prices, sends and invoices a quote. Gmail is captured offline with the existing document-proof transport; no email leaves the container. `/health` must name the commit the image was built from. | `e2e/run-image-smoke.sh <image> [commit]` |
 | `audit` | No high or critical advisory outside the accepted list in `SECURITY.md` ("Dependency Advisories"), and none past its recheck date. It also writes CycloneDX SBOMs of the server and client production dependencies (artifact `sbom`). | `node scripts/dependency-audit.mjs` |
 | `test` | The gate: every lane above passed | |
 
