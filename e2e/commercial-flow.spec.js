@@ -21,7 +21,7 @@ test("an operator prices, sends and invoices a new quote", async ({ page }, test
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL(/#\/jobs$/);
 
-  await page.getByRole("button", { name: /New quote/ }).click();
+  await page.getByRole("main").locator("header").getByRole("button", { name: /New quote/ }).click();
   const dialog = page.getByRole("dialog", { name: "New quote" });
   await dialog.getByLabel("Site address").fill(address);
   await dialog.getByLabel("Customer", { exact: true }).fill("Browser Proof Customer");
