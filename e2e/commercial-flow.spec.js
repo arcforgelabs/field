@@ -34,6 +34,8 @@ test("an operator prices, sends and invoices a new quote", async ({ page }, test
   await page.getByRole("option", { name: /Tip-truck haulage \(demo\)/ }).click();
   await page.getByRole("textbox", { name: "Quantity", exact: true }).fill("2");
   const rate = page.getByRole("textbox", { name: "Rate", exact: true });
+  // Focusing switches the currency display to its editable numeric value.
+  await rate.click();
   await rate.fill("150");
   await rate.press("Enter");
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
