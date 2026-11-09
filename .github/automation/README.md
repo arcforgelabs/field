@@ -9,7 +9,7 @@ of this repository, caller-only App repository scope, and the helper path here. 
 is executed. Preserve those substitutions when updating from the shared implementation.
 Labeler uses the existing Barnacle App; reactions use GITHUB_TOKEN.
 
-`barnacle.yml` is an inline copy of `arcforgelabs/.github@d1877d0bac0d77e614929580f071437d8ad3ac71`
+`barnacle.yml` is an inline copy of `arcforgelabs/.github@b0fc9bcc89b5219efc0c8e5f855aaedc3ccec6b6`
 for the same reason. Its scripts and config stay in `.github`: the job checks that repository
 out at the pinned commit with the Barnacle App token, scoped to this repository and `.github`.
 Bump the pinned SHA in both places when refreshing it.
