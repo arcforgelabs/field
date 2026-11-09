@@ -1,6 +1,6 @@
 # Barnacle auto-response. Triggers match openclaw's auto-response.yml.
 # Inline copy of arcforgelabs/.github barnacle.yml at
-# d1877d0bac0d77e614929580f071437d8ad3ac71: dictate is public and GitHub does not
+# b0fc9bcc89b5219efc0c8e5f855aaedc3ccec6b6: dictate is public and GitHub does not
 # let public repositories call reusable workflows from the private .github repo.
 # The Barnacle scripts and config still live in arcforgelabs/.github; this job
 # checks them out at the same pinned commit. Keep the job identical to that
@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arcforgelabs/.github
-          ref: d1877d0bac0d77e614929580f071437d8ad3ac71 # arcforgelabs/.github main
+          ref: b0fc9bcc89b5219efc0c8e5f855aaedc3ccec6b6 # arcforgelabs/.github main
           token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
       - name: Apply PR cap label
