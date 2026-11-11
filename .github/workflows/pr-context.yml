@@ -1,4 +1,3 @@
-# arc-forge-org-consistency: managed by arc-forge-tools components/org-consistency
 name: PR context
 
 on:

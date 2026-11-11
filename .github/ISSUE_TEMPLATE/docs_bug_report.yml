@@ -1,4 +1,3 @@
-# arc-forge-org-consistency: managed by arc-forge-tools components/org-consistency
 # Copied unchanged from openclaw/openclaw .github/ISSUE_TEMPLATE/docs_bug_report.yml at 44b01a1e5a.
 name: Docs bug report
 description: Report documentation defects (incorrect, missing, outdated, or contradictory docs).
