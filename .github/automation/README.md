@@ -7,7 +7,13 @@ Upstream helper and reaction logic: `openclaw/openclaw@5ff5fb278348bb6d2280bfbfb
 Only delivery changes: direct event triggers, default manual inputs, trusted base checkout
 of this repository, caller-only App repository scope, and the helper path here. No PR code
 is executed. Preserve those substitutions when updating from the shared implementation.
-Labeler uses the arc-forge-barnacle App token; reactions use GITHUB_TOKEN.
+Labeler uses the org Barnacle App pair (`GH_APP_ID` and `GH_APP_ID_FALLBACK`, keys
+`GH_APP_PRIVATE_KEY` and `GH_APP_PRIVATE_KEY_FALLBACK`), as upstream does; reactions use GITHUB_TOKEN.
+
+Barnacle (`.github/workflows/auto-response.yml`) has the shape of openclaw/clawhub's: Field
+owns `scripts/github/barnacle-auto-response.mjs` and its close-reason rules (`r: not-in-vision`,
+`r: customer-data`). A maintainer adds the label; Barnacle posts the reply and closes.
+`bad-barnacle` switches it off for one item.
 
 Field copies these files from `arcforgelabs/dictate` (`.github/workflows/labeler.yml`,
 `maintainer-command-reactions.yml` and this folder). Its only change is

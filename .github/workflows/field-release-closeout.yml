@@ -142,12 +142,23 @@ jobs:
       # workflows use an App token. Its pull request also starts CI.
       - name: Create pull request token
         id: app-token
-        if: steps.commit.outputs.changed == 'true' && vars.BARNACLE_APP_ID != ''
+        if: steps.commit.outputs.changed == 'true' && vars.GH_APP_ID != ''
         continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
-          app-id: ${{ vars.BARNACLE_APP_ID }}
-          private-key: ${{ secrets.BARNACLE_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+
+      - name: Create pull request token (fallback App)
+        id: app-token-fallback
+        if: (steps.commit.outputs.changed == 'true' && vars.GH_APP_ID != '') && steps.app-token.outcome == 'failure' && vars.GH_APP_ID_FALLBACK != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ vars.GH_APP_ID_FALLBACK }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY_FALLBACK }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-pull-requests: write
@@ -156,7 +167,7 @@ jobs:
         if: steps.commit.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          PR_TOKEN: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token || github.token }}
           TAG: ${{ inputs.tag }}
           VERSION: ${{ steps.release.outputs.version }}
           BRANCH: ${{ steps.commit.outputs.branch }}

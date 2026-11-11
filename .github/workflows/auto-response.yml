@@ -1,0 +1,72 @@
+name: Auto response
+
+# Barnacle, in the shape of openclaw/clawhub .github/workflows/auto-response.yml:
+# this repository owns scripts/github/barnacle-auto-response.mjs and its rules.
+# Identity: the org Barnacle App pair (variables GH_APP_ID and
+# GH_APP_ID_FALLBACK, secrets GH_APP_PRIVATE_KEY and
+# GH_APP_PRIVATE_KEY_FALLBACK). Without a token the job skips the run.
+# Owners, members and collaborators are skipped, as upstream.
+
+on:
+  issues:
+    types: [labeled]
+  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted base checkout only; no untrusted PR code execution
+    types: [labeled]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions: {}
+
+jobs:
+  auto-response:
+    if: >-
+      ${{
+        !contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association || github.event.pull_request.author_association) &&
+        vars.GH_APP_ID != ''
+      }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            /scripts/github/
+          sparse-checkout-cone-mode: false
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        id: app-token
+        continue-on-error: true
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: write
+          permission-pull-requests: write
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        id: app-token-fallback
+        if: steps.app-token.outcome == 'failure' && vars.GH_APP_ID_FALLBACK != ''
+        with:
+          app-id: ${{ vars.GH_APP_ID_FALLBACK }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY_FALLBACK }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: write
+          permission-pull-requests: write
+      - name: Run Barnacle auto-response
+        if: steps.app-token.outputs.token != '' || steps.app-token-fallback.outputs.token != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          github-token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
+          script: |
+            const { pathToFileURL } = require("node:url");
+            const { runBarnacleAutoResponse } = await import(
+              pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/github/barnacle-auto-response.mjs`).href
+            );
+            await runBarnacleAutoResponse({ github, context, core });

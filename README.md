@@ -44,7 +44,7 @@ Work lives in this repository's GitHub issues and pull requests. Start with
 | `docs/SELF_HOSTING.md` | Running a pinned, verified release with Docker, Node or Replit, and the `deploy/replit/` template |
 | `docs/RELEASING.md` | How a release is cut, what it publishes (npm, GHCR, GitHub Release) and how to verify and run one |
 | `docs/CI.md` | CI's test lanes, which checks are required, and how to run each lane locally |
-| `.github/automation/README.md` | Where the review and triage bots (labeler, command reactions, ClawSweeper) come from |
+| `.github/automation/README.md` | Where the review and triage bots (Barnacle, labeler, command reactions, ClawSweeper) come from |
 | `docs/review/` | Before and after renders of customer documents a change alters, from synthetic data, for the owner's review |
 | `server/catalog/README.md` | The PostgreSQL price catalogue |
 | `server/db/README.md` | The database runtime, migrations and tenancy |
