@@ -7,19 +7,13 @@ Upstream helper and reaction logic: `openclaw/openclaw@5ff5fb278348bb6d2280bfbfb
 Only delivery changes: direct event triggers, default manual inputs, trusted base checkout
 of this repository, caller-only App repository scope, and the helper path here. No PR code
 is executed. Preserve those substitutions when updating from the shared implementation.
-Labeler uses the existing Barnacle App; reactions use GITHUB_TOKEN.
+Labeler uses the arc-forge-barnacle App token; reactions use GITHUB_TOKEN.
 
-`barnacle.yml` is an inline copy of `arcforgelabs/.github@b0fc9bcc89b5219efc0c8e5f855aaedc3ccec6b6`
-for the same reason. Its scripts and config stay in `.github`: the job checks that repository
-out at the pinned commit with the Barnacle App token, scoped to this repository and `.github`.
-Bump the pinned SHA in both places when refreshing it.
-
-Field copies these files from `arcforgelabs/dictate` (`.github/workflows/barnacle.yml`,
-`labeler.yml`, `maintainer-command-reactions.yml` and this folder). Its only change is
+Field copies these files from `arcforgelabs/dictate` (`.github/workflows/labeler.yml`,
+`maintainer-command-reactions.yml` and this folder). Its only change is
 that the size label leaves out `package-lock.json`, `client/package-lock.json` and
 `e2e/package-lock.json`, as
-it already leaves out other lockfiles. Field's area labels are in `.github/labeler.yml`
-and its Barnacle close messages in `.github/barnacle.json`.
+it already leaves out other lockfiles. Field's area labels are in `.github/labeler.yml`.
 
 ClawSweeper needs no workflow here. An `arcforgelabs` organization webhook sends this
 repository's issue, comment and pull request events to ClawSweeper; enrolment is
