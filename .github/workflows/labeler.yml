@@ -44,9 +44,23 @@ jobs:
     steps:
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         id: app-token
+        continue-on-error: true
         with:
-          app-id: ${{ vars.BARNACLE_APP_ID }}
-          private-key: ${{ secrets.BARNACLE_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-issues: write
+          permission-members: read
+          permission-metadata: read
+          permission-pull-requests: write
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        id: app-token-fallback
+        if: steps.app-token.outcome == 'failure' && vars.GH_APP_ID_FALLBACK != ''
+        with:
+          app-id: ${{ vars.GH_APP_ID_FALLBACK }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY_FALLBACK }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-contents: read
@@ -58,7 +72,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.sha }}
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
           persist-credentials: false
       # Read only the caller's trusted base config as data. Never checkout PR code.
       - name: Load optional area map
@@ -66,7 +80,7 @@ jobs:
         if: ${{ github.event.action != 'edited' || github.event.changes.base }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
-          github-token: ${{ steps.app-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
           script: |
             try {
               const { data } = await github.rest.repos.getContent({
@@ -86,13 +100,13 @@ jobs:
         if: ${{ steps.area-map.outputs.exists == 'true' }}
         with:
           configuration-path: .caller-labeler.yml
-          repo-token: ${{ steps.app-token.outputs.token }}
+          repo-token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
           sync-labels: true
       - name: Apply PR size label
         if: ${{ github.event.action != 'edited' || github.event.changes.base }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
-          github-token: ${{ steps.app-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
           script: |
             const pullRequest = context.payload.pull_request;
             if (!pullRequest) {
@@ -189,7 +203,7 @@ jobs:
         if: ${{ github.event.action != 'edited' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
-          github-token: ${{ steps.app-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
           script: |
             const login = context.payload.pull_request?.user?.login;
             if (!login) {
@@ -268,7 +282,7 @@ jobs:
         if: ${{ github.event.action != 'edited' || github.event.changes.title }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
-          github-token: ${{ steps.app-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
           script: |
             const pullRequest = context.payload.pull_request;
             if (!pullRequest) {
@@ -336,9 +350,23 @@ jobs:
     steps:
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         id: app-token
+        continue-on-error: true
         with:
-          app-id: ${{ vars.BARNACLE_APP_ID }}
-          private-key: ${{ secrets.BARNACLE_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-issues: write
+          permission-members: read
+          permission-metadata: read
+          permission-pull-requests: write
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        id: app-token-fallback
+        if: steps.app-token.outcome == 'failure' && vars.GH_APP_ID_FALLBACK != ''
+        with:
+          app-id: ${{ vars.GH_APP_ID_FALLBACK }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY_FALLBACK }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-contents: read
@@ -350,12 +378,12 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.sha }}
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
           persist-credentials: false
       - name: Backfill PR labels
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
-          github-token: ${{ steps.app-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
@@ -663,9 +691,23 @@ jobs:
     steps:
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         id: app-token
+        continue-on-error: true
         with:
-          app-id: ${{ vars.BARNACLE_APP_ID }}
-          private-key: ${{ secrets.BARNACLE_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-issues: write
+          permission-members: read
+          permission-metadata: read
+          permission-pull-requests: write
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        id: app-token-fallback
+        if: steps.app-token.outcome == 'failure' && vars.GH_APP_ID_FALLBACK != ''
+        with:
+          app-id: ${{ vars.GH_APP_ID_FALLBACK }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY_FALLBACK }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-contents: read
@@ -677,12 +719,12 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.sha }}
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
           persist-credentials: false
       - name: Apply maintainer or trusted-contributor label
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
-          github-token: ${{ steps.app-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
           script: |
             const login = context.payload.issue?.user?.login;
             if (!login) {
@@ -760,7 +802,7 @@ jobs:
       - name: Apply beta-blocker title label
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
-          github-token: ${{ steps.app-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
           script: |
             const issue = context.payload.issue;
             if (!issue || issue.pull_request) {
