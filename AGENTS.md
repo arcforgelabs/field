@@ -1,14 +1,8 @@
 # AGENTS.md
 
-This is the one instruction file for every agent that works in this
-repository. `CLAUDE.md`, `GEMINI.md` and `replit.md` are links to it, so
-Claude Code, Gemini, Codex and Replit Agent all read the same rules. Change
-the rules here, never in a link.
+Read `VISION.md` before starting work. `README.md` indexes the rest. This file owns all agent rules for this repo; it has no Tools pointer.
 
-Read `VISION.md` before starting work. `README.md` indexes all other
-documentation; check it first.
-
-The shared rules are in Shared safeguards; this repo's own rules are in Field safeguards, at the end.
+`CLAUDE.md`, `GEMINI.md` and `replit.md` are links to this file, so Claude Code, Gemini, Codex and Replit Agent all read the same rules. Change the rules here, never in a link.
 
 ## Shared safeguards
 
@@ -89,3 +83,19 @@ Replit's connector. The steps and the guard script are in `docs/REPLIT.md`,
   repository: the live address comes from the project's own notes.
 - Keep the conversation that owns a scheduled publish open: a task bound to
   a closed conversation does not run.
+
+## Project skills
+
+`.agents/skills` holds this repo's own skills. Claude Code finds them through `.claude/skills`, a link to `.agents/skills`.
+
+- `field-release` and `field-changelog-update`: release work.
+- `github-sync`: GitHub steps from a Replit workspace.
+- `arcforge-pr-maintainer` is a copy stamped from the retired Tools repo. It stays until a `<repo>-pr-maintainer` skill replaces it, as [platform-pr-maintainer](https://github.com/arcforgelabs/platform/blob/main/.agents/skills/platform-pr-maintainer/SKILL.md) did in Platform.
+
+## Read when relevant
+
+- **Installation on Replit:** [Replit](docs/REPLIT.md), [self-hosting](docs/SELF_HOSTING.md).
+- **Releases:** [releasing](docs/RELEASING.md).
+- **Architecture and design:** [architecture](ARCHITECTURE.md), [design](DESIGN.md).
+- **Contributing:** [contributing](CONTRIBUTING.md).
+- **Security:** [security policy](SECURITY.md).
