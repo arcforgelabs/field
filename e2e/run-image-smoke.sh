@@ -50,10 +50,17 @@ docker run --rm --network host \
   -e DATABASE_URL="$db" -e FIELD_DB_URL="$db" \
   "$image" node scripts/quote-invoice-proof/seed.mjs /app /tmp
 
-config='{"dataDir":"/app/data","authToken":"smoke-installation-token","bootstrapUsers":[{"email":"smoke.operator@example.invalid","password":"smoke-password-fixture","role":"admin","name":"Smoke Operator"}]}'
+config='{"dataDir":"/app/data","authToken":"smoke-installation-token","quoteCatalogId":"field-verification","bootstrapUsers":[{"email":"smoke.operator@example.invalid","password":"smoke-password-fixture","role":"admin","name":"Smoke Operator"}],"mail":{"fromEmail":"smoke.operator@example.invalid","gmailUser":"smoke.operator@example.invalid","deliveryPolicy":{"mode":"live"}},"googleServiceAccountKey":"/tmp/smoke-key.json"}'
 docker run -d --name "$app" --network host \
+  -v "$root/scripts/quote-invoice-proof/hooks.mjs:/tmp/hooks.mjs:ro" \
+  -v "$root/scripts/quote-invoice-proof/fake-googleapis.mjs:/tmp/fake-googleapis.mjs:ro" \
+  -e FIELD_PROOF_MAIL_DIR=/tmp/smoke-mail \
   -e FIELD_CONFIG_JSON="$config" -e DATABASE_URL="$db" -e FIELD_STORAGE=postgres -e FIELD_PORT="$port" \
-  "$image" >/dev/null
+  "$image" node --import /tmp/hooks.mjs --input-type=module -e '
+    import { writeFileSync } from "node:fs";
+    writeFileSync("/tmp/smoke-key.json", JSON.stringify({ client_email: "proof@example.invalid", private_key: "not-a-key" }));
+    await import("/app/server/index.js");
+  ' >/dev/null
 
 for _ in $(seq 1 90); do
   curl -fsS "http://127.0.0.1:${port}/health" >/dev/null 2>&1 && break

@@ -1,3 +1,5 @@
+import { attachQuotePricingAttestation, isPricingAttestationVerified } from "./quote-pricing-attestation.js";
+
 export function projectQuoteForReviewState({ quote, gaps = [] }) {
   if (!quote || typeof quote !== "object") return quote;
 
@@ -71,6 +73,15 @@ export function projectQuoteForReviewState({ quote, gaps = [] }) {
   nextQuote.review = projectReviewFlags(nextQuote);
   nextQuote.status = nextQuote.review.status;
 
+  // Review changes only annotations, but removing a missing-input array entry
+  // changes the legacy output digest. Carry verified authority across this
+  // trusted projection only; never repair a source whose money was changed.
+  if (isPricingAttestationVerified(quote.pricing?.attestation, quote)) {
+    return attachQuotePricingAttestation({
+      quote: nextQuote,
+      attestation: { ...quote.pricing.attestation, outputDigest: undefined },
+    });
+  }
   return nextQuote;
 }
 

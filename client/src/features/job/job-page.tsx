@@ -91,7 +91,9 @@ export function JobPage() {
   const milestoneRules = useJobMilestoneRules(meta?.id || "", JSON.stringify([meta?.paymentSchedule?.source?.at ?? null, (meta ? jobInvoices(meta) : []).map((invoice) => [invoice.status, invoice.total])]));
   const nextBlocked = Boolean(nextInvoice && milestoneRules?.milestones.find((entry) => entry.milestoneIndex === nextInvoice.milestoneIndex)?.blocked);
   const priced = totals ? totals.subtotal > 0 : (meta?.quoteTotal || 0) > 0;
-  const sendBlocked = detail?.quote?.pricing?.sendable === false ? detail.quote.pricing.blockingReason || "This quote can't be sent yet." : null;
+  const sendBlocked = detail?.review?.canSend === false
+    ? detail.review.blockingReason || "Complete quote review before sending."
+    : detail?.quote?.pricing?.sendable === false ? detail.quote.pricing.blockingReason || "This quote can't be sent yet." : null;
   const sendable = priced && !sendBlocked;
 
   const onTotals = useCallback((next: QuoteTotals) => setTotals(next), []);
@@ -300,8 +302,9 @@ export function JobPage() {
           paid={jobPaid(meta)}
           landed={landed}
           selectedVersion={selectedVersion}
+          canReview={viewingLatest && editable}
           onPickVersion={pickVersion}
-          onDetailSaved={(next) => { setDetail((current) => (current ? { ...current, meta: next.meta, jobState: next.jobState } : next)); patchJobMeta(next.meta); }}
+          onDetailSaved={(next) => { setDetail((current) => (current ? { ...current, meta: next.meta, jobState: next.jobState, review: next.review } : next)); patchJobMeta(next.meta); }}
         />
       </div>
 
